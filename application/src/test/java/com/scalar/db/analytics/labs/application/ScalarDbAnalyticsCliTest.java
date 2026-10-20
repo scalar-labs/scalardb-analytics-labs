@@ -110,6 +110,27 @@ class ScalarDbAnalyticsCliTest {
   }
 
   @Test
+  void queryRejectsStateChangingSqlAsInvalidQuery() throws Exception {
+    var standardOutput = new ByteArrayOutputStream();
+    var standardError = new ByteArrayOutputStream();
+
+    int exitCode;
+    try (var cli =
+        new ScalarDbAnalyticsCli(
+            new PrintStream(standardOutput, true, StandardCharsets.UTF_8),
+            new PrintStream(standardError, true, StandardCharsets.UTF_8))) {
+      exitCode = cli.execute("query", "--sql", "CREATE TABLE forbidden_table(id INTEGER)");
+    }
+
+    assertThat(exitCode).isEqualTo(1);
+    assertThat(standardOutput.toString(StandardCharsets.UTF_8)).isEmpty();
+    JsonNode error = OBJECT_MAPPER.readTree(standardError.toString(StandardCharsets.UTF_8).strip());
+    assertThat(error.get("code").textValue()).isEqualTo("INVALID_QUERY");
+    assertThat(error.get("message").textValue())
+        .isEqualTo("Only a single read-only SELECT query is allowed.");
+  }
+
+  @Test
   void queryReadsSqlFromStandardInput() throws Exception {
     var standardInput =
         new ByteArrayInputStream("SELECT 2 AS answer".getBytes(StandardCharsets.UTF_8));

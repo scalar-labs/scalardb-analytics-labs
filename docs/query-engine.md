@@ -15,7 +15,9 @@ JDBC resources. JDBC and DuckDB-specific types do not cross the public boundary.
 An engine instance owns its embedded connection for the application-service lifetime. Query
 results stream in bounded Arrow record batches. A result owns its Arrow reader and the underlying
 JDBC resources, so callers must close it before closing the engine. Statements that do not return
-a result are rejected by this query-only contract.
+a result are rejected by this query-only contract. Before execution, the product extension uses
+DuckDB's parser to require exactly one `SELECT` statement. DDL, DML, malformed SQL, and
+multiple-statement input are rejected before any submitted statement can modify engine state.
 
 ## Execution and trust boundary
 

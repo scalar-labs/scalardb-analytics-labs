@@ -10,6 +10,7 @@ import com.scalar.db.analytics.labs.query.QueryError;
 import com.scalar.db.analytics.labs.query.QueryResult;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -78,6 +79,7 @@ public final class DuckDbQueryEngine implements QueryEngine {
     if (sql.isBlank()) {
       throw new IllegalArgumentException("sql must not be blank");
     }
+    validateReadOnlyQuery(sql, executionId);
 
     Statement statement = null;
     ResultSet resultSet = null;
@@ -102,6 +104,27 @@ public final class DuckDbQueryEngine implements QueryEngine {
       throw new QueryEngineException(
           executionId, new QueryError.ExecutionFailed("Query execution failed."), e);
     }
+  }
+
+  private void validateReadOnlyQuery(String sql, String executionId) {
+    try (PreparedStatement statement =
+        connection.prepareStatement("SELECT scalardb_analytics_is_read_only_query(?) AS allowed")) {
+      statement.setString(1, sql);
+      try (var resultSet = statement.executeQuery()) {
+        if (!resultSet.next() || !resultSet.getBoolean("allowed")) {
+          throw invalidQuery(executionId, null);
+        }
+      }
+    } catch (SQLException e) {
+      throw invalidQuery(executionId, e);
+    }
+  }
+
+  private static QueryEngineException invalidQuery(String executionId, @Nullable Throwable cause) {
+    var error = new QueryError.InvalidQuery("Only a single read-only SELECT query is allowed.");
+    return cause == null
+        ? new QueryEngineException(executionId, error)
+        : new QueryEngineException(executionId, error, cause);
   }
 
   private static void closeAfterFailedExecution(
