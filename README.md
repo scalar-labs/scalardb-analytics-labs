@@ -1,41 +1,47 @@
 # ScalarDB Analytics Labs
 
-This repository is the integration repository for the new ScalarDB Analytics architecture. It
-combines independently built Java, C++, and Rust artifacts into one user-facing distribution. It is
-not a Java-only project, even though the currently implemented application module is built with
-Gradle.
+ScalarDB Analytics Labs is the integration repository for building the new ScalarDB Analytics
+architecture as one command-line application from Java, C++, and Rust components.
 
-## Repository boundaries
+The current MVP accepts SQL through a non-interactive CLI, executes it with an embedded DuckDB
+Query Engine, and returns a versioned JSON result. The CLI is the machine-to-machine boundary for
+an external Query Agent; this repository does not implement the agent runtime or SQL generation.
+
+## Run a query
+
+Java 25 is required. The Gradle wrapper supplies the repository's Gradle version.
+
+Build the CLI distribution:
+
+```console
+./gradlew :application:installDist
+```
+
+Run a query:
+
+```console
+application/build/install/scalardb-analytics/bin/scalardb-analytics query --sql "SELECT 1 AS answer"
+```
+
+The command returns a versioned JSON envelope:
+
+```json
+{"schema":"scalardb-analytics/query-result","schemaVersion":"3","executionId":"...","fields":[{"name":"answer","type":"Int(32, true)","nullable":true,"children":[]}],"rows":[[1]],"truncated":false}
+```
+
+## Repository scope
 
 | Path or artifact | Responsibility | Primary language and build |
 | --- | --- | --- |
-| `application/` | CLI, composition, lifecycle, and final distribution | Java 25 and Gradle; GraalVM Native Image will be added later |
-| `semantic-catalog/` | Semantic state, evidence, decisions, and catalog construction | Java 25 and Gradle |
-| `physical-catalog/` | Adapter and native boundary around the existing Physical Catalog | Java 25, Gradle, and GraalVM Native Image |
-| `duckdb/` | DuckDB extension and product integration | C++ and the DuckDB extension toolchain |
-| `end-to-end-tests/` | Tests of the assembled product | Integration-specific tooling, to be decided with the first tests |
-| `upstream/scalardb-analytics/` | Pinned existing Analytics implementation | Git submodule; not present yet |
-| Connector artifacts | Source access and ADBC drivers | Built with Cargo in `scalardb-analytics-connectors` and consumed here |
+| `application/` | CLI, composition, lifecycle, and final distribution | Java 25 and Gradle |
+| `duckdb/` | Embedded Query Engine boundary and DuckDB integration | Java today; C++ for product extensions |
+| Semantic and Physical Catalog modules | Catalog behavior and the boundary to the existing implementation | Java and native integration |
+| Connector artifacts | Source access and ADBC drivers | Rust and Cargo in `scalardb-analytics-connectors` |
 
-The Query Agent is an external consumer. This repository provides a machine-readable CLI and a
-versioned Agent Skill, but does not implement the Query Agent runtime, model, planning, or SQL
-generation.
+Root Gradle orchestrates these build units while their native build systems remain authoritative.
+The architecture and rationale are documented under [`docs/`](docs/README.md).
 
-## Build orchestration
-
-Gradle is the repository-wide build entry point and orchestrator. It builds the Java modules
-directly and will delegate native compilation to each module's authoritative build tool. The root
-build will connect those independently testable build units through declared inputs, outputs, and
-task dependencies; it will not reproduce CMake or Cargo build logic in Gradle.
-
-- Java modules are Gradle subprojects included by `settings.gradle.kts`.
-- `duckdb/` will own its C++ and DuckDB extension configuration. Root Gradle tasks will invoke that
-  build and consume its artifacts.
-- Connectors remain owned and built by `scalardb-analytics-connectors`. Root Gradle tasks will
-  obtain and verify versioned connector artifacts instead of compiling their Rust sources here.
-- Root lifecycle tasks such as `check` and `build` cover every implemented build unit wired into
-  the repository. At present, only the Java application is implemented.
-- `application` owns the final Native Image and distribution assembly.
+## Development
 
 Run all currently implemented checks:
 
@@ -43,17 +49,18 @@ Run all currently implemented checks:
 ./gradlew check
 ```
 
+All Java packages are `@NullMarked` with JSpecify. NullAway checks both production and test source
+sets as compilation errors. New Java packages must declare `@NullMarked` or `@NullUnmarked`
+explicitly; use `@Nullable` only where `null` is part of the contract.
+
 Build the current CLI distribution:
 
 ```console
 ./gradlew :application:installDist
 ```
 
-Run it:
+Inspect the available CLI commands:
 
 ```console
-application/build/install/scalardb-analytics/bin/scalardb-analytics version
+application/build/install/scalardb-analytics/bin/scalardb-analytics --help
 ```
-
-See [`docs/architecture/build-boundaries.md`](docs/architecture/build-boundaries.md) for the
-boundary decision and its verification status.

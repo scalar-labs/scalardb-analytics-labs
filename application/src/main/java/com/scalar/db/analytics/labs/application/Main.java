@@ -9,6 +9,13 @@ public final class Main {
   private Main() {}
 
   public static void main(String[] args) {
-    System.exit(new ScalarDbAnalyticsCli(System.out, System.err).execute(args));
+    int exitCode;
+    var cli = new ScalarDbAnalyticsCli(System.out, System.err);
+    try {
+      exitCode = cli.execute(args);
+    } finally {
+      cli.close();
+    }
+    System.exit(exitCode);
   }
 }

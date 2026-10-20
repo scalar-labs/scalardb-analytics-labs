@@ -6,7 +6,9 @@ package com.scalar.db.analytics.labs.application;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.Objects;
 import java.util.concurrent.Callable;
+import org.jspecify.annotations.Nullable;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Spec;
@@ -15,7 +17,7 @@ import picocli.CommandLine.Spec;
 final class VersionCommand implements Callable<Integer> {
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
-  @Spec private CommandSpec commandSpec;
+  @Spec private @Nullable CommandSpec commandSpec;
 
   @Override
   public Integer call() throws JsonProcessingException {
@@ -23,7 +25,10 @@ final class VersionCommand implements Callable<Integer> {
     var versionInfo =
         new VersionInfo(
             "scalardb-analytics/version", "1", version == null ? "development" : version);
-    commandSpec.commandLine().getOut().println(OBJECT_MAPPER.writeValueAsString(versionInfo));
+    Objects.requireNonNull(commandSpec, "commandSpec")
+        .commandLine()
+        .getOut()
+        .println(OBJECT_MAPPER.writeValueAsString(versionInfo));
     return 0;
   }
 

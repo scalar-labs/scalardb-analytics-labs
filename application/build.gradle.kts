@@ -17,9 +17,15 @@ java {
 application {
     mainClass.set("com.scalar.db.analytics.labs.application.Main")
     applicationName = "scalardb-analytics"
+    applicationDefaultJvmArgs = listOf(
+        "--add-opens=java.base/java.nio=ALL-UNNAMED",
+        "--enable-native-access=ALL-UNNAMED",
+    )
 }
 
 dependencies {
+    implementation(project(":query-engine"))
+    implementation(project(":duckdb"))
     implementation(libs.jackson.databind)
     implementation(libs.picocli)
 
@@ -51,6 +57,10 @@ tasks.withType<JavaCompile>().configureEach {
 
 tasks.test {
     useJUnitPlatform()
+    jvmArgs(
+        "--add-opens=java.base/java.nio=ALL-UNNAMED",
+        "--enable-native-access=ALL-UNNAMED",
+    )
 }
 
 tasks.jar {

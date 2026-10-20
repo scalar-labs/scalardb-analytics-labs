@@ -22,4 +22,6 @@ rootProject.name = "scalardb-analytics-labs"
 // JVM modules are Gradle subprojects. Native build units are connected through root orchestration
 // tasks while retaining their authoritative build configurations.
 include("application")
+include("query-engine")
+include("duckdb")
 

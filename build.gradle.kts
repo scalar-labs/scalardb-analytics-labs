@@ -3,8 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import net.ltgt.gradle.errorprone.CheckSeverity
+import net.ltgt.gradle.errorprone.errorprone
+
 plugins {
     base
+    alias(libs.plugins.error.prone) apply false
     alias(libs.plugins.spotless) apply false
 }
 
@@ -19,6 +23,28 @@ val checkJava = tasks.register("checkJava") {
 subprojects {
     group = rootProject.group
     version = rootProject.version
+
+    pluginManager.withPlugin("java") {
+        apply(plugin = "net.ltgt.errorprone")
+
+        dependencies {
+            add("compileOnly", libs.jspecify)
+            add("testCompileOnly", libs.jspecify)
+            add("errorprone", libs.error.prone.core)
+            add("errorprone", libs.nullaway)
+        }
+
+        tasks.withType<JavaCompile>().configureEach {
+            options.errorprone {
+                disableAllChecks.set(true)
+                check("NullAway", CheckSeverity.ERROR)
+                check("RequireExplicitNullMarking", CheckSeverity.ERROR)
+                check("JSpecifyUnrecognizedAnnotationLocation", CheckSeverity.ERROR)
+                option("NullAway:OnlyNullMarked", "true")
+                option("NullAway:JSpecifyMode", "true")
+            }
+        }
+    }
 
     pluginManager.withPlugin("base") {
         val subprojectAssemble = tasks.named("assemble")
