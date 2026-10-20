@@ -9,15 +9,25 @@ types, and batches across engine integrations.
 
 `application` depends on the `QueryEngine` and `QueryResult` interfaces in the `query-engine`
 module. `QueryResult` exposes an `ArrowReader` rather than a second product-specific schema and
-value model. The `duckdb` module owns the concrete engine, its connection, Arrow allocator, and
-JDBC resources. JDBC and DuckDB-specific types do not cross the public boundary.
+value model. The `duckdb` module owns the concrete engine, its connection, Arrow allocator, JDBC
+resources, and bounded execution controls. JDBC types do not cross either public boundary, and
+DuckDB-specific controls do not become requirements for other Query Engine implementations.
 
 An engine instance owns its embedded connection for the application-service lifetime. Query
-results stream in bounded Arrow record batches. A result owns its Arrow reader and the underlying
-JDBC resources, so callers must close it before closing the engine. Statements that do not return
-a result are rejected by this query-only contract. Before execution, the product extension uses
-DuckDB's parser to require exactly one `SELECT` statement. DDL, DML, malformed SQL, and
-multiple-statement input are rejected before any submitted statement can modify engine state.
+results stream in bounded Arrow record batches. One execution may be active on an engine instance
+at a time. A result owns its Arrow reader and the underlying JDBC resources, so callers must close
+it before starting another execution or closing the engine. Statements that do not return a result
+are rejected by this query-only contract. Before execution, the product extension uses DuckDB's
+parser to require exactly one `SELECT` statement. DDL, DML, malformed SQL, and multiple-statement
+input are rejected before any submitted statement can modify engine state.
+
+`DuckDbQueryExecutionOptions` applies optional cumulative row and Arrow-buffer byte limits, a
+wall-clock time limit, and a DuckDB plus Arrow memory limit. `DuckDbQueryExecution` provides the
+execution ID, completion, and idempotent cancellation lifecycle. These APIs remain in the `duckdb`
+module because memory enforcement and interruption semantics are engine-specific. Row and byte
+checks happen as record batches are consumed, without materializing the full result. Time limits
+and explicit cancellation use DuckDB interruption. A limit or cancellation closes the Arrow,
+JDBC, and per-query allocator resources; the resulting typed error retains the execution ID.
 
 ## Execution and trust boundary
 
@@ -29,8 +39,9 @@ contract.
 
 Query failures use a sealed `QueryError` hierarchy whose variants are records. This keeps the
 engine error contract closed and lets each application adapter exhaustively encode it. The CLI maps
-those variants to stable uppercase error codes in its versioned JSON envelope; exceptions only
-carry the execution ID, typed error, and optional cause.
+those variants to stable uppercase error codes in its versioned JSON envelope. Query failures only
+expose the execution ID and a redacted typed error; DuckDB diagnostics that can contain submitted
+SQL or connection details do not cross the public exception boundary.
 
 Runtime extension installation and automatic loading are disabled. Required product, scanner, and
 connector artifacts are version-aligned parts of the distribution rather than network-fetched

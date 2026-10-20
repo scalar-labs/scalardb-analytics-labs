@@ -9,10 +9,29 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.scalar.db.analytics.labs.query.QueryEngineException;
 import com.scalar.db.analytics.labs.query.QueryError;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.lang.reflect.Proxy;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
+import java.util.OptionalLong;
+import java.util.concurrent.AbstractExecutorService;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.memory.OutOfMemoryException;
+import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.vector.ipc.ArrowReader;
+import org.apache.arrow.vector.types.pojo.Schema;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -148,6 +167,334 @@ class DuckDbQueryEngineTest {
   }
 
   @Test
+  void enforcesRowLimitWhileStreamingAndReleasesResources() throws Exception {
+    try (var queryEngine = new DuckDbQueryEngine();
+        var execution =
+            queryEngine.start(
+                "SELECT * FROM range(2050)",
+                options(
+                    OptionalLong.of(1_500),
+                    OptionalLong.empty(),
+                    Optional.empty(),
+                    OptionalLong.empty()));
+        var result = execution.awaitResult()) {
+      var reader = result.reader();
+      assertThat(reader.loadNextBatch()).isTrue();
+
+      assertThatThrownBy(reader::loadNextBatch)
+          .isInstanceOfSatisfying(
+              QueryEngineException.class,
+              exception -> {
+                assertThat(exception.executionId()).isEqualTo(execution.executionId());
+                assertThat(exception.error()).isInstanceOf(QueryError.ResourceLimitExceeded.class);
+                assertThat(exception.getMessage()).isEqualTo("Query row limit exceeded.");
+              });
+
+      assertEngineRemainsUsable(queryEngine);
+    }
+  }
+
+  @Test
+  void enforcesByteLimitWhileStreamingAndReleasesResources() throws Exception {
+    try (var queryEngine = new DuckDbQueryEngine();
+        var execution =
+            queryEngine.start(
+                "SELECT repeat('x', 2048) AS value",
+                options(
+                    OptionalLong.empty(),
+                    OptionalLong.of(128),
+                    Optional.empty(),
+                    OptionalLong.empty()));
+        var result = execution.awaitResult()) {
+      assertThatThrownBy(result.reader()::loadNextBatch)
+          .isInstanceOfSatisfying(
+              QueryEngineException.class,
+              exception -> {
+                assertThat(exception.executionId()).isEqualTo(execution.executionId());
+                assertThat(exception.error()).isInstanceOf(QueryError.ResourceLimitExceeded.class);
+                assertThat(exception.getMessage()).isEqualTo("Query byte limit exceeded.");
+              });
+
+      assertEngineRemainsUsable(queryEngine);
+    }
+  }
+
+  @Test
+  void enforcesTimeLimitAndReleasesResources() throws Exception {
+    try (var queryEngine = new DuckDbQueryEngine();
+        var execution =
+            queryEngine.start(
+                "SELECT sum(sin(i)) FROM range(1000000000) values_source(i)",
+                options(
+                    OptionalLong.empty(),
+                    OptionalLong.empty(),
+                    Optional.of(Duration.ofMillis(20)),
+                    OptionalLong.empty()))) {
+      assertThatThrownBy(execution::awaitResult)
+          .isInstanceOfSatisfying(
+              QueryEngineException.class,
+              exception -> {
+                assertThat(exception.executionId()).isEqualTo(execution.executionId());
+                assertThat(exception.error()).isInstanceOf(QueryError.ResourceLimitExceeded.class);
+                assertThat(exception.getMessage()).isEqualTo("Query time limit exceeded.");
+              });
+
+      assertEngineRemainsUsable(queryEngine);
+    }
+  }
+
+  @Test
+  void enforcesMemoryLimitAndReleasesResources() throws Exception {
+    try (var queryEngine = new DuckDbQueryEngine();
+        var execution =
+            queryEngine.start(
+                "SELECT list(i) FROM range(10000000) values_source(i)",
+                options(
+                    OptionalLong.empty(),
+                    OptionalLong.empty(),
+                    Optional.empty(),
+                    OptionalLong.of(1_048_576)))) {
+      assertThatThrownBy(execution::awaitResult)
+          .isInstanceOfSatisfying(
+              QueryEngineException.class,
+              exception -> {
+                assertThat(exception.executionId()).isEqualTo(execution.executionId());
+                assertThat(exception.error()).isInstanceOf(QueryError.ResourceLimitExceeded.class);
+                assertThat(exception.getMessage()).isEqualTo("Query memory limit exceeded.");
+              });
+
+      assertEngineRemainsUsable(queryEngine);
+    }
+  }
+
+  @Test
+  void cancellationIsIdempotentAndInterruptsStreamingWork() throws Exception {
+    try (var queryEngine = new DuckDbQueryEngine();
+        var execution =
+            queryEngine.start(
+                "SELECT i FROM range(1000000000) values_source(i)",
+                DuckDbQueryExecutionOptions.unlimited());
+        var result = execution.awaitResult();
+        var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      var reader = result.reader();
+      var failure =
+          executor.submit(
+              () -> {
+                try {
+                  while (reader.loadNextBatch()) {}
+                  return (Throwable) null;
+                } catch (Throwable t) {
+                  return t;
+                }
+              });
+
+      execution.cancel();
+      execution.cancel();
+
+      assertThat(failure.get(5, TimeUnit.SECONDS))
+          .isInstanceOfSatisfying(
+              QueryEngineException.class,
+              exception -> {
+                assertThat(exception.executionId()).isEqualTo(execution.executionId());
+                assertThat(exception.error()).isInstanceOf(QueryError.Canceled.class);
+                assertThat(exception.getMessage()).isEqualTo("Query execution was canceled.");
+              });
+      assertEngineRemainsUsable(queryEngine);
+    }
+  }
+
+  @Test
+  void retriesCancellationThatArrivesImmediatelyBeforeDuckDbExecutionStarts() throws Exception {
+    var queryExecutor = new DeferredExecutorService();
+    var controlExecutor = Executors.newSingleThreadScheduledExecutor();
+    var secondCancellation = new CountDownLatch(2);
+    var statement = cancellationCountingStatement(secondCancellation);
+    var options = DuckDbQueryExecutionOptions.unlimited();
+    try (var queryEngine = new DuckDbQueryEngine()) {
+      var execution = new DuckDbQueryExecution(queryEngine, "SELECT 1", options);
+      execution.start(queryExecutor, controlExecutor);
+      execution.track(statement);
+
+      execution.cancel();
+
+      assertThat(secondCancellation.await(1, TimeUnit.SECONDS)).isTrue();
+      execution.finish();
+    } finally {
+      queryExecutor.shutdownNow();
+      controlExecutor.shutdownNow();
+    }
+  }
+
+  @Test
+  void cancellationAfterResultCreationStillProducesTypedError() throws Exception {
+    try (var queryEngine = new DuckDbQueryEngine();
+        var execution =
+            queryEngine.start("SELECT 1 AS value", DuckDbQueryExecutionOptions.unlimited());
+        var result = execution.awaitResult()) {
+      execution.cancel();
+
+      assertThatThrownBy(result::reader)
+          .isInstanceOfSatisfying(
+              QueryEngineException.class,
+              exception -> {
+                assertThat(exception.executionId()).isEqualTo(execution.executionId());
+                assertThat(exception.error()).isInstanceOf(QueryError.Canceled.class);
+              });
+      assertEngineRemainsUsable(queryEngine);
+    }
+  }
+
+  @Test
+  void timeLimitAfterResultCreationStillProducesTypedError() throws Exception {
+    try (var queryEngine = new DuckDbQueryEngine();
+        var execution =
+            queryEngine.start(
+                "SELECT 1 AS value",
+                options(
+                    OptionalLong.empty(),
+                    OptionalLong.empty(),
+                    Optional.of(Duration.ofMillis(20)),
+                    OptionalLong.empty()));
+        var result = execution.awaitResult()) {
+      Thread.sleep(100);
+
+      assertThatThrownBy(result::reader)
+          .isInstanceOfSatisfying(
+              QueryEngineException.class,
+              exception -> {
+                assertThat(exception.executionId()).isEqualTo(execution.executionId());
+                assertThat(exception.error()).isInstanceOf(QueryError.ResourceLimitExceeded.class);
+                assertThat(exception.getMessage()).isEqualTo("Query time limit exceeded.");
+              });
+      assertEngineRemainsUsable(queryEngine);
+    }
+  }
+
+  @Test
+  void arrowMemoryFailureProducesTypedErrorAndReleasesResources() throws Exception {
+    var options =
+        options(
+            OptionalLong.empty(),
+            OptionalLong.empty(),
+            Optional.empty(),
+            OptionalLong.of(1_048_576));
+    try (var queryEngine = new DuckDbQueryEngine();
+        var rootAllocator = new RootAllocator()) {
+      BufferAllocator queryAllocator =
+          rootAllocator.newChildAllocator("memory-limit-test", 0, Long.MAX_VALUE);
+      var execution = new DuckDbQueryExecution(queryEngine, "SELECT 1", options);
+      var result =
+          new DuckDbQueryResult(
+              execution,
+              options,
+              memoryFailingReader(queryAllocator),
+              queryAllocator,
+              noOpProxy(ResultSet.class),
+              noOpProxy(Statement.class),
+              false);
+      execution.complete(result);
+
+      assertThatThrownBy(() -> execution.awaitResult().reader().loadNextBatch())
+          .isInstanceOfSatisfying(
+              QueryEngineException.class,
+              exception -> {
+                assertThat(exception.executionId()).isEqualTo(execution.executionId());
+                assertThat(exception.error()).isInstanceOf(QueryError.ResourceLimitExceeded.class);
+                assertThat(exception.getMessage()).isEqualTo("Query memory limit exceeded.");
+              });
+      assertEngineRemainsUsable(queryEngine);
+    }
+  }
+
+  @Test
+  void streamingFailureDoesNotExposeSensitiveDiagnostics() throws Exception {
+    var sensitiveMarker = "credential=stream-secret";
+    var options = DuckDbQueryExecutionOptions.unlimited();
+    try (var queryEngine = new DuckDbQueryEngine();
+        var rootAllocator = new RootAllocator()) {
+      BufferAllocator queryAllocator =
+          rootAllocator.newChildAllocator("stream-failure-test", 0, Long.MAX_VALUE);
+      var execution = new DuckDbQueryExecution(queryEngine, "SELECT 1", options);
+      var result =
+          new DuckDbQueryResult(
+              execution,
+              options,
+              failingReader(queryAllocator, new IllegalStateException(sensitiveMarker)),
+              queryAllocator,
+              noOpProxy(ResultSet.class),
+              noOpProxy(Statement.class),
+              false);
+      execution.complete(result);
+
+      assertThatThrownBy(() -> execution.awaitResult().reader().loadNextBatch())
+          .isInstanceOfSatisfying(
+              QueryEngineException.class,
+              exception -> {
+                assertThat(exception.error()).isInstanceOf(QueryError.ExecutionFailed.class);
+                assertThat(exception.getCause()).isNull();
+                assertThat(stackTrace(exception)).doesNotContain(sensitiveMarker);
+              });
+      assertEngineRemainsUsable(queryEngine);
+    }
+  }
+
+  @Test
+  void cleanupFailureDoesNotExposeSensitiveDiagnostics() throws Exception {
+    var sensitiveMarker = "connection=cleanup-secret";
+    var options = DuckDbQueryExecutionOptions.unlimited();
+    try (var queryEngine = new DuckDbQueryEngine();
+        var rootAllocator = new RootAllocator()) {
+      BufferAllocator queryAllocator =
+          rootAllocator.newChildAllocator("cleanup-failure-test", 0, Long.MAX_VALUE);
+      var execution = new DuckDbQueryExecution(queryEngine, "SELECT 1", options);
+      var result =
+          new DuckDbQueryResult(
+              execution,
+              options,
+              emptyReader(queryAllocator),
+              queryAllocator,
+              noOpProxy(ResultSet.class),
+              cleanupFailingStatement(sensitiveMarker),
+              false);
+      execution.complete(result);
+
+      execution.cancel();
+
+      assertThatThrownBy(result::reader)
+          .isInstanceOfSatisfying(
+              QueryEngineException.class,
+              exception -> {
+                assertThat(exception.error()).isInstanceOf(QueryError.Canceled.class);
+                assertThat(exception.getSuppressed())
+                    .singleElement()
+                    .satisfies(
+                        suppressed ->
+                            assertThat(suppressed)
+                                .hasMessage("Additional resource cleanup failed."));
+                assertThat(stackTrace(exception)).doesNotContain(sensitiveMarker);
+              });
+      assertEngineRemainsUsable(queryEngine);
+    }
+  }
+
+  @Test
+  void executionFailureDoesNotExposeSensitiveSql() {
+    var sensitiveSql = "SELECT credential_value FROM connection_string_secret";
+
+    try (var queryEngine = new DuckDbQueryEngine()) {
+      assertThatThrownBy(() -> queryEngine.execute(sensitiveSql))
+          .isInstanceOfSatisfying(
+              QueryEngineException.class,
+              exception -> {
+                assertThat(exception.getMessage()).isEqualTo("Query execution failed.");
+                assertThat(exception.getCause()).isNull();
+                assertThat(exception.toString())
+                    .doesNotContain("credential_value", "connection_string_secret", sensitiveSql);
+              });
+    }
+  }
+
+  @Test
   void deniesExternalFileAccess(@TempDir Path temporaryDirectory) throws Exception {
     var csv = temporaryDirectory.resolve("values.csv");
     Files.writeString(csv, "value\n1\n");
@@ -197,5 +544,154 @@ class DuckDbQueryEngineTest {
       assertThat(root.getVector("list_value").getObject(0).toString()).contains("1", "null", "3");
       assertThat(root.getVector("struct_value").getObject(0).toString()).contains("alice", "true");
     }
+  }
+
+  private static DuckDbQueryExecutionOptions options(
+      OptionalLong rowLimit,
+      OptionalLong byteLimit,
+      Optional<Duration> timeLimit,
+      OptionalLong memoryLimitBytes) {
+    return new DuckDbQueryExecutionOptions(rowLimit, byteLimit, timeLimit, memoryLimitBytes);
+  }
+
+  private static void assertEngineRemainsUsable(DuckDbQueryEngine queryEngine) throws Exception {
+    try (var result = queryEngine.execute("SELECT 1 AS value")) {
+      assertThat(result.reader().loadNextBatch()).isTrue();
+      assertThat(result.reader().getVectorSchemaRoot().getVector("value").getObject(0))
+          .isEqualTo(1);
+    }
+  }
+
+  private static ArrowReader memoryFailingReader(BufferAllocator allocator) {
+    return failingReader(allocator, new OutOfMemoryException("allocator capacity exceeded"));
+  }
+
+  private static ArrowReader failingReader(BufferAllocator allocator, RuntimeException failure) {
+    return new ArrowReader(allocator) {
+      @Override
+      public boolean loadNextBatch() {
+        throw failure;
+      }
+
+      @Override
+      public long bytesRead() {
+        return 0;
+      }
+
+      @Override
+      protected void closeReadSource() {}
+
+      @Override
+      protected Schema readSchema() throws IOException {
+        return new Schema(List.of());
+      }
+    };
+  }
+
+  private static ArrowReader emptyReader(BufferAllocator allocator) {
+    return new ArrowReader(allocator) {
+      @Override
+      public boolean loadNextBatch() {
+        return false;
+      }
+
+      @Override
+      public long bytesRead() {
+        return 0;
+      }
+
+      @Override
+      protected void closeReadSource() {}
+
+      @Override
+      protected Schema readSchema() throws IOException {
+        return new Schema(List.of());
+      }
+    };
+  }
+
+  private static Statement cleanupFailingStatement(String sensitiveMarker) {
+    return (Statement)
+        Proxy.newProxyInstance(
+            Statement.class.getClassLoader(),
+            new Class<?>[] {Statement.class},
+            (proxy, method, arguments) -> {
+              if (method.getName().equals("cancel") || method.getName().equals("close")) {
+                throw new SQLException(sensitiveMarker);
+              }
+              return null;
+            });
+  }
+
+  private static Statement cancellationCountingStatement(CountDownLatch cancellations) {
+    return (Statement)
+        Proxy.newProxyInstance(
+            Statement.class.getClassLoader(),
+            new Class<?>[] {Statement.class},
+            (proxy, method, arguments) -> {
+              if (method.getName().equals("cancel")) {
+                cancellations.countDown();
+              }
+              return null;
+            });
+  }
+
+  private static final class DeferredExecutorService extends AbstractExecutorService {
+    private boolean shutdown;
+
+    @Override
+    public void shutdown() {
+      shutdown = true;
+    }
+
+    @Override
+    public List<Runnable> shutdownNow() {
+      shutdown = true;
+      return List.of();
+    }
+
+    @Override
+    public boolean isShutdown() {
+      return shutdown;
+    }
+
+    @Override
+    public boolean isTerminated() {
+      return shutdown;
+    }
+
+    @Override
+    public boolean awaitTermination(long timeout, TimeUnit unit) {
+      return shutdown;
+    }
+
+    @Override
+    public void execute(Runnable command) {}
+  }
+
+  private static String stackTrace(Throwable throwable) {
+    var output = new StringWriter();
+    throwable.printStackTrace(new PrintWriter(output));
+    return output.toString();
+  }
+
+  private static <T> T noOpProxy(Class<T> type) {
+    return type.cast(
+        Proxy.newProxyInstance(
+            type.getClassLoader(),
+            new Class<?>[] {type},
+            (proxy, method, arguments) -> {
+              var returnType = method.getReturnType();
+              if (!returnType.isPrimitive()) {
+                return null;
+              }
+              if (returnType == boolean.class) {
+                return false;
+              }
+              if (returnType == char.class) {
+                return '\0';
+              }
+              return 0;
+            }));
   }
 }
