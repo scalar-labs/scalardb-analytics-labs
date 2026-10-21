@@ -59,7 +59,61 @@ include("query-engine")
 include("duckdb")
 include("physical-catalog")
 
-// The Physical Catalog is built from the pinned upstream source, which keeps its own Gradle build.
+// The Physical Catalog is built from the pinned upstream source, a submodule. Included builds are
+// resolved while settings are evaluated, before any task runs, so the submodule is checked out at
+// its recorded commit here when it is missing or behind. Local work in the submodule is never
+// discarded: a submodule with uncommitted changes at another commit fails the build instead.
+val upstreamSubmodule = "upstream/scalardb-analytics"
+
+fun git(vararg arguments: String) = providers.exec {
+    commandLine(listOf("git", "-C", rootDir.absolutePath) + arguments)
+    isIgnoreExitValue = true
+}
+
+fun syncUpstreamSubmodule() {
+    val status = git("submodule", "status", "--", upstreamSubmodule)
+    if (status.result.get().exitValue != 0) {
+        // Outside a Git checkout, such as an unpacked source archive, the source must already exist.
+        if (rootDir.resolve("$upstreamSubmodule/scalardb-analytics-core").isDirectory) return
+        throw GradleException(
+            "$upstreamSubmodule is missing and this is not a Git checkout, so it cannot be fetched.",
+        )
+    }
+    when (status.standardOutput.asText.get().firstOrNull()) {
+        ' ' -> return
+        '-' -> Unit
+        '+' -> {
+            val changes = git("-C", upstreamSubmodule, "status", "--porcelain")
+                .standardOutput.asText.get()
+            if (changes.isNotBlank()) {
+                throw GradleException(
+                    "$upstreamSubmodule has uncommitted changes and is not at the recorded commit. " +
+                        "Commit or discard them, or run `git submodule update $upstreamSubmodule`.",
+                )
+            }
+        }
+        else -> throw GradleException(
+            "$upstreamSubmodule has merge conflicts; resolve them before building.",
+        )
+    }
+    if (gradle.startParameter.isOffline) {
+        throw GradleException(
+            "$upstreamSubmodule must be checked out at its recorded commit, which may need the " +
+                "network. Run `git submodule update --init $upstreamSubmodule` or build online.",
+        )
+    }
+    val update = git("submodule", "update", "--init", "--", upstreamSubmodule)
+    if (update.result.get().exitValue != 0) {
+        throw GradleException(
+            "Could not check out $upstreamSubmodule:\n" + update.standardError.asText.get(),
+        )
+    }
+    logger.lifecycle("Checked out $upstreamSubmodule at its recorded commit.")
+}
+
+syncUpstreamSubmodule()
+
+// The upstream catalog keeps its own Gradle build.
 // Its modules are published as scalardb-analytics-<project>, so their coordinates are mapped to the
 // upstream projects explicitly.
 includeBuild("upstream/scalardb-analytics/scalardb-analytics-core") {

@@ -74,6 +74,6 @@ scalardb-analytics query \
 operational failures write versioned JSON to stdout and return exit code `0` or `1`, respectively.
 Invalid command usage returns exit code `2` through picocli. `SIGINT` cancels an active query.
 
-The distribution packages Query Agent Skill v0 at
-`META-INF/scalardb-analytics/skills/query-agent-v0/SKILL.md`. It covers only workspace selection,
-source and physical metadata discovery, and query execution.
+The distribution packages Query Agent Skill v0 at `skills/query-agent-v0/SKILL.md`, and the
+application jar carries the same file at `META-INF/scalardb-analytics/skills/query-agent-v0/SKILL.md`.
+It covers only workspace selection, source and physical metadata discovery, and query execution.

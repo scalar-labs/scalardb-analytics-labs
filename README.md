@@ -12,17 +12,52 @@ an external Query Agent; this repository does not implement the agent runtime or
 Java 25 is required. The Gradle wrapper supplies the repository's Gradle version. Building the
 embedded Physical Catalog also needs:
 
-- the upstream catalog source: `git submodule update --init`
+- the upstream catalog source, the `upstream/scalardb-analytics` submodule. Gradle checks it out at
+  its recorded commit when it is missing or behind, which needs network access. A submodule with
+  uncommitted changes at another commit fails the build instead of being overwritten.
 - credentials for the private ScalarDB SQL package registry, as the `gprUsername` and
   `gprPassword` Gradle properties or the `GPR_USERNAME` and `GPR_PASSWORD` environment variables
 
 The upstream catalog modules compile with their own Java toolchains, which Gradle provisions
 automatically.
 
-Build the CLI distribution:
+Build the CLI distribution archive:
 
 ```console
-./gradlew :application:installDist
+./gradlew distTar
+```
+
+The task writes `application/build/distributions/scalardb-analytics-<version>-<platform>.tar.gz`.
+The packaged DuckDB extensions are built for the build host, so an archive supports only the
+platform it was built on: `osx_arm64`, `linux_amd64`, or `linux_arm64`. The build fails on other
+hosts.
+
+The unpacked distribution needs only a Java 25 or later runtime, selected through `JAVA_HOME` or the
+`java` command on `PATH`. A missing or older Java fails with a message that says so. It needs no
+installed DuckDB, extension directory, or network download at runtime. Each command runs in one
+process, with no background service.
+
+| Path | Contents |
+| --- | --- |
+| `bin/scalardb-analytics` | Launcher |
+| `lib/` | Runtime jars, including the packaged DuckDB extensions inside the `duckdb` jar |
+| `skills/query-agent-v0/` | Query Agent Skill v0 |
+| `LICENSE` | Product license |
+| `licenses/` | Third-party inventory (`third-party/THIRD-PARTY.md`), the license files embedded in the bundled jars, and the licenses of the DuckDB and upstream catalog builds |
+| `provenance/` | Distribution version, platform, and source revision; DuckDB extension and Physical Catalog provenance |
+
+Unpack the archive:
+
+```console
+tar -xzf application/build/distributions/scalardb-analytics-<version>-<platform>.tar.gz
+cd scalardb-analytics-<version>-<platform>
+```
+
+To try the distribution without an archive, install the same layout unarchived:
+
+```console
+./gradlew installDist
+cd application/build/install/scalardb-analytics-<platform>
 ```
 
 Initialize a workspace. The named environment variable supplies the Physical Catalog store
@@ -30,7 +65,7 @@ password; the password is not written to the workspace. The workspace is trusted
 operator-managed configuration, and credentials must not be embedded in the JDBC URL:
 
 ```console
-application/build/install/scalardb-analytics/bin/scalardb-analytics workspace init \
+bin/scalardb-analytics workspace init \
   --workspace ./analytics-workspace \
   --catalog analytics \
   --store-jdbc-url jdbc:postgresql://localhost:5432/catalog \
@@ -41,7 +76,7 @@ application/build/install/scalardb-analytics/bin/scalardb-analytics workspace in
 Query through the workspace (registered sources are addressed as `source.namespace.table`):
 
 ```console
-application/build/install/scalardb-analytics/bin/scalardb-analytics query \
+bin/scalardb-analytics query \
   --workspace ./analytics-workspace \
   --sql "SELECT 1 AS answer"
 ```
@@ -51,6 +86,9 @@ The command returns a versioned JSON envelope:
 ```json
 {"schema":"scalardb-analytics/query-result","schemaVersion":"3","executionId":"...","fields":[{"name":"answer","type":"Int(32, true)","nullable":true,"children":[]}],"rows":[[1]],"truncated":false}
 ```
+
+To try the whole flow against local sample databases, follow the
+[quickstart runbook](examples/quickstart/README.md).
 
 See [`application/README.md`](application/README.md) for workspace initialization, source
 registration, metadata discovery, SQL input modes, time limits, and the packaged Query Agent Skill.
@@ -84,14 +122,17 @@ All Java packages are `@NullMarked` with JSpecify. NullAway checks both producti
 sets as compilation errors. New Java packages must declare `@NullMarked` or `@NullUnmarked`
 explicitly; use `@Nullable` only where `null` is part of the contract.
 
-Build the current CLI distribution:
+Run the distribution smoke test:
 
 ```console
-./gradlew :application:installDist
+./gradlew distSmokeTest
 ```
 
-Inspect the available CLI commands:
-
-```console
-application/build/install/scalardb-analytics/bin/scalardb-analytics --help
-```
+The smoke test builds the archive, unpacks it into a clean directory, and runs the launcher with an
+isolated `HOME` and temporary directory. It checks version and help output, the Java runtime check,
+workspace initialization against a PostgreSQL store, source registration, a typed query, denied
+unsafe SQL, and classified, redacted failures. Network access is denied except to the test
+databases. On macOS, the launcher runs under `sandbox-exec`. On Linux, it runs in an
+`eclipse-temurin:25-jre` container on an internal Docker network that contains only the databases.
+The test needs a Docker-compatible daemon, and Gradle provisions a Java 21 toolchain to exercise the
+launcher's rejection of older runtimes.

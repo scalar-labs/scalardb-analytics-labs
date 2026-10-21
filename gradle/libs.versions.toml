@@ -57,6 +57,7 @@ testcontainers-mysql = { module = "org.testcontainers:mysql", version.ref = "tes
 testcontainers-postgresql = { module = "org.testcontainers:postgresql", version.ref = "testcontainers" }
 
 [plugins]
+dependency-license-report = { id = "com.github.jk1.dependency-license-report", version = "3.1.4" }
 error-prone = { id = "net.ltgt.errorprone", version.ref = "error-prone-plugin" }
 spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
 

@@ -1,0 +1,421 @@
+/*
+ * Copyright Scalar, Inc.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package com.scalar.db.analytics.labs.application.distribution;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.scalar.db.analytics.labs.application.distribution.RestrictedEnvironment.Result;
+import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
+import org.jspecify.annotations.Nullable;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.MethodOrderer.OrderAnnotation;
+import org.junit.jupiter.api.Order;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.api.TestInstance.Lifecycle;
+import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.api.io.TempDir;
+
+/**
+ * Proves that the distribution archive works as users receive it: unpacked into a clean directory,
+ * launched through its own launcher with only a Java runtime, an isolated home and temporary
+ * directory, and no network access except to the test databases.
+ *
+ * <p>The steps share one workspace and run in order.
+ */
+@TestInstance(Lifecycle.PER_CLASS)
+@TestMethodOrder(OrderAnnotation.class)
+class DistributionSmokeTest {
+  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  // "<name> <version> (<license>)", as the scanner provenance records each bundled component.
+  private static final Pattern BUNDLED_COMPONENT =
+      Pattern.compile("(.+) ([0-9][0-9.]*) \\(([^)]+)\\)");
+  private static final Map<String, String> NATIVE_LICENSE_FILES =
+      Map.of(
+          "libpq", "libpq.txt",
+          "OpenSSL", "openssl.txt",
+          "MariaDB Connector/C", "mariadb-connector-c.txt",
+          "zlib", "zlib.txt");
+  private static final Pattern INVENTORY_ENTRY =
+      Pattern.compile("\\*\\*Name:\\*\\* `([^`]+)` \\*\\*Version:\\*\\* `([^`]+)`");
+
+  // Shared by the ordered steps, so it is created once for the class.
+  @TempDir static Path scratch;
+
+  private Path distribution;
+  private @Nullable RestrictedEnvironment environment;
+  private String workspace = "";
+  private Map<String, String> credentials = Map.of();
+
+  static String requiredProperty(String name) {
+    var value = System.getProperty(name);
+    if (value == null || value.isEmpty()) {
+      throw new IllegalStateException(
+          name + " is not set; run the smoke test with ./gradlew distSmokeTest");
+    }
+    return value;
+  }
+
+  @BeforeAll
+  void unpackAndStart() throws Exception {
+    var archive = Path.of(requiredProperty("distribution.archive"));
+    var unpacked = Files.createDirectories(scratch.resolve("unpacked"));
+    var tar =
+        new ProcessBuilder("tar", "-xzf", archive.toString(), "-C", unpacked.toString())
+            .inheritIO()
+            .start();
+    assertThat(tar.waitFor(5, TimeUnit.MINUTES) && tar.exitValue() == 0).isTrue();
+    try (var entries = Files.list(unpacked)) {
+      var roots = entries.toList();
+      assertThat(roots).hasSize(1);
+      distribution = roots.get(0);
+    }
+    environment =
+        RestrictedEnvironment.start(
+            requiredProperty("distribution.platform"),
+            distribution,
+            Files.createDirectories(scratch.resolve("environment")));
+    environment
+        .source()
+        .execute("CREATE TABLE orders (id INT PRIMARY KEY, amount BIGINT, note TEXT)");
+    environment.source().execute("INSERT INTO orders VALUES (1, 10, 'first'), (2, 20, NULL)");
+    workspace = environment.workspace("workspace");
+    credentials =
+        Map.of(
+            "STORE_PASSWORD", environment.store().password(),
+            "SOURCE_PASSWORD", environment.source().password());
+  }
+
+  @AfterAll
+  void stop() throws Exception {
+    if (environment != null) {
+      environment.close();
+    }
+  }
+
+  @Test
+  @Order(1)
+  void containsTheLauncherSkillProvenanceAndLicenses() throws Exception {
+    var platform = requiredProperty("distribution.platform");
+    assertThat(distribution.getFileName().toString())
+        .isEqualTo(
+            "scalardb-analytics-" + requiredProperty("distribution.version") + "-" + platform);
+    assertThat(distribution.resolve("bin/scalardb-analytics")).isExecutable();
+    assertThat(distribution.resolve("skills/query-agent-v0/SKILL.md")).isRegularFile();
+    assertThat(distribution.resolve("LICENSE")).isRegularFile();
+    assertThat(distribution.resolve("licenses/third-party/THIRD-PARTY.md")).isRegularFile();
+    assertThat(distribution.resolve("provenance/physical-catalog.properties")).isRegularFile();
+    assertThat(Files.readString(distribution.resolve("provenance/distribution.properties")))
+        .contains("platform=" + platform, "javaRuntime=25 or later");
+    for (var extension : List.of("scalardb_analytics", "postgres_scanner", "mysql_scanner")) {
+      assertThat(
+              Files.readString(
+                  distribution.resolve(
+                      "provenance/duckdb-extensions/" + extension + ".properties")))
+          .contains("platform=" + platform);
+    }
+    // Components statically linked into the scanners are versioned and ship their license text.
+    for (var scanner : List.of("postgres_scanner", "mysql_scanner")) {
+      var provenance = new Properties();
+      try (var input =
+          Files.newInputStream(
+              distribution.resolve("provenance/duckdb-extensions/" + scanner + ".properties"))) {
+        provenance.load(input);
+      }
+      for (var component : provenance.getProperty("bundledLicenses", "").split(",\\s*")) {
+        var matcher = BUNDLED_COMPONENT.matcher(component);
+        assertThat(matcher.matches()).as("%s: %s", scanner, component).isTrue();
+        assertThat(NATIVE_LICENSE_FILES).as(component).containsKey(matcher.group(1));
+        assertThat(distribution.resolve("licenses/" + NATIVE_LICENSE_FILES.get(matcher.group(1))))
+            .as(component)
+            .isNotEmptyFile();
+      }
+    }
+    // Every bundled jar is inventoried with its license.
+    var inventory = Files.readString(distribution.resolve("licenses/third-party/THIRD-PARTY.md"));
+    assertThat(inventory).doesNotContain("## Unknown");
+    var inventoried =
+        INVENTORY_ENTRY
+            .matcher(inventory)
+            .results()
+            .map(entry -> entry.group(1) + "-" + entry.group(2))
+            .toList();
+    try (var jars = Files.list(distribution.resolve("lib"))) {
+      var names = jars.map(jar -> jar.getFileName().toString()).toList();
+      assertThat(names)
+          .contains("application-" + requiredProperty("distribution.version") + ".jar");
+      for (var name : names) {
+        if (!name.startsWith("application-")) {
+          // A jar is named after its module and version, optionally followed by a classifier.
+          assertThat(inventoried)
+              .as(name)
+              .anyMatch(module -> name.equals(module + ".jar") || name.startsWith(module + "-"));
+        }
+      }
+    }
+  }
+
+  @Test
+  @Order(2)
+  void printsVersionAndHelp() throws Exception {
+    var version = run("version");
+    assertSuccessful(version, "scalardb-analytics/version");
+    assertThat(json(version).get("productVersion").textValue())
+        .isEqualTo(requiredProperty("distribution.version"));
+
+    var help = run("--help");
+    assertThat(help.exitCode()).isZero();
+    assertThat(help.standardOutput())
+        .contains("Usage: scalardb-analytics", "workspace", "source", "metadata", "query");
+  }
+
+  @Test
+  @Order(3)
+  void rejectsMissingAndOlderJavaWithActionableMessages() throws Exception {
+    var launcher = distribution.resolve("bin/scalardb-analytics").toString();
+
+    var older =
+        runOnHost(
+            List.of(launcher, "version"),
+            Map.of(
+                "PATH",
+                "/usr/bin:/bin",
+                "JAVA_HOME",
+                requiredProperty("distribution.olderJavaHome")));
+    assertThat(older.exitCode()).isEqualTo(1);
+    assertThat(older.standardError())
+        .contains("requires Java 25 or later", "is Java 21", "Set JAVA_HOME");
+
+    // A PATH with the tools the launcher needs, but no java command.
+    var tools = Files.createDirectories(scratch.resolve("tools"));
+    for (var tool : List.of("sh", "uname", "sed", "xargs", "tr", "head", "ls")) {
+      Files.createSymbolicLink(tools.resolve(tool), locate(tool));
+    }
+    var missing = runOnHost(List.of(launcher, "version"), Map.of("PATH", tools.toString()));
+    assertThat(missing.exitCode()).isEqualTo(1);
+    assertThat(missing.standardError())
+        .contains("no 'java' command", "requires Java 25 or later", "Set JAVA_HOME");
+  }
+
+  @Test
+  @Order(4)
+  void initializesAWorkspaceAgainstAPostgreSqlStore() throws Exception {
+    var store = requireEnvironment().store();
+    var initialized =
+        run(
+            "workspace",
+            "init",
+            "--workspace",
+            workspace,
+            "--catalog",
+            "smoke",
+            "--store-jdbc-url",
+            store.jdbcUrl(),
+            "--store-user",
+            "postgres",
+            "--store-password-env",
+            "STORE_PASSWORD");
+    assertSuccessful(initialized, "scalardb-analytics/workspace");
+    assertThat(initialized.allOutput()).doesNotContain(store.password());
+  }
+
+  @Test
+  @Order(5)
+  void registersASource() throws Exception {
+    var source = requireEnvironment().source();
+    var registered = registerSource("warehouse", "SOURCE_PASSWORD", credentials);
+    assertSuccessful(registered, "scalardb-analytics/source");
+    assertThat(registered.allOutput()).doesNotContain(source.password());
+
+    var metadata = run("metadata", "list", "--workspace", workspace, "--source", "warehouse");
+    assertSuccessful(metadata, "scalardb-analytics/physical-metadata");
+    assertThat(json(metadata).get("tables").toString()).contains("orders", "amount");
+  }
+
+  @Test
+  @Order(6)
+  void runsATypedQuery() throws Exception {
+    var result =
+        run(
+            "query",
+            "--workspace",
+            workspace,
+            "--sql",
+            "SELECT id, amount, note FROM warehouse.public.orders ORDER BY id");
+    assertSuccessful(result, "scalardb-analytics/query-result");
+    var output = json(result);
+    assertThat(output.get("fields").findValuesAsText("name"))
+        .containsExactly("id", "amount", "note");
+    assertThat(output.get("fields").findValuesAsText("type"))
+        .containsExactly("Int(32, true)", "Int(64, true)", "Utf8");
+    assertThat(output.get("rows").toString()).isEqualTo("[[1,10,\"first\"],[2,20,null]]");
+    assertThat(output.get("truncated").booleanValue()).isFalse();
+  }
+
+  @Test
+  @Order(7)
+  void deniesUnsafeSql() throws Exception {
+    // Query validation rejects these before execution. A remote read is not rejected by
+    // validation; it fails when it executes, which here also proves no network download.
+    var exported = scratch.resolve("exported.csv");
+    var expectedCodes = new LinkedHashMap<String, String>();
+    expectedCodes.put("INSTALL httpfs", "INVALID_QUERY");
+    expectedCodes.put("COPY (SELECT 1) TO '" + exported + "'", "INVALID_QUERY");
+    expectedCodes.put("ATTACH ':memory:' AS other", "INVALID_QUERY");
+    expectedCodes.put("SELECT * FROM postgres_query('warehouse', 'SELECT 1')", "INVALID_QUERY");
+    expectedCodes.put("DELETE FROM warehouse.public.orders", "INVALID_QUERY");
+    expectedCodes.put("SELECT * FROM read_csv('https://example.com/data.csv')", "EXECUTION_FAILED");
+    var codes = new LinkedHashMap<String, String>();
+    for (var sql : expectedCodes.keySet()) {
+      var result = run("query", "--workspace", workspace, "--sql", sql);
+      assertThat(result.exitCode()).as(sql).isEqualTo(1);
+      assertThat(result.standardError()).as(sql).isEmpty();
+      codes.put(sql, json(result).get("code").textValue());
+    }
+    assertThat(codes).isEqualTo(expectedCodes);
+    assertThat(exported).doesNotExist();
+    var unchanged =
+        run(
+            "query",
+            "--workspace",
+            workspace,
+            "--sql",
+            "SELECT count(*) FROM warehouse.public.orders");
+    assertSuccessful(unchanged, "scalardb-analytics/query-result");
+    assertThat(json(unchanged).get("rows").toString()).isEqualTo("[[2]]");
+  }
+
+  @Test
+  @Order(8)
+  void classifiesAndRedactsFailures() throws Exception {
+    var secret = "secret-" + UUID.randomUUID();
+
+    var wrongPassword =
+        registerSource("unreachable", "WRONG_PASSWORD", Map.of("WRONG_PASSWORD", secret));
+    assertError(wrongPassword, "DATA_SOURCE_UNREACHABLE");
+    assertThat(wrongPassword.allOutput()).doesNotContain(secret);
+
+    var missingCredential = run(Map.of(), "query", "--workspace", workspace, "--sql", "SELECT 1");
+    assertError(missingCredential, "MISSING_CREDENTIAL");
+
+    var sensitiveSql = "SELECT * FROM warehouse.public.missing /* " + secret + " */";
+    var invalid = run("query", "--workspace", workspace, "--sql", sensitiveSql);
+    assertError(invalid, "EXECUTION_FAILED");
+    assertThat(invalid.allOutput()).doesNotContain(secret);
+
+    var noWorkspace =
+        run("query", "--workspace", requireEnvironment().workspace("missing"), "--sql", "SELECT 1");
+    assertError(noWorkspace, "INVALID_WORKSPACE");
+
+    var environment = requireEnvironment();
+    for (var result : List.of(wrongPassword, missingCredential, invalid, noWorkspace)) {
+      assertThat(result.allOutput())
+          .doesNotContain(environment.store().password(), environment.source().password());
+    }
+  }
+
+  private Result registerSource(String name, String passwordVariable, Map<String, String> variables)
+      throws Exception {
+    var source = requireEnvironment().source();
+    var environmentVariables = new HashMap<>(credentials);
+    environmentVariables.putAll(variables);
+    return run(
+        environmentVariables,
+        "source",
+        "register",
+        "--workspace",
+        workspace,
+        "--name",
+        name,
+        "--type",
+        "postgresql",
+        "--host",
+        source.host(),
+        "--port",
+        Integer.toString(source.port()),
+        "--database",
+        "postgres",
+        "--user",
+        "postgres",
+        "--password-env",
+        passwordVariable);
+  }
+
+  private Result run(String... arguments) throws Exception {
+    return run(credentials, arguments);
+  }
+
+  private Result run(Map<String, String> variables, String... arguments) throws Exception {
+    return requireEnvironment().run(variables, arguments);
+  }
+
+  private RestrictedEnvironment requireEnvironment() {
+    if (environment == null) {
+      throw new IllegalStateException("The restricted environment did not start.");
+    }
+    return environment;
+  }
+
+  /** Runs a command on the host without network restriction, for launcher checks only. */
+  private Result runOnHost(List<String> command, Map<String, String> variables) throws Exception {
+    var output = scratch.resolve(UUID.randomUUID() + ".out");
+    var error = scratch.resolve(UUID.randomUUID() + ".err");
+    var builder =
+        new ProcessBuilder(command)
+            .redirectOutput(output.toFile())
+            .redirectError(error.toFile())
+            .redirectInput(ProcessBuilder.Redirect.from(new File("/dev/null")));
+    builder.environment().clear();
+    builder.environment().putAll(variables);
+    var process = builder.start();
+    assertThat(process.waitFor(1, TimeUnit.MINUTES)).isTrue();
+    return new Result(
+        process.exitValue(),
+        Files.readString(output, StandardCharsets.UTF_8),
+        Files.readString(error, StandardCharsets.UTF_8));
+  }
+
+  private static Path locate(String tool) {
+    for (var directory : List.of("/bin", "/usr/bin")) {
+      var candidate = Path.of(directory, tool);
+      if (Files.isExecutable(candidate)) {
+        return candidate;
+      }
+    }
+    throw new IllegalStateException(tool + " is not installed in /bin or /usr/bin");
+  }
+
+  private static JsonNode json(Result result) throws Exception {
+    return OBJECT_MAPPER.readTree(result.standardOutput().strip());
+  }
+
+  private static void assertSuccessful(Result result, String schema) throws Exception {
+    assertThat(result.exitCode()).as(result.allOutput()).isZero();
+    assertThat(result.standardError()).isEmpty();
+    assertThat(json(result).get("schema").textValue()).isEqualTo(schema);
+  }
+
+  private static void assertError(Result result, String code) throws Exception {
+    assertThat(result.exitCode()).as(result.allOutput()).isEqualTo(1);
+    assertThat(result.standardError()).isEmpty();
+    var output = json(result);
+    assertThat(output.get("schema").textValue()).isEqualTo("scalardb-analytics/error");
+    assertThat(output.get("code").textValue()).as(result.allOutput()).isEqualTo(code);
+  }
+}

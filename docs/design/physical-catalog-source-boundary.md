@@ -17,7 +17,9 @@ dependency. Neither an extra build invocation nor an intermediate repository is 
 
 ## Consequences
 
-- A checkout needs `git submodule update --init`.
+- Settings evaluation checks out the submodule at its recorded commit when it is missing or
+  behind, so a fresh checkout builds without a separate step. Local submodule changes at another
+  commit fail the build rather than being overwritten.
 - The upstream build runs under the root build's Gradle version, so upgrading Gradle in either
   repository requires the other to support the new version.
 - The upstream modules compile with their own Java toolchains. Gradle provisions those toolchains.

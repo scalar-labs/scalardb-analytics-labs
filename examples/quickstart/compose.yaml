@@ -1,0 +1,51 @@
+# Local databases for the quickstart runbook: the Physical Catalog store and two sample data sources.
+# The passwords are example values for a local, disposable environment only.
+name: scalardb-analytics-quickstart
+
+services:
+  # Physical Catalog store. The workspace binds to one catalog stored here.
+  catalog-store:
+    image: postgres:16.4
+    environment:
+      POSTGRES_DB: catalog
+      POSTGRES_USER: catalog
+      POSTGRES_PASSWORD: catalog-password
+    ports:
+      - "127.0.0.1:15432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "catalog", "-d", "catalog"]
+      interval: 2s
+      retries: 30
+
+  # Sample PostgreSQL source: orders.
+  warehouse:
+    image: postgres:16.4
+    environment:
+      POSTGRES_DB: warehouse
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: warehouse-admin-password
+    volumes:
+      - ./data/warehouse.sql:/docker-entrypoint-initdb.d/warehouse.sql:ro
+    ports:
+      - "127.0.0.1:25432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "warehouse"]
+      interval: 2s
+      retries: 30
+
+  # Sample MySQL source: customers.
+  crm:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: crm-root-password
+      MYSQL_DATABASE: crm
+    volumes:
+      - ./data/crm.sql:/docker-entrypoint-initdb.d/crm.sql:ro
+    ports:
+      - "127.0.0.1:13306:3306"
+    healthcheck:
+      # The temporary server that runs the init scripts does not listen on TCP, so this succeeds
+      # only once the sample data is loaded and the final server is up.
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-pcrm-root-password"]
+      interval: 2s
+      retries: 60

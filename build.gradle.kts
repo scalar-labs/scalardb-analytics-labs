@@ -67,3 +67,23 @@ tasks.named("assemble") {
     description = "Assembles every build unit currently wired into the repository."
 }
 
+// These delegate to the application's distribution tasks of the same names, because the
+// application owns the distribution.
+tasks.register("distTar") {
+    group = "distribution"
+    description = "Assembles the CLI distribution archive for the build host platform."
+    dependsOn(":application:distTar")
+}
+
+tasks.register("installDist") {
+    group = "distribution"
+    description = "Installs the CLI distribution, unarchived, for the build host platform."
+    dependsOn(":application:installDist")
+}
+
+tasks.register("distSmokeTest") {
+    group = LifecycleBasePlugin.VERIFICATION_GROUP
+    description = "Runs the CLI distribution archive in an isolated, network-restricted environment."
+    dependsOn(":application:distSmokeTest")
+}
+

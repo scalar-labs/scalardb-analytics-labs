@@ -48,11 +48,14 @@ scanner_sha256() {
 }
 
 # Third-party components statically linked into each scanner, as found in the published binaries.
+# Versions come from the scanners' vcpkg ports and the vcpkg baseline of DuckDB's extension CI.
+# Their license texts are packaged under src/main/resources/META-INF/licenses/.
 scanner_bundled_licenses() {
   case "$1" in
-    postgres_scanner) echo "libpq (PostgreSQL), OpenSSL 3.6.0 (Apache-2.0)" ;;
+    postgres_scanner) echo "libpq 18.3 (PostgreSQL), OpenSSL 3.6.0 (Apache-2.0)" ;;
     mysql_scanner)
-      echo "MariaDB Connector/C 3.4.7 (LGPL-2.1-or-later), OpenSSL 3.6.0 (Apache-2.0)" ;;
+      echo "MariaDB Connector/C 3.4.7 (LGPL-2.1-or-later), OpenSSL 3.6.0 (Apache-2.0)," \
+        "zlib 1.3.1 (Zlib)" ;;
   esac
 }
 

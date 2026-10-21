@@ -45,6 +45,7 @@ Docker-compatible daemon.
 The extension's host ABI is declared in `src/main/cpp/include/scalardb_analytics_host.h`. Each
 packaged extension's provenance (source, checksums, platform, DuckDB release, licenses, and, for
 the scanners, upstream commit and statically linked components) is recorded in
-`META-INF/scalardb-analytics-labs/duckdb-extensions/<extension>.properties`.
+`META-INF/scalardb-analytics-labs/duckdb-extensions/<extension>.properties`. The license texts of
+DuckDB and of the components statically linked into the scanners are in `META-INF/licenses/`.
 
 See [`../docs/query-engine.md`](../docs/query-engine.md) for the Query Engine mental model.
