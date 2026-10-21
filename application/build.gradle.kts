@@ -26,11 +26,14 @@ application {
 dependencies {
     implementation(project(":query-engine"))
     implementation(project(":duckdb"))
+    implementation(project(":physical-catalog"))
     implementation(libs.jackson.databind)
     implementation(libs.picocli)
 
     testImplementation(libs.assertj.core)
     testImplementation(libs.junit.jupiter)
+    testImplementation(libs.testcontainers.junit.jupiter)
+    testImplementation(libs.testcontainers.postgresql)
     testRuntimeOnly(libs.junit.platform.launcher)
 }
 

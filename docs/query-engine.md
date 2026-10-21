@@ -63,3 +63,29 @@ verified artifacts, and the Query Engine owns loading and using them.
 
 See [`design/duckdb-distribution.md`](design/duckdb-distribution.md) for the packaging decision and
 its rationale.
+
+## Catalog host
+
+The product extension does not load or start product components. Its host, the application,
+supplies them after loading the extension. The ABI is declared in
+`duckdb/src/main/cpp/include/scalardb_analytics_host.h`:
+
+- **Registration.** The host registers one versioned, sized table with
+  `scalardb_analytics_register_host`. The table currently carries a catalog provider. Later
+  versions can append members, such as connector library handles. The extension copies the table
+  and exports only the registration functions besides its DuckDB entry point.
+- **Calls.** The catalog provider answers unary gRPC calls in serialized form. Each call runs inside
+  a scope that owns the response memory until the extension ends the scope. Failures are
+  serialized `google.rpc.Status` values.
+- **Threads.** Callbacks may run concurrently on any thread, including DuckDB worker threads, and
+  never unwind across the boundary.
+- **Unregistration.** `scalardb_analytics_unregister_host` refuses while a scope is open.
+
+`DuckDbQueryEngine` takes an optional `NativeCatalogProvider`. It registers the provider through
+FFM upcalls right after loading the extension and unregisters it after closing the connection, so
+no DuckDB thread can call the provider outside the engine's lifetime. DuckDB cannot interrupt a
+call in progress, so query cancellation and time limits take effect once the call returns. The
+provider bounds how long that takes; the Physical Catalog provider uses a per-call deadline.
+`scalardb_analytics_catalog_status()` reports the catalog's serving status and is the current SQL
+consumer of the provider. The provider's contract on the catalog side is described in
+[`physical-catalog.md`](physical-catalog.md).

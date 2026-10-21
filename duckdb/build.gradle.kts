@@ -12,15 +12,19 @@ val nativeBuildDirectory = layout.buildDirectory.dir("native")
 val nativeExtension = nativeBuildDirectory.map {
     it.file("output/scalardb_analytics.duckdb_extension")
 }
+val nativeExtensionProvenance = nativeBuildDirectory.map {
+    it.file("output/scalardb_analytics.properties")
+}
 
 val buildNativeExtension = tasks.register<Exec>("buildNativeExtension") {
     group = LifecycleBasePlugin.BUILD_GROUP
     description = "Builds the ScalarDB Analytics DuckDB extension."
 
-    inputs.file("src/main/cpp/scalardb_analytics_extension.cpp")
+    inputs.dir("src/main/cpp")
     inputs.file("src/native/build-extension.sh")
     inputs.property("extensionVersion", project.version.toString())
     outputs.file(nativeExtension)
+    outputs.file(nativeExtensionProvenance)
 
     commandLine(
         "bash",
@@ -85,8 +89,14 @@ tasks.test {
 
 val stageNativeExtension = tasks.register<Copy>("stageNativeExtension") {
     dependsOn(buildNativeExtension)
-    from(nativeExtension)
-    into(layout.buildDirectory.dir("generated-resources/main/native"))
+    into(layout.buildDirectory.dir("generated-resources/main"))
+    from(nativeExtension) {
+        into("native")
+    }
+    from(nativeExtensionProvenance) {
+        into("META-INF/scalardb-analytics-labs")
+        rename { "duckdb-extension.properties" }
+    }
 }
 
 tasks.processResources {

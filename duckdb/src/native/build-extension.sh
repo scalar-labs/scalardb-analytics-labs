@@ -112,22 +112,38 @@ if [ ! -f "$STATIC_DIRECTORY/libduckdb_static.a" ]; then
   unzip -oq "$STATIC_ARCHIVE" -d "$STATIC_DIRECTORY"
 fi
 
-readonly OBJECT_FILE="$OUTPUT_DIRECTORY/$EXTENSION_NAME.o"
-clang++ -std=c++17 -O2 -DNDEBUG "${ARCHITECTURE_FLAGS[@]}" -fPIC -fvisibility=hidden \
-  -DDUCKDB_BUILD_LIBRARY -DDUCKDB_BUILD_LOADABLE_EXTENSION \
-  -I"$SOURCE_DIRECTORY" \
-  -c "$MODULE_DIRECTORY/src/main/cpp/scalardb_analytics_extension.cpp" \
-  -o "$OBJECT_FILE"
+readonly CPP_DIRECTORY="$MODULE_DIRECTORY/src/main/cpp"
+# The host ABI is the only interface besides the DuckDB entry point that the extension exports.
+readonly EXPORTED_SYMBOLS=(
+  "${EXTENSION_NAME}_duckdb_cpp_init"
+  "scalardb_analytics_register_host"
+  "scalardb_analytics_unregister_host"
+)
+
+OBJECT_FILES=()
+for source in "$CPP_DIRECTORY"/*.cpp; do
+  object_file="$OUTPUT_DIRECTORY/$(basename "${source%.cpp}").o"
+  clang++ -std=c++17 -O2 -DNDEBUG "${ARCHITECTURE_FLAGS[@]}" -fPIC -fvisibility=hidden \
+    -DDUCKDB_BUILD_LIBRARY -DDUCKDB_BUILD_LOADABLE_EXTENSION \
+    -I"$SOURCE_DIRECTORY" -I"$CPP_DIRECTORY/include" \
+    -c "$source" \
+    -o "$object_file"
+  OBJECT_FILES+=("$object_file")
+done
 
 if [ "$(uname -s)" = "Darwin" ]; then
+  EXPORT_FLAGS=()
+  for symbol in "${EXPORTED_SYMBOLS[@]}"; do
+    EXPORT_FLAGS+=("-Wl,-exported_symbol,_$symbol")
+  done
   clang++ -dynamiclib "${ARCHITECTURE_FLAGS[@]}" \
     -install_name "@rpath/$EXTENSION_NAME.duckdb_extension" \
-    -Wl,-dead_strip -Wl,-exported_symbol,_${EXTENSION_NAME}_duckdb_cpp_init \
-    "$OBJECT_FILE" "$STATIC_DIRECTORY/libduckdb_static.a" \
+    -Wl,-dead_strip "${EXPORT_FLAGS[@]}" \
+    "${OBJECT_FILES[@]}" "$STATIC_DIRECTORY/libduckdb_static.a" \
     -o "$EXTENSION_FILE"
 else
   clang++ -shared -Wl,--gc-sections \
-    "$OBJECT_FILE" "$STATIC_DIRECTORY/libduckdb_static.a" -ldl -pthread \
+    "${OBJECT_FILES[@]}" "$STATIC_DIRECTORY/libduckdb_static.a" -ldl -pthread \
     -o "$EXTENSION_FILE"
 fi
 
@@ -145,5 +161,27 @@ fi
   append_field "4"
   dd if=/dev/zero bs=256 count=1 2>/dev/null
 } >> "$EXTENSION_FILE"
+
+HOST_ABI_VERSION="$(sed -n 's/^#define SCALARDB_ANALYTICS_HOST_ABI_VERSION \([0-9][0-9]*\)u$/\1/p' \
+  "$CPP_DIRECTORY/include/scalardb_analytics_host.h")"
+if [ -z "$HOST_ABI_VERSION" ]; then
+  echo "could not read the host ABI version from scalardb_analytics_host.h" >&2
+  exit 1
+fi
+
+# Record what the extension was built from so the distribution can report its provenance.
+cat > "$OUTPUT_DIRECTORY/$EXTENSION_NAME.properties" <<EOF
+extension=$EXTENSION_NAME
+extensionVersion=$EXTENSION_VERSION
+extensionAbi=CPP
+hostAbiVersion=$HOST_ABI_VERSION
+platform=$DUCKDB_PLATFORM
+duckdbVersion=$DUCKDB_VERSION
+duckdbSource=$RELEASE_BASE_URL/libduckdb-src.zip
+duckdbSourceSha256=$DUCKDB_SOURCE_SHA256
+duckdbStaticLibraries=$RELEASE_BASE_URL/static-libs-$PLATFORM_ASSET.zip
+duckdbStaticLibrariesSha256=$STATIC_LIBRARIES_SHA256
+duckdbLicense=MIT
+EOF
 
 printf '%s\n' "$EXTENSION_FILE"

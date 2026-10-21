@@ -34,6 +34,7 @@ public final class DuckDbQueryEngine implements QueryEngine {
 
   private final RootAllocator allocator;
   private final Connection connection;
+  private final @Nullable CatalogHostRegistration catalogHost;
   private final ExecutorService queryExecutor;
   private final ScheduledExecutorService deadlineExecutor;
   private final AtomicReference<@Nullable DuckDbQueryExecution> activeExecution =
@@ -41,9 +42,21 @@ public final class DuckDbQueryEngine implements QueryEngine {
   private final AtomicBoolean closed = new AtomicBoolean();
 
   public DuckDbQueryEngine() {
+    this(null);
+  }
+
+  /**
+   * Creates an engine whose product extension calls the given catalog provider.
+   *
+   * <p>The provider is registered into the extension after it is loaded and unregistered after the
+   * connection is closed, so no DuckDB thread can call it outside the engine's lifetime.
+   */
+  public DuckDbQueryEngine(@Nullable NativeCatalogProvider catalogProvider) {
     allocator = new RootAllocator();
     try {
-      connection = openConnection();
+      var opened = openConnection(catalogProvider);
+      connection = opened.connection();
+      catalogHost = opened.catalogHost();
     } catch (RuntimeException e) {
       try {
         allocator.close();
@@ -59,21 +72,38 @@ public final class DuckDbQueryEngine implements QueryEngine {
                 Thread.ofPlatform().daemon().name("duckdb-query-deadline").unstarted(runnable));
   }
 
-  private static Connection openConnection() {
+  private record OpenedConnection(
+      Connection connection, @Nullable CatalogHostRegistration catalogHost) {}
+
+  private static OpenedConnection openConnection(@Nullable NativeCatalogProvider catalogProvider) {
     Connection openedConnection = null;
+    CatalogHostRegistration registration = null;
     try {
       var properties = new Properties();
       properties.setProperty("allow_unsigned_extensions", "true");
       properties.setProperty("jdbc_stream_results", "true");
       openedConnection = DriverManager.getConnection("jdbc:duckdb:", properties);
-      PackagedDuckDbExtension.load(openedConnection);
+      registration = PackagedDuckDbExtension.load(openedConnection, catalogProvider);
       configureConnection(openedConnection);
-      return openedConnection;
+      return new OpenedConnection(openedConnection, registration);
     } catch (SQLException e) {
       closeAfterFailedInitialization(openedConnection, e);
+      closeCatalogHost(registration, e);
       throw new QueryEngineException(
           UUID.randomUUID().toString(),
           new QueryError.InitializationFailed("Could not initialize the Query Engine."));
+    }
+  }
+
+  private static void closeCatalogHost(
+      @Nullable CatalogHostRegistration registration, Throwable failure) {
+    if (registration == null) {
+      return;
+    }
+    try {
+      registration.close();
+    } catch (RuntimeException closeFailure) {
+      failure.addSuppressed(closeFailure);
     }
   }
 
@@ -276,6 +306,14 @@ public final class DuckDbQueryEngine implements QueryEngine {
       connection.close();
     } catch (SQLException e) {
       failure = addFailure(failure, e);
+    }
+    // DuckDB threads stop with the connection, so the extension holds no open catalog scope here.
+    if (catalogHost != null) {
+      try {
+        catalogHost.close();
+      } catch (RuntimeException e) {
+        failure = addFailure(failure, e);
+      }
     }
     try {
       allocator.close();

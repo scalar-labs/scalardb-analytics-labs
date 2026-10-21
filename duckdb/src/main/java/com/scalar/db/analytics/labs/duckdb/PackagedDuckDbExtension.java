@@ -18,7 +18,14 @@ final class PackagedDuckDbExtension {
 
   private PackagedDuckDbExtension() {}
 
-  static void load(Connection connection) throws SQLException {
+  /**
+   * Loads the extension and, when a catalog provider is given, registers it as the extension's
+   * catalog host.
+   *
+   * @return the registration to close after the connection, or {@code null} without a provider
+   */
+  static @Nullable CatalogHostRegistration load(
+      Connection connection, @Nullable NativeCatalogProvider catalogProvider) throws SQLException {
     Path temporaryDirectory = null;
     try (var extension = PackagedDuckDbExtension.class.getResourceAsStream(RESOURCE_PATH)) {
       if (extension == null) {
@@ -32,7 +39,12 @@ final class PackagedDuckDbExtension {
       try (var statement = connection.createStatement()) {
         statement.execute("LOAD '" + escapeSqlLiteral(extensionFile.toAbsolutePath()) + "'");
       }
-    } catch (IOException e) {
+      // The registration must resolve the library DuckDB just loaded, which is identified by its
+      // path, so it happens before the staged file is deleted.
+      return catalogProvider == null
+          ? null
+          : CatalogHostRegistration.register(extensionFile.toAbsolutePath(), catalogProvider);
+    } catch (IOException | IllegalStateException e) {
       throw new SQLException("Could not stage the packaged DuckDB extension.", e);
     } finally {
       deleteTemporaryExtension(temporaryDirectory);

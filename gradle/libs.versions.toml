@@ -13,6 +13,12 @@ nullaway = "0.14.2"
 picocli = "4.7.7"
 spotless = "8.10.4"
 google-java-format = "1.36.1"
+grpc = "1.83.1"
+mariadb = "3.5.10"
+postgresql = "42.7.13"
+proto-google-common-protos = "2.74.0"
+spring-boot = "4.1.0"
+testcontainers = "1.21.4"
 
 [libraries]
 assertj-core = { module = "org.assertj:assertj-core", version.ref = "assertj" }
@@ -28,6 +34,22 @@ junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "jun
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher", version.ref = "junit-platform" }
 nullaway = { module = "com.uber.nullaway:nullaway", version.ref = "nullaway" }
 picocli = { module = "info.picocli:picocli", version.ref = "picocli" }
+grpc-bom = { module = "io.grpc:grpc-bom", version.ref = "grpc" }
+grpc-api = { module = "io.grpc:grpc-api" }
+grpc-inprocess = { module = "io.grpc:grpc-inprocess" }
+grpc-protobuf = { module = "io.grpc:grpc-protobuf" }
+grpc-services = { module = "io.grpc:grpc-services" }
+grpc-stub = { module = "io.grpc:grpc-stub" }
+mariadb-java-client = { module = "org.mariadb.jdbc:mariadb-java-client", version.ref = "mariadb" }
+postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
+proto-google-common-protos = { module = "com.google.api.grpc:proto-google-common-protos", version.ref = "proto-google-common-protos" }
+slf4j-nop = { module = "org.slf4j:slf4j-nop" }
+spring-boot-dependencies = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "spring-boot" }
+spring-boot-autoconfigure = { module = "org.springframework.boot:spring-boot-autoconfigure" }
+spring-boot-jdbc = { module = "org.springframework.boot:spring-boot-jdbc" }
+testcontainers-junit-jupiter = { module = "org.testcontainers:junit-jupiter", version.ref = "testcontainers" }
+testcontainers-mysql = { module = "org.testcontainers:mysql", version.ref = "testcontainers" }
+testcontainers-postgresql = { module = "org.testcontainers:postgresql", version.ref = "testcontainers" }
 
 [plugins]
 error-prone = { id = "net.ltgt.errorprone", version.ref = "error-prone-plugin" }

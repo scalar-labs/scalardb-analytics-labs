@@ -13,7 +13,7 @@ model execution, planning, and SQL generation do not belong to this repository.
 | --- | --- |
 | Application | CLI contracts, use-case coordination, process lifecycle, composition, and distribution |
 | Semantic Catalog | Semantic state, evidence, decisions, and construction of query-facing catalog context |
-| Physical Catalog | Access to physical source metadata through the existing catalog implementation and its native boundary |
+| Physical Catalog | Physical source registration and metadata, through the embedded upstream catalog and its in-process boundary |
 | Query Engine | Embedded DuckDB lifecycle, product extensions, SQL execution, and Arrow result streaming |
 | Connectors | Source access and ADBC drivers, produced by the separate connector repository |
 
@@ -49,6 +49,16 @@ The non-interactive query path is designed as a stable machine-to-machine bounda
 This path keeps presentation and process concerns in `application` while keeping execution details
 inside the Query Engine. See [`query-engine.md`](query-engine.md) for that component's mental model.
 
+## Catalog access
+
+The Physical Catalog runs inside the application process and keeps its state in a ScalarDB store.
+The application calls it directly to register and resolve data sources. DuckDB reaches it only
+through a read-only provider that the application registers into the product extension, so catalog
+administration and source credentials stay out of SQL. `ApplicationRuntime` composes the two:
+it starts the catalog before the Query Engine and stops it after the engine. The `query` CLI command
+does not use that composition yet, because the CLI has no catalog store configuration. See
+[`physical-catalog.md`](physical-catalog.md) for the boundary and its credential handling.
+
 ## Build and runtime boundaries
 
 Root Gradle is the repository-wide entry point. It builds Java modules directly and delegates C++
@@ -65,3 +75,5 @@ The rationale for these boundaries is recorded in:
 
 - [`design/gradle-build-orchestration.md`](design/gradle-build-orchestration.md)
 - [`design/duckdb-distribution.md`](design/duckdb-distribution.md)
+- [`design/physical-catalog-hosting.md`](design/physical-catalog-hosting.md)
+- [`design/physical-catalog-source-boundary.md`](design/physical-catalog-source-boundary.md)
