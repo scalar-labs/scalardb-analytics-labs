@@ -19,7 +19,10 @@ import com.scalar.db.analytics.grpc.generated.datasource.v1.FindDataSourceReques
 import com.scalar.db.analytics.grpc.generated.datasource.v1.ListDataSourcesRequest;
 import com.scalar.db.analytics.grpc.generated.datasource.v1.RegisterRequest;
 import com.scalar.db.analytics.grpc.generated.error.v1.AnalyticsError;
+import com.scalar.db.analytics.grpc.generated.namespace.v1.ListNamespacesRequest;
 import com.scalar.db.analytics.grpc.generated.namespace.v1.NamespaceServiceGrpc;
+import com.scalar.db.analytics.grpc.generated.table.v1.DescribeTableRequest;
+import com.scalar.db.analytics.grpc.generated.table.v1.ListTablesRequest;
 import com.scalar.db.analytics.grpc.generated.table.v1.TableServiceGrpc;
 import com.scalar.db.analytics.server.grpc.CatalogServiceImpl;
 import com.scalar.db.analytics.server.grpc.DataSourceServiceImpl;
@@ -45,6 +48,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.Duration;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -109,6 +113,8 @@ public final class PhysicalCatalog implements AutoCloseable {
   private final Duration serializedCallTimeout;
   private final CatalogServiceGrpc.CatalogServiceBlockingStub catalogs;
   private final DataSourceServiceGrpc.DataSourceServiceBlockingStub dataSources;
+  private final NamespaceServiceGrpc.NamespaceServiceBlockingStub namespaces;
+  private final TableServiceGrpc.TableServiceBlockingStub tables;
   private final DataSourceUseCase dataSourceUseCase;
   private final Map<String, MethodDescriptor<byte[], byte[]>> serializedMethods =
       new ConcurrentHashMap<>();
@@ -127,6 +133,8 @@ public final class PhysicalCatalog implements AutoCloseable {
     this.serializedCallTimeout = serializedCallTimeout;
     catalogs = CatalogServiceGrpc.newBlockingStub(channel);
     dataSources = DataSourceServiceGrpc.newBlockingStub(channel);
+    namespaces = NamespaceServiceGrpc.newBlockingStub(channel);
+    tables = TableServiceGrpc.newBlockingStub(channel);
     dataSourceUseCase = context.getBean(DataSourceUseCase.class);
   }
 
@@ -241,6 +249,74 @@ public final class PhysicalCatalog implements AutoCloseable {
                     ListDataSourcesRequest.newBuilder().setCatalogName(catalogName).build()));
     return response.getDataSourcesList().stream()
         .map(dataSource -> toDescriptor(catalogName, dataSource))
+        .toList();
+  }
+
+  /** Lists the namespaces recorded for one logical data source. */
+  public List<PhysicalNamespace> listNamespaces(String catalogName, String dataSourceName) {
+    requireName(catalogName, "catalogName");
+    requireName(dataSourceName, "dataSourceName");
+    var response =
+        call(
+            () ->
+                namespaces.listNamespaces(
+                    ListNamespacesRequest.newBuilder().setCatalogName(catalogName).build()));
+    return response.getNamespacesList().stream()
+        .filter(namespace -> namespace.getDataSource().getName().equals(dataSourceName))
+        .map(
+            namespace ->
+                new PhysicalNamespace(dataSourceName, namespace.getNamespace().getNamesList()))
+        .sorted(Comparator.comparing(namespace -> String.join("\u0000", namespace.names())))
+        .toList();
+  }
+
+  /** Lists the tables and columns recorded for one logical data source. */
+  public List<PhysicalTable> listTables(String catalogName, String dataSourceName) {
+    requireName(catalogName, "catalogName");
+    requireName(dataSourceName, "dataSourceName");
+    var response =
+        call(
+            () ->
+                tables.listTables(
+                    ListTablesRequest.newBuilder().setCatalogName(catalogName).build()));
+    return response.getTablesList().stream()
+        .filter(table -> table.getDataSource().getName().equals(dataSourceName))
+        .map(
+            table -> {
+              var namespaceNames = table.getNamespace().getNamesList();
+              var tableName = table.getTable().getInfo().getName();
+              var detail =
+                  call(
+                      () ->
+                          tables.describeTable(
+                              DescribeTableRequest.newBuilder()
+                                  .setCatalogName(catalogName)
+                                  .setDataSourceName(dataSourceName)
+                                  .addAllNamespaceNames(namespaceNames)
+                                  .setTableName(tableName)
+                                  .build()));
+              if (!detail.hasTable()) {
+                throw new PhysicalCatalogException(
+                    new PhysicalCatalogError.OperationFailed(
+                        "A table was removed while its metadata was read."));
+              }
+              var columns =
+                  detail.getTable().getTableDetail().getColumnsList().stream()
+                      .map(
+                          column ->
+                              new PhysicalTable.Column(
+                                  column.getName(),
+                                  column.getType(),
+                                  column.getOrdinalPosition(),
+                                  column.getNullable()))
+                      .sorted(Comparator.comparingInt(PhysicalTable.Column::ordinalPosition))
+                      .toList();
+              return new PhysicalTable(dataSourceName, namespaceNames, tableName, columns);
+            })
+        .sorted(
+            Comparator.comparing(
+                    (PhysicalTable table) -> String.join("\u0000", table.namespaceNames()))
+                .thenComparing(PhysicalTable::name))
         .toList();
   }
 

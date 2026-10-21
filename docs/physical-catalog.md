@@ -34,8 +34,9 @@ DuckDB extension --host ABI--> NativeCatalogProvider --callSerialized--> (read-o
 ```
 
 - **Application code** uses the typed `PhysicalCatalog` operations: create a catalog, register a
-  PostgreSQL or MySQL data source, and resolve registered data sources. Registration connects to
-  the source to resolve its schema, so it fails when the source is unreachable.
+  PostgreSQL or MySQL data source, resolve registered data sources, and list their recorded
+  namespaces, tables, and columns. Registration connects to the source to resolve its schema, so it
+  fails when the source is unreachable.
 - **The DuckDB extension** reaches the catalog through the host ABI described in
   [`query-engine.md`](query-engine.md#catalog-host). The application registers the catalog's
   `callSerialized` entry point as the extension's catalog provider. That entry point accepts only
@@ -79,8 +80,9 @@ Catalog work runs on the catalog's own threads:
 
 `ApplicationRuntime` starts the catalog first. It starts at most one Query Engine, for one catalog
 and with the data sources registered in it at that moment, and closes the engine before the
-catalog, so the extension can never call a stopped catalog. The `query` CLI command does not compose the
-catalog yet. It will once the CLI has application configuration for the catalog store.
+catalog, so the extension can never call a stopped catalog. Every state-bearing CLI invocation
+loads one workspace configuration, starts this runtime against its catalog store, and exits after
+the requested operation.
 
 ## Source boundary
 

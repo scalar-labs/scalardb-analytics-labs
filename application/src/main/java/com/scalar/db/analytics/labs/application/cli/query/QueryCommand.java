@@ -2,10 +2,13 @@
  * Copyright Scalar, Inc.
  * SPDX-License-Identifier: Apache-2.0
  */
-package com.scalar.db.analytics.labs.application;
+package com.scalar.db.analytics.labs.application.cli.query;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.scalar.db.analytics.labs.application.ApplicationFailure;
+import com.scalar.db.analytics.labs.application.cli.CliOutput;
+import com.scalar.db.analytics.labs.application.workspace.Workspace;
 import com.scalar.db.analytics.labs.query.QueryEngineException;
 import com.scalar.db.analytics.labs.query.QueryError;
 import com.scalar.db.analytics.labs.query.QueryResult;
@@ -16,6 +19,7 @@ import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.temporal.TemporalAccessor;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -23,8 +27,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.util.Text;
 import org.jspecify.annotations.Nullable;
@@ -35,47 +42,118 @@ import picocli.CommandLine.Option;
 import picocli.CommandLine.Spec;
 
 @Command(name = "query", description = "Executes SQL and prints a machine-readable result.")
-final class QueryCommand implements Callable<Integer> {
+public final class QueryCommand implements Callable<Integer>, AutoCloseable {
   private static final int MAX_JSON_ROWS = 1_000;
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
-  private final QueryApplicationService queryService;
   private final InputStream standardInput;
+  private final Map<String, String> environment;
+  private final Function<Workspace, QueryApplicationService> queryServiceFactory;
+  private final AtomicBoolean active = new AtomicBoolean();
+  private final AtomicBoolean cancellationRequested = new AtomicBoolean();
+  private volatile @Nullable QueryApplicationService queryService;
+
+  @Option(names = "--workspace", required = true, paramLabel = "DIR")
+  private @Nullable Path workspaceDirectory;
+
+  @Option(names = "--time-limit-seconds", paramLabel = "SECONDS")
+  private @Nullable Long timeLimitSeconds;
 
   @ArgGroup(exclusive = true, multiplicity = "1")
   private @Nullable QueryInput queryInput;
 
   @Spec private @Nullable CommandSpec commandSpec;
 
-  QueryCommand(QueryApplicationService queryService, InputStream standardInput) {
-    this.queryService = queryService;
+  public QueryCommand(InputStream standardInput, Map<String, String> environment) {
+    this(standardInput, environment, QueryApplicationService::create);
+  }
+
+  QueryCommand(
+      InputStream standardInput,
+      Map<String, String> environment,
+      Function<Workspace, QueryApplicationService> queryServiceFactory) {
     this.standardInput = standardInput;
+    this.environment = environment;
+    this.queryServiceFactory = queryServiceFactory;
   }
 
   @Override
   public Integer call() throws JsonProcessingException {
-    try (var result = queryService.execute(readSql())) {
+    try {
+      var workspace =
+          Workspace.load(
+              Objects.requireNonNull(workspaceDirectory, "workspaceDirectory"), environment);
+      var sql = readSql();
+      var limit = timeLimit();
+      active.set(true);
+      var service = queryServiceFactory.apply(workspace);
+      queryService = service;
+      if (cancellationRequested.get()) {
+        service.cancel();
+      }
       QueryOutput output;
-      try {
-        output = toJsonOutput(result);
-      } catch (IOException e) {
-        throw new QueryEngineException(
-            result.executionId(),
-            new QueryError.ExecutionFailed("Could not read the query result."),
-            e);
+      try (service;
+          var result = service.execute(sql, limit)) {
+        try {
+          output = toJsonOutput(result);
+        } catch (IOException e) {
+          throw new QueryEngineException(
+              result.executionId(),
+              new QueryError.ExecutionFailed("Could not read the query result."),
+              e);
+        }
       }
       commandSpec().commandLine().getOut().println(OBJECT_MAPPER.writeValueAsString(output));
       return 0;
     } catch (QueryEngineException e) {
       writeError(e.executionId(), e.error());
       return 1;
+    } catch (com.scalar.db.analytics.labs.physical.PhysicalCatalogException e) {
+      return CliOutput.writeFailure(
+          commandSpec().commandLine().getOut(), ApplicationFailure.from(e));
+    } catch (ApplicationFailure e) {
+      return CliOutput.writeFailure(commandSpec().commandLine().getOut(), e);
     } catch (IllegalArgumentException | IOException e) {
       writeError(
           UUID.randomUUID().toString(),
           new QueryError.InvalidQuery(
               Objects.requireNonNullElse(e.getMessage(), "Invalid query.")));
       return 1;
+    } finally {
+      queryService = null;
+      cancellationRequested.set(false);
+      active.set(false);
     }
+  }
+
+  public boolean cancel() {
+    if (!active.get()) {
+      return false;
+    }
+    cancellationRequested.set(true);
+    var service = queryService;
+    if (service != null) {
+      service.cancel();
+    }
+    return true;
+  }
+
+  @Override
+  public void close() {
+    var service = queryService;
+    if (service != null) {
+      service.close();
+    }
+  }
+
+  private Optional<Duration> timeLimit() {
+    if (timeLimitSeconds == null) {
+      return Optional.empty();
+    }
+    if (timeLimitSeconds <= 0) {
+      throw new ApplicationFailure("INVALID_REQUEST", "The query time limit must be positive.");
+    }
+    return Optional.of(Duration.ofSeconds(timeLimitSeconds));
   }
 
   private QueryOutput toJsonOutput(QueryResult result) throws IOException {
@@ -165,14 +243,11 @@ final class QueryCommand implements Callable<Integer> {
 
   private void writeError(String executionId, QueryError queryError)
       throws JsonProcessingException {
-    var output =
-        new ErrorOutput(
-            "scalardb-analytics/error",
-            "3",
-            executionId,
-            errorCode(queryError),
-            queryError.message());
-    commandSpec().commandLine().getErr().println(OBJECT_MAPPER.writeValueAsString(output));
+    CliOutput.writeError(
+        commandSpec().commandLine().getOut(),
+        executionId,
+        errorCode(queryError),
+        queryError.message());
   }
 
   private CommandSpec commandSpec() {
@@ -200,9 +275,6 @@ final class QueryCommand implements Callable<Integer> {
 
   private record QueryFieldOutput(
       String name, String type, boolean nullable, List<QueryFieldOutput> children) {}
-
-  private record ErrorOutput(
-      String schema, String schemaVersion, String executionId, String code, String message) {}
 
   private static final class QueryInput {
     @Option(names = "--sql", description = "SQL to execute.")

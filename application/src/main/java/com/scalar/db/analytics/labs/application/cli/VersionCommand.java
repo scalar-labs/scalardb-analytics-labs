@@ -2,10 +2,11 @@
  * Copyright Scalar, Inc.
  * SPDX-License-Identifier: Apache-2.0
  */
-package com.scalar.db.analytics.labs.application;
+package com.scalar.db.analytics.labs.application.cli;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.scalar.db.analytics.labs.application.Main;
 import java.util.Objects;
 import java.util.concurrent.Callable;
 import org.jspecify.annotations.Nullable;

@@ -2,7 +2,7 @@
  * Copyright Scalar, Inc.
  * SPDX-License-Identifier: Apache-2.0
  */
-package com.scalar.db.analytics.labs.application;
+package com.scalar.db.analytics.labs.application.cli;
 
 import picocli.CommandLine.Command;
 

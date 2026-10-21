@@ -27,7 +27,7 @@ import org.jspecify.annotations.Nullable;
  * engine attaches the data sources registered in one catalog, with connection settings that the
  * application resolves from the catalog, so SQL addresses sources only by their registered names.
  */
-final class ApplicationRuntime implements AutoCloseable {
+public final class ApplicationRuntime implements AutoCloseable {
   private final PhysicalCatalog physicalCatalog;
   private @Nullable DuckDbQueryEngine queryEngine;
 
@@ -35,11 +35,11 @@ final class ApplicationRuntime implements AutoCloseable {
     this.physicalCatalog = physicalCatalog;
   }
 
-  static ApplicationRuntime start(PhysicalCatalogSettings catalogSettings) {
+  public static ApplicationRuntime start(PhysicalCatalogSettings catalogSettings) {
     return new ApplicationRuntime(PhysicalCatalog.start(catalogSettings));
   }
 
-  PhysicalCatalog physicalCatalog() {
+  public PhysicalCatalog physicalCatalog() {
     return physicalCatalog;
   }
 
@@ -55,7 +55,7 @@ final class ApplicationRuntime implements AutoCloseable {
    * @throws com.scalar.db.analytics.labs.query.QueryEngineException if the engine cannot start or
    *     cannot attach a data source
    */
-  synchronized DuckDbQueryEngine startQueryEngine(String catalogName) {
+  public synchronized DuckDbQueryEngine startQueryEngine(String catalogName) {
     if (queryEngine != null) {
       throw new IllegalStateException("A Query Engine is already running");
     }

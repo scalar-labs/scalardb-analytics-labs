@@ -24,6 +24,7 @@ import java.nio.charset.StandardCharsets;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
@@ -220,6 +221,33 @@ class PhysicalCatalogTest {
         .contains("orders", "customers");
     assertNoSecret(new String(dataSourcesBytes, StandardCharsets.ISO_8859_1));
     assertNoSecret(new String(tablesBytes, StandardCharsets.ISO_8859_1));
+  }
+
+  @Test
+  void exposesTypedNamespacesTablesAndColumnsWithoutCredentials() {
+    catalog.registerDataSource(catalogName, "warehouse", postgresConnection());
+    catalog.registerDataSource(catalogName, "crm", mysqlConnection());
+
+    assertThat(catalog.listNamespaces(catalogName, "warehouse"))
+        .extracting(PhysicalNamespace::names)
+        .contains(List.of("public"));
+    assertThat(catalog.listNamespaces(catalogName, "crm"))
+        .extracting(PhysicalNamespace::names)
+        .contains(List.of(MYSQL_DATABASE));
+    assertThat(catalog.listTables(catalogName, "warehouse"))
+        .anySatisfy(
+            table -> {
+              assertThat(table.name()).isEqualTo("orders");
+              assertThat(table.namespaceNames()).containsExactly("public");
+              assertThat(table.columns()).extracting(PhysicalTable.Column::name).contains("id");
+            });
+    assertThat(catalog.listTables(catalogName, "crm"))
+        .anySatisfy(
+            table -> {
+              assertThat(table.name()).isEqualTo("customers");
+              assertThat(table.namespaceNames()).containsExactly(MYSQL_DATABASE);
+              assertThat(table.columns()).extracting(PhysicalTable.Column::name).contains("id");
+            });
   }
 
   @Test

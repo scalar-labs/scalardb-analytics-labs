@@ -25,10 +25,25 @@ Build the CLI distribution:
 ./gradlew :application:installDist
 ```
 
-Run a query:
+Initialize a workspace. The named environment variable supplies the Physical Catalog store
+password; the password is not written to the workspace. The workspace is trusted,
+operator-managed configuration, and credentials must not be embedded in the JDBC URL:
 
 ```console
-application/build/install/scalardb-analytics/bin/scalardb-analytics query --sql "SELECT 1 AS answer"
+application/build/install/scalardb-analytics/bin/scalardb-analytics workspace init \
+  --workspace ./analytics-workspace \
+  --catalog analytics \
+  --store-jdbc-url jdbc:postgresql://localhost:5432/catalog \
+  --store-user catalog_user \
+  --store-password-env CATALOG_PASSWORD
+```
+
+Query through the workspace (registered sources are addressed as `source.namespace.table`):
+
+```console
+application/build/install/scalardb-analytics/bin/scalardb-analytics query \
+  --workspace ./analytics-workspace \
+  --sql "SELECT 1 AS answer"
 ```
 
 The command returns a versioned JSON envelope:
@@ -36,6 +51,9 @@ The command returns a versioned JSON envelope:
 ```json
 {"schema":"scalardb-analytics/query-result","schemaVersion":"3","executionId":"...","fields":[{"name":"answer","type":"Int(32, true)","nullable":true,"children":[]}],"rows":[[1]],"truncated":false}
 ```
+
+See [`application/README.md`](application/README.md) for workspace initialization, source
+registration, metadata discovery, SQL input modes, time limits, and the packaged Query Agent Skill.
 
 ## Repository scope
 
