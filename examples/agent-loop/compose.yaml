@@ -1,0 +1,51 @@
+# Local databases for the agent-loop runbook: the Physical Catalog store and two sample sources.
+# The passwords are example values for a local, disposable environment only.
+name: scalardb-analytics-agent-loop
+
+services:
+  # Physical Catalog store. The workspace binds to one catalog stored here.
+  catalog-store:
+    image: postgres:16.4
+    environment:
+      POSTGRES_DB: catalog
+      POSTGRES_USER: catalog
+      POSTGRES_PASSWORD: catalog-password
+    ports:
+      - "127.0.0.1:15433:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "catalog", "-d", "catalog"]
+      interval: 2s
+      retries: 30
+
+  # E-commerce source: customers and orders.
+  shop:
+    image: postgres:16.4
+    environment:
+      POSTGRES_DB: shop
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: shop-admin-password
+    volumes:
+      - ./data/shop.sql:/docker-entrypoint-initdb.d/shop.sql:ro
+    ports:
+      - "127.0.0.1:25433:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "shop"]
+      interval: 2s
+      retries: 30
+
+  # In-store point-of-sale source: members and store sales.
+  pos:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: pos-root-password
+      MYSQL_DATABASE: pos
+    volumes:
+      - ./data/pos.sql:/docker-entrypoint-initdb.d/pos.sql:ro
+    ports:
+      - "127.0.0.1:13307:3306"
+    healthcheck:
+      # The temporary server that runs the init scripts does not listen on TCP, so this succeeds
+      # only once the sample data is loaded and the final server is up.
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-ppos-root-password"]
+      interval: 2s
+      retries: 60

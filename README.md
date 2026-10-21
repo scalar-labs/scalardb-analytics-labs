@@ -88,7 +88,9 @@ The command returns a versioned JSON envelope:
 ```
 
 To try the whole flow against local sample databases, follow the
-[quickstart runbook](examples/quickstart/README.md).
+[quickstart runbook](examples/quickstart/README.md). To have an AI agent build the Semantic
+Catalog, review its knowledge with you, and answer a business question with cited SQL, follow the
+[agent-loop runbook](examples/agent-loop/README.md) (a prototype on provisional design decisions).
 
 See [`application/README.md`](application/README.md) for workspace initialization, source
 registration, metadata discovery, SQL input modes, time limits, and the packaged Query Agent Skill.
@@ -101,7 +103,7 @@ registration, metadata discovery, SQL input modes, time limits, and the packaged
 | `duckdb/` | Embedded Query Engine boundary and DuckDB integration | Java and C++ product extension |
 | `physical-catalog/` | Boundary to the embedded upstream Physical Catalog | Java and Gradle |
 | `upstream/scalardb-analytics/` | Pinned upstream Physical Catalog source (submodule) | Java; included Gradle build |
-| Semantic Catalog modules | Semantic catalog behavior | Java |
+| `semantic-catalog/` | Semantic Catalog log, storage DuckDB, Generators, and public API | Java and Gradle |
 | Connector artifacts | Source access and ADBC drivers | Rust and Cargo in `scalardb-analytics-connectors` |
 
 Root Gradle orchestrates these build units while their native build systems remain authoritative.
