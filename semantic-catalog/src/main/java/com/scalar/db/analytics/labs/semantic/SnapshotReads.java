@@ -417,6 +417,7 @@ public final class SnapshotReads {
         fact.element,
         element.kind(),
         element.label(),
+        name(element),
         fact.predicate,
         fact.value,
         revision.state(),
@@ -433,6 +434,15 @@ public final class SnapshotReads {
         false,
         newCandidates,
         newerObservations);
+  }
+
+  /** A readable name that places an element: a Field under its Dataset, an edge by its ends. */
+  private String name(com.scalar.db.analytics.labs.semantic.model.ElementDescriptor element) {
+    var parent = element.parent() == null ? null : state.elementRecords().get(element.parent());
+    if (parent != null) {
+      return parent.descriptor.label() + "." + element.label();
+    }
+    return element.kind().wireName() + " " + element.label();
   }
 
   // 4.4 The list awaiting review

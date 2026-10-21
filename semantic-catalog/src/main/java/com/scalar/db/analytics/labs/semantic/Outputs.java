@@ -64,7 +64,12 @@ public final class Outputs {
       @Nullable String failureReason,
       Effects effects) {}
 
-  /** Fact Revision content (section 2.6). */
+  /**
+   * Fact Revision content (section 2.6).
+   *
+   * @param elementName a readable name that places the element, such as {@code
+   *     source.namespace.table.column} for a Field; a prototype addition for presentation
+   */
   public record FactRevisionContent(
       String factRevision,
       String fact,
@@ -72,6 +77,7 @@ public final class Outputs {
       String element,
       ElementKind elementKind,
       String elementLabel,
+      String elementName,
       String predicate,
       JsonNode value,
       FactState state,

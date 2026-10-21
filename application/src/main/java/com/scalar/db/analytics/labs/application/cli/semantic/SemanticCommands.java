@@ -656,6 +656,7 @@ final class OverviewCommand extends SemanticCommand.Base {
       @Nullable String parent,
       @Nullable String from,
       @Nullable String to,
+      @Nullable JsonNode identifying,
       Map<String, List<Knowledge>> knowledge) {}
 
   record Output(String snapshot, List<Entry> elements) {}
@@ -717,6 +718,7 @@ final class OverviewCommand extends SemanticCommand.Base {
                     element.parent(),
                     element.from(),
                     element.to(),
+                    element.identifying(),
                     knowledge));
           }
           return new Output(found.snapshot(), entries);
