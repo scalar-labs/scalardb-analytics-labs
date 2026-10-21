@@ -435,6 +435,11 @@ final class CatalogState implements CatalogView {
     return list == null || list.isEmpty() ? Optional.empty() : Optional.of(list.getLast());
   }
 
+  @Override
+  public List<ObservationView> observations(String inputResource) {
+    return List.copyOf(observationsByResource.getOrDefault(inputResource, List.of()));
+  }
+
   /** The latest observation of an Input Resource as of a commit. */
   Optional<ObservationView> latestObservation(String inputResource, long c) {
     var list = observationsByResource.getOrDefault(inputResource, List.of());

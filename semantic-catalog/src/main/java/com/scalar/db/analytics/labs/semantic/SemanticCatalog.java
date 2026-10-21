@@ -550,6 +550,7 @@ public final class SemanticCatalog implements AutoCloseable {
     }
     var input = Json.object().put("authorityCheck", authorityCheck);
     input.set("answers", Json.tree(answers));
+    var ordered = dependencyOrder(answers);
     return operation(
         "submit-answers",
         principal,
@@ -559,7 +560,7 @@ public final class SemanticCatalog implements AutoCloseable {
           var judge = new Judge(state, commit);
           var results = new ArrayList<AnswerResult>();
           var answered = new HashSet<String>();
-          for (var answer : answers) {
+          for (var answer : ordered) {
             var outcome =
                 judge.answer(
                     state.requireFact(answer.fact()),
@@ -587,6 +588,34 @@ public final class SemanticCatalog implements AutoCloseable {
           var cascaded = cascadedTransitions(commit, answered);
           return effects -> new AnswersSubmitted(results, cascaded, effects);
         });
+  }
+
+  /**
+   * Orders the answers of one submission so that an answer to a Fact comes after the answers to the
+   * Facts it depends on. Answers are written in one commit either way, but a consent processed
+   * before the consent to its dependency would only be recorded, without confirming.
+   */
+  private List<AnswerInput> dependencyOrder(List<AnswerInput> answers) {
+    var remaining = new ArrayList<>(answers);
+    var ordered = new ArrayList<AnswerInput>();
+    while (!remaining.isEmpty()) {
+      var pending = new HashSet<String>();
+      remaining.forEach(answer -> pending.add(answer.fact()));
+      var ready =
+          remaining.stream()
+              .filter(
+                  answer ->
+                      state.requireFact(answer.fact()).factDependencies().stream()
+                          .noneMatch(
+                              dependency ->
+                                  !dependency.equals(answer.fact())
+                                      && pending.contains(dependency)))
+              .toList();
+      var next = ready.isEmpty() ? List.of(remaining.getFirst()) : ready;
+      ordered.addAll(next);
+      remaining.removeAll(next);
+    }
+    return ordered;
   }
 
   private List<CascadedTransition> cascadedTransitions(Commit commit, Set<String> direct) {

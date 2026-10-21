@@ -41,6 +41,9 @@ public interface CatalogView {
 
   Optional<ObservationView> latestObservation(String inputResource);
 
+  /** Every observation of an Input Resource, oldest first. */
+  List<ObservationView> observations(String inputResource);
+
   List<ObservationView> latestObservations(ObservationKind kind);
 
   /** An answer Fact Event by its log record identifier. */
