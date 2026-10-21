@@ -55,8 +55,12 @@ The Physical Catalog runs inside the application process and keeps its state in 
 The application calls it directly to register and resolve data sources. DuckDB reaches it only
 through a read-only provider that the application registers into the product extension, so catalog
 administration and source credentials stay out of SQL. `ApplicationRuntime` composes the two:
-it starts the catalog before the Query Engine and stops it after the engine. The `query` CLI command
-does not use that composition yet, because the CLI has no catalog store configuration. See
+it starts the catalog before the Query Engine and stops it after the engine. It resolves the
+registered data sources of one catalog, chooses a read path for each, and hands them to the engine,
+so SQL addresses sources only by their registered names. Until connectors are available, every
+source uses the interim scanner path; see
+[`query-engine.md`](query-engine.md#source-attachment-and-read-paths). The `query` CLI command does
+not use that composition yet, because the CLI has no catalog store configuration. See
 [`physical-catalog.md`](physical-catalog.md) for the boundary and its credential handling.
 
 ## Build and runtime boundaries

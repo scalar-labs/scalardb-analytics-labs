@@ -108,6 +108,9 @@ sourceSets {
 
 dependencies {
     api(project(":query-engine"))
+    // The interim scanner read path takes data source connections as the Physical Catalog
+    // resolves them.
+    api(project(":physical-catalog"))
     implementation(libs.arrow.c.data)
     implementation(libs.arrow.memory.unsafe)
     implementation(libs.duckdb.jdbc) {
@@ -119,7 +122,12 @@ dependencies {
 
     testImplementation(libs.assertj.core)
     testImplementation(libs.junit.jupiter)
+    testImplementation(libs.testcontainers.junit.jupiter)
+    testImplementation(libs.testcontainers.postgresql)
     testRuntimeOnly(libs.junit.platform.launcher)
+    // The scanner tests prepare and inspect the source databases directly.
+    testRuntimeOnly(libs.mariadb.java.client)
+    testRuntimeOnly(libs.postgresql)
 }
 
 spotless {

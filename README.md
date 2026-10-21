@@ -59,8 +59,8 @@ Run all currently implemented checks:
 ./gradlew check
 ```
 
-The Physical Catalog and application tests start PostgreSQL and MySQL with Testcontainers, so a
-running Docker-compatible daemon is required.
+The Physical Catalog, DuckDB, and application tests start PostgreSQL and MySQL with Testcontainers,
+so a running Docker-compatible daemon is required.
 
 All Java packages are `@NullMarked` with JSpecify. NullAway checks both production and test source
 sets as compilation errors. New Java packages must declare `@NullMarked` or `@NullUnmarked`

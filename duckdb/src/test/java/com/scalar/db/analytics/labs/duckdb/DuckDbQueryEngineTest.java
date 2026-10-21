@@ -16,13 +16,17 @@ import java.lang.reflect.Proxy;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.Set;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -147,6 +151,59 @@ class DuckDbQueryEngineTest {
       assertThat(result.reader().loadNextBatch()).isTrue();
       assertThat(result.reader().getVectorSchemaRoot().getVector("version").getObject(0).toString())
           .isEqualTo("1");
+    }
+  }
+
+  @Test
+  void rejectsEveryPackagedExtensionFunctionThatCouldBypassAttachedSources() throws Exception {
+    // Functions reviewed as unable to reach a source or run SQL supplied as a value. A scanner
+    // upgrade that adds any other function fails here until it is reviewed.
+    var reviewed =
+        Set.of(
+            "scalardb_analytics_version",
+            "scalardb_analytics_is_read_only_query",
+            "scalardb_analytics_catalog_status",
+            // Reads a file, which disabled external access refuses.
+            "read_postgres_binary");
+    var coreFunctions = new HashSet<String>();
+    try (var connection = DriverManager.getConnection("jdbc:duckdb:");
+        var statement = connection.createStatement();
+        var resultSet =
+            statement.executeQuery("SELECT DISTINCT function_name FROM duckdb_functions()")) {
+      while (resultSet.next()) {
+        coreFunctions.add(resultSet.getString(1));
+      }
+    }
+
+    try (var queryEngine = new DuckDbQueryEngine()) {
+      var extensionFunctions = new ArrayList<String>();
+      try (var result =
+          queryEngine.execute("SELECT DISTINCT function_name FROM duckdb_functions()")) {
+        while (result.reader().loadNextBatch()) {
+          var names = result.reader().getVectorSchemaRoot().getVector(0);
+          for (int row = 0; row < names.getValueCount(); row++) {
+            var name = names.getObject(row).toString();
+            if (!coreFunctions.contains(name)) {
+              extensionFunctions.add(name);
+            }
+          }
+        }
+      }
+
+      assertThat(extensionFunctions).contains("postgres_scan", "mysql_query");
+      for (var name : extensionFunctions) {
+        if (reviewed.contains(name)) {
+          continue;
+        }
+        assertThatThrownBy(() -> queryEngine.execute("SELECT \"" + name + "\"()"))
+            .as(name)
+            .hasMessage("Sources must be queried through their attached databases.");
+      }
+      for (var name : List.of("query", "query_table", "json_execute_serialized_sql")) {
+        assertThatThrownBy(() -> queryEngine.execute("SELECT * FROM " + name + "('SELECT 1')"))
+            .as(name)
+            .hasMessage("Sources must be queried through their attached databases.");
+      }
     }
   }
 

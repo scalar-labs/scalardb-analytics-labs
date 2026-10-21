@@ -35,7 +35,12 @@ diagnostic that names the mismatch.
 
 At runtime the Query Engine opens DuckDB with automatic installation and loading and community
 extensions disabled, and with an application-owned `extension_directory` instead of the per-user
-default. It loads each packaged extension by absolute path.
+default. It loads each packaged extension by absolute path, attaches the given `SourceAttachment`s,
+and then disables external access. The interim scanner read path for PostgreSQL and MySQL lives in
+the `scanner` package.
+
+The scanner tests start PostgreSQL and MySQL with Testcontainers, so `:duckdb:test` requires a
+Docker-compatible daemon.
 
 The extension's host ABI is declared in `src/main/cpp/include/scalardb_analytics_host.h`. Each
 packaged extension's provenance (source, checksums, platform, DuckDB release, licenses, and, for

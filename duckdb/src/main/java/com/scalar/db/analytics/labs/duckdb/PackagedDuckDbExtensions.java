@@ -29,6 +29,29 @@ final class PackagedDuckDbExtensions {
   static final List<String> SUPPORTED_PLATFORMS =
       List.of("osx_arm64", "linux_amd64", "linux_arm64");
 
+  /**
+   * The functions of each packaged extension that query validation rejects. The scanners provide
+   * functions that connect to any connection string, pass SQL through to a source, or change
+   * scanner state, and some of them keep working after external access is disabled. Sources are
+   * therefore queryable only through their attached databases.
+   */
+  static final List<FunctionPolicy> FUNCTION_POLICIES =
+      List.of(
+          new FunctionPolicy("postgres_scanner", List.of("postgres_"), List.of("pg_clear_cache")),
+          new FunctionPolicy("mysql_scanner", List.of("mysql_"), List.of()),
+          new FunctionPolicy(PRODUCT_EXTENSION, List.of(), List.of()));
+
+  /** The functions of one packaged extension that SQL must not call. */
+  record FunctionPolicy(
+      String extension, List<String> deniedFunctionPrefixes, List<String> deniedFunctions) {}
+
+  static {
+    // An extension added to the packaged set must declare which of its functions are denied.
+    if (!FUNCTION_POLICIES.stream().map(FunctionPolicy::extension).toList().equals(EXTENSIONS)) {
+      throw new IllegalStateException("Every packaged extension needs a function policy");
+    }
+  }
+
   private static final String EXTENSION_RESOURCE_DIRECTORY = "/native/";
   private static final String PROVENANCE_RESOURCE_DIRECTORY =
       "/META-INF/scalardb-analytics-labs/duckdb-extensions/";

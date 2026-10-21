@@ -5,6 +5,7 @@
 package com.scalar.db.analytics.labs.duckdb;
 
 import com.scalar.db.analytics.labs.duckdb.PackagedDuckDbExtensions.IncompatibleExtensionsException;
+import com.scalar.db.analytics.labs.duckdb.SourceAttachments.AttachFailedException;
 import com.scalar.db.analytics.labs.query.QueryEngine;
 import com.scalar.db.analytics.labs.query.QueryEngineException;
 import com.scalar.db.analytics.labs.query.QueryError;
@@ -18,6 +19,8 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
@@ -35,6 +38,32 @@ import org.jspecify.annotations.Nullable;
 /** Owns one embedded DuckDB connection and exports query results as Arrow streams. */
 public final class DuckDbQueryEngine implements QueryEngine {
   static final int DEFAULT_ARROW_BATCH_SIZE = 1_024;
+
+  /** Core functions that run SQL supplied as a value, which validation could not inspect. */
+  private static final List<String> DYNAMIC_SQL_FUNCTIONS =
+      List.of("query", "query_table", "json_execute_serialized_sql");
+
+  /**
+   * Requires exactly one SELECT statement that calls no function able to bypass the attached
+   * sources: neither a dynamic-SQL core function nor a function a packaged extension denies.
+   * Function names are read from DuckDB's serialized parse tree, so the check sees every subquery
+   * and table function, and the query is never bound or run.
+   */
+  private static final String VALIDATION_QUERY =
+      """
+      SELECT
+        scalardb_analytics_is_read_only_query(?) AS read_only,
+        EXISTS (
+          SELECT 1
+          FROM (
+            SELECT json_extract_string(node.value, '$') AS name
+            FROM json_tree(json_serialize_sql(CAST(? AS VARCHAR))) AS node
+            WHERE node.key = 'function_name'
+          ) AS called
+          WHERE %s
+        ) AS bypasses_sources
+      """
+          .formatted(deniedFunctionPredicate());
 
   private final RootAllocator allocator;
   private final Connection connection;
@@ -56,9 +85,25 @@ public final class DuckDbQueryEngine implements QueryEngine {
    * connection is closed, so no DuckDB thread can call it outside the engine's lifetime.
    */
   public DuckDbQueryEngine(@Nullable NativeCatalogProvider catalogProvider) {
+    this(catalogProvider, List.of());
+  }
+
+  /**
+   * Creates an engine that also attaches the given data sources.
+   *
+   * <p>Each source is attached through its own read path while the engine starts, and is queryable
+   * as {@code name.schema.table}. External access is disabled afterwards, so SQL can reach no other
+   * source, file, or network location, and sources cannot be added to a running engine.
+   * Initialization fails with a typed error that names only the source if any source cannot be
+   * attached, including when two source names differ only in letter case or a name is reserved by
+   * the engine.
+   */
+  public DuckDbQueryEngine(
+      @Nullable NativeCatalogProvider catalogProvider, List<SourceAttachment> sources) {
+    var attachedSources = List.copyOf(sources);
     allocator = new RootAllocator();
     try {
-      var opened = openConnection(catalogProvider);
+      var opened = openConnection(catalogProvider, attachedSources);
       connection = opened.connection();
       catalogHost = opened.catalogHost();
     } catch (RuntimeException e) {
@@ -79,11 +124,13 @@ public final class DuckDbQueryEngine implements QueryEngine {
   private record OpenedConnection(
       Connection connection, @Nullable CatalogHostRegistration catalogHost) {}
 
-  private static OpenedConnection openConnection(@Nullable NativeCatalogProvider catalogProvider) {
+  private static OpenedConnection openConnection(
+      @Nullable NativeCatalogProvider catalogProvider, List<SourceAttachment> sources) {
     Connection openedConnection = null;
     CatalogHostRegistration registration = null;
     Path extensionDirectory = null;
     try {
+      SourceAttachments.validate(sources);
       // DuckDB reads extensions only from this application-owned directory, never from the
       // per-user default. The packaged extensions are staged there just for loading.
       extensionDirectory = Files.createTempDirectory("scalardb-analytics-duckdb-");
@@ -92,10 +139,12 @@ public final class DuckDbQueryEngine implements QueryEngine {
       openedConnection = DriverManager.getConnection("jdbc:duckdb:", properties);
       registration =
           PackagedDuckDbExtensions.load(openedConnection, extensionDirectory, catalogProvider);
+      SourceAttachments.attach(openedConnection, sources);
       configureConnection(openedConnection);
       return new OpenedConnection(openedConnection, registration);
-    } catch (IncompatibleExtensionsException e) {
+    } catch (IncompatibleExtensionsException | AttachFailedException e) {
       closeAfterFailedInitialization(openedConnection, e);
+      closeCatalogHost(registration, e);
       throw new QueryEngineException(
           UUID.randomUUID().toString(),
           new QueryError.InitializationFailed(Objects.requireNonNull(e.getMessage())));
@@ -233,13 +282,19 @@ public final class DuckDbQueryEngine implements QueryEngine {
   }
 
   private void validateReadOnlyQuery(String sql, DuckDbQueryExecution execution) {
-    try (PreparedStatement statement =
-        connection.prepareStatement("SELECT scalardb_analytics_is_read_only_query(?) AS allowed")) {
+    try (PreparedStatement statement = connection.prepareStatement(VALIDATION_QUERY)) {
       execution.track(statement);
       statement.setString(1, sql);
+      statement.setString(2, sql);
       try (var resultSet = statement.executeQuery()) {
-        if (!resultSet.next() || !resultSet.getBoolean("allowed")) {
+        if (!resultSet.next() || !resultSet.getBoolean("read_only")) {
           throw invalidQuery(execution.executionId());
+        }
+        if (resultSet.getBoolean("bypasses_sources")) {
+          throw new QueryEngineException(
+              execution.executionId(),
+              new QueryError.InvalidQuery(
+                  "Sources must be queried through their attached databases."));
         }
       } finally {
         execution.untrack(statement);
@@ -248,6 +303,26 @@ public final class DuckDbQueryEngine implements QueryEngine {
       execution.throwIfTerminated();
       throw invalidQuery(execution.executionId());
     }
+  }
+
+  private static String deniedFunctionPredicate() {
+    var conditions = new ArrayList<String>();
+    var names = new ArrayList<>(DYNAMIC_SQL_FUNCTIONS);
+    for (var extension : PackagedDuckDbExtensions.FUNCTION_POLICIES) {
+      for (var prefix : extension.deniedFunctionPrefixes()) {
+        conditions.add("starts_with(called.name, " + sqlLiteral(prefix) + ")");
+      }
+      names.addAll(extension.deniedFunctions());
+    }
+    conditions.add(
+        "called.name IN ("
+            + String.join(", ", names.stream().map(DuckDbQueryEngine::sqlLiteral).toList())
+            + ")");
+    return String.join(" OR ", conditions);
+  }
+
+  private static String sqlLiteral(String value) {
+    return "'" + value.replace("'", "''") + "'";
   }
 
   private static QueryEngineException invalidQuery(String executionId) {
@@ -365,6 +440,8 @@ public final class DuckDbQueryEngine implements QueryEngine {
   }
 
   private static void configureConnection(Connection connection) throws SQLException {
+    // Sources must be attached before this point: DuckDB refuses scanner attachments without
+    // external access, while sources attached earlier stay queryable.
     try (Statement statement = connection.createStatement()) {
       statement.execute("SET enable_external_access = false");
     }

@@ -52,6 +52,67 @@ Scanner connections are both query paths and metadata boundaries. Source schema 
 the same scanner connection used for reads, but scanner-normalized types must not be represented as
 source-native metadata without an explicit mapping owned by the relevant catalog integration.
 
+## Source attachment and read paths
+
+`DuckDbQueryEngine` takes the data sources to make queryable as `SourceAttachment` values when it
+starts. An attachment has a name and attaches its source through one read path; the engine knows
+nothing else about the source, so its API does not depend on source types. Each source becomes a
+DuckDB database named after the data source, and SQL addresses its tables as
+`source.schema.table` whichever read path serves it. The application resolves the data sources of
+one Physical Catalog catalog and chooses the read path for each of them.
+
+```text
+application --resolveConnection--> Physical Catalog
+     |
+     +-- read path per data source --> SourceAttachment --> DuckDbQueryEngine
+                                           |
+                                           +-- interim scanner path --ATTACH (READ_ONLY)--> PostgreSQL / MySQL
+```
+
+Attachment happens once, before external access is disabled. DuckDB refuses source attachments
+afterwards but keeps attached sources queryable, so a running engine sees exactly the sources it
+started with. Moving a data source to another read path therefore takes a new engine.
+Initialization fails with a typed error that names only the data source if any source cannot be
+attached, including when its name would collide with another source or a DuckDB built-in database
+or schema. An attachment reaches the connection only through `AttachSession`, which binds values
+such as credentials as statement parameters and reports failures without DuckDB diagnostics.
+
+Query validation rejects any query that calls a core function that runs SQL supplied as a value
+(`query`, `query_table`, `json_execute_serialized_sql`) or a function that a packaged extension
+declares as denied in its function policy. The check reads function names from DuckDB's serialized
+parse tree, so the query is never bound and no connection is opened.
+
+SQL can read anything the source account can read through the attached database, including the
+source's own system catalogs. Source accounts should therefore be read-only and limited to the data
+meant for analysis.
+
+### Interim scanner path
+
+Until a connector serves a source type, PostgreSQL and MySQL sources are read through DuckDB's
+packaged scanners. Every source-type-specific decision of this path lives in the
+`com.scalar.db.analytics.labs.duckdb.scanner` package, which is removed once connectors replace it:
+
+- `ScannerPath` turns a Physical Catalog `DataSourceConnection` into a read-only scanner
+  attachment. Connection settings reach DuckDB as bound session variables; a temporary DuckDB
+  secret is created from them and the variables are reset, so no connection value appears in SQL
+  text. `duckdb_secrets()` shows the password as redacted.
+- The scanners also provide functions that connect to arbitrary connection strings, pass SQL
+  through to a source, or reset scanner state, and some of them work even with external access
+  disabled. Their function policies deny every `postgres_*` and `mysql_*` function and
+  `pg_clear_cache`.
+- The scanners cache source schemas, and resetting that cache is not allowed from SQL, so schema
+  changes need a new engine. Schema and table listings through `information_schema` or
+  `duckdb_tables()` come from the scanner connections and show scanner-normalized types. A MySQL
+  source registered without a database exposes every database on the server.
+- The scanners push projections, filters, and limits into the SQL that each source receives, which
+  the scanner tests assert from the source servers' statement logs. Row, byte, time, and memory
+  limits and cancellation apply as to any other query, but DuckDB cannot interrupt a scanner while
+  it waits for the source, so a time limit or cancellation takes effect once the source returns
+  data.
+
+The scanner path does not yet derive table metadata from its own connections, and the Physical
+Catalog still resolves source schemas when a data source is registered.
+
 ## Extension model
 
 Product query behavior integrates with DuckDB through loadable extensions. The `duckdb` build

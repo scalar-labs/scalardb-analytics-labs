@@ -58,9 +58,10 @@ also quote it. The boundary handles this in one place, at the edge of the in-pro
 
 Only `PhysicalCatalog.resolveConnection` returns a registered data source's credentials. It reads
 the catalog through the upstream use case rather than the in-process gRPC server, so no serialized
-call can reach it. Application code that connects to a source, such as the scanner query path,
-resolves its connection there. That code hands the secret to the connection mechanism and never
-writes it into SQL text.
+call can reach it. `ApplicationRuntime` resolves every data source of a catalog there when it starts
+the Query Engine, and hands each connection to the read path it chooses for that data source. The
+read path passes the secret to DuckDB as a bound parameter and never writes it into SQL text; see
+[`query-engine.md`](query-engine.md#source-attachment-and-read-paths).
 
 ## Failure and lifecycle
 
@@ -76,8 +77,9 @@ Catalog work runs on the catalog's own threads:
 - Typed operations wait for the store without a labs deadline.
 - Closing the catalog fails later calls as unavailable.
 
-`ApplicationRuntime` starts the catalog before the Query Engine and closes it after the engine, so
-the extension can never call a stopped catalog. The `query` CLI command does not compose the
+`ApplicationRuntime` starts the catalog first. It starts at most one Query Engine, for one catalog
+and with the data sources registered in it at that moment, and closes the engine before the
+catalog, so the extension can never call a stopped catalog. The `query` CLI command does not compose the
 catalog yet. It will once the CLI has application configuration for the catalog store.
 
 ## Source boundary
