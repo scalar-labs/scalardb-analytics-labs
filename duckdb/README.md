@@ -10,12 +10,36 @@ root Gradle build will delegate their compilation to the DuckDB extension toolch
 them with the application. Runtime extension downloads remain disabled; required extensions must
 come from the verified product distribution.
 
-`buildNativeExtension` is the Gradle entry point for the native build. The delegated build downloads
-the official DuckDB source amalgamation and platform static library, verifies their SHA-256 digests,
-and produces `scalardb_analytics.duckdb_extension`.
+The packaged extension set is the product extension plus DuckDB's official PostgreSQL and MySQL
+scanner extensions, all bound to one DuckDB release:
 
-The extension's host ABI is declared in `src/main/cpp/include/scalardb_analytics_host.h`. The build
-also records the extension's DuckDB source, checksums, and platform in
-`META-INF/scalardb-analytics-labs/duckdb-extension.properties`.
+- `gradle/libs.versions.toml` owns the version set: the DuckDB release (`duckdb`), the JDBC
+  binding (`duckdb-jdbc`), and the upstream commits of the scanners. `verifyDuckDbVersionSet` fails
+  the build when the JDBC binding does not embed that release, and the dependency is pinned
+  strictly.
+- `buildNativeExtension` downloads the official DuckDB source amalgamation and platform static
+  library, verifies their SHA-256 digests, and produces `scalardb_analytics.duckdb_extension`.
+- `acquireScannerExtensions` downloads the signed scanner binaries, verifies their pinned SHA-256
+  digests, and checks each footer for the CPP ABI, the DuckDB release, the platform, the scanner
+  commit, and a signature.
+- The native scripts pin checksums per DuckDB release and fail for a release they have not pinned.
+
+Verified downloads are cached under `<gradle-user-home>/caches/scalardb-analytics-labs/duckdb`,
+keyed by checksum, so a clean build needs no network once the cache is populated. With
+`--offline`, a missing cache entry fails instead of being downloaded.
+
+Supported platforms are `osx_arm64`, `linux_amd64`, and `linux_arm64`. Extensions are built for the
+build host only; other hosts fail the build with a diagnostic. At startup the Query Engine compares
+the packaged platform and DuckDB release with the embedded DuckDB and fails initialization with a
+diagnostic that names the mismatch.
+
+At runtime the Query Engine opens DuckDB with automatic installation and loading and community
+extensions disabled, and with an application-owned `extension_directory` instead of the per-user
+default. It loads each packaged extension by absolute path.
+
+The extension's host ABI is declared in `src/main/cpp/include/scalardb_analytics_host.h`. Each
+packaged extension's provenance (source, checksums, platform, DuckDB release, licenses, and, for
+the scanners, upstream commit and statically linked components) is recorded in
+`META-INF/scalardb-analytics-labs/duckdb-extensions/<extension>.properties`.
 
 See [`../docs/query-engine.md`](../docs/query-engine.md) for the Query Engine mental model.

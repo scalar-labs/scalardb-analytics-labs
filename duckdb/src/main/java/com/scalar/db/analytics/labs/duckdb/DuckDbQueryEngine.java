@@ -4,17 +4,21 @@
  */
 package com.scalar.db.analytics.labs.duckdb;
 
+import com.scalar.db.analytics.labs.duckdb.PackagedDuckDbExtensions.IncompatibleExtensionsException;
 import com.scalar.db.analytics.labs.query.QueryEngine;
 import com.scalar.db.analytics.labs.query.QueryEngineException;
 import com.scalar.db.analytics.labs.query.QueryError;
 import com.scalar.db.analytics.labs.query.QueryResult;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.Properties;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -78,20 +82,45 @@ public final class DuckDbQueryEngine implements QueryEngine {
   private static OpenedConnection openConnection(@Nullable NativeCatalogProvider catalogProvider) {
     Connection openedConnection = null;
     CatalogHostRegistration registration = null;
+    Path extensionDirectory = null;
     try {
-      var properties = new Properties();
-      properties.setProperty("allow_unsigned_extensions", "true");
+      // DuckDB reads extensions only from this application-owned directory, never from the
+      // per-user default. The packaged extensions are staged there just for loading.
+      extensionDirectory = Files.createTempDirectory("scalardb-analytics-duckdb-");
+      var properties = PackagedDuckDbExtensions.connectionProperties(extensionDirectory);
       properties.setProperty("jdbc_stream_results", "true");
       openedConnection = DriverManager.getConnection("jdbc:duckdb:", properties);
-      registration = PackagedDuckDbExtension.load(openedConnection, catalogProvider);
+      registration =
+          PackagedDuckDbExtensions.load(openedConnection, extensionDirectory, catalogProvider);
       configureConnection(openedConnection);
       return new OpenedConnection(openedConnection, registration);
-    } catch (SQLException e) {
+    } catch (IncompatibleExtensionsException e) {
+      closeAfterFailedInitialization(openedConnection, e);
+      throw new QueryEngineException(
+          UUID.randomUUID().toString(),
+          new QueryError.InitializationFailed(Objects.requireNonNull(e.getMessage())));
+    } catch (IOException | SQLException e) {
       closeAfterFailedInitialization(openedConnection, e);
       closeCatalogHost(registration, e);
       throw new QueryEngineException(
           UUID.randomUUID().toString(),
           new QueryError.InitializationFailed("Could not initialize the Query Engine."));
+    } finally {
+      deleteStagedExtensions(extensionDirectory);
+    }
+  }
+
+  private static void deleteStagedExtensions(@Nullable Path extensionDirectory) {
+    if (extensionDirectory == null) {
+      return;
+    }
+    try {
+      for (var extension : PackagedDuckDbExtensions.EXTENSIONS) {
+        Files.deleteIfExists(extensionDirectory.resolve(extension + ".duckdb_extension"));
+      }
+      Files.deleteIfExists(extensionDirectory);
+    } catch (IOException ignored) {
+      // The operating system can retain the loaded libraries until process exit.
     }
   }
 
@@ -108,7 +137,7 @@ public final class DuckDbQueryEngine implements QueryEngine {
   }
 
   private static void closeAfterFailedInitialization(
-      @Nullable Connection connection, SQLException failure) {
+      @Nullable Connection connection, Exception failure) {
     if (connection == null) {
       return;
     }
@@ -338,8 +367,6 @@ public final class DuckDbQueryEngine implements QueryEngine {
   private static void configureConnection(Connection connection) throws SQLException {
     try (Statement statement = connection.createStatement()) {
       statement.execute("SET enable_external_access = false");
-      statement.execute("SET autoinstall_known_extensions = false");
-      statement.execute("SET autoload_known_extensions = false");
     }
   }
 }
