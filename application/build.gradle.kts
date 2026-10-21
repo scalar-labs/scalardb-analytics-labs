@@ -41,6 +41,7 @@ dependencies {
     implementation(project(":query-engine"))
     implementation(project(":duckdb"))
     implementation(project(":physical-catalog"))
+    implementation(project(":semantic-catalog"))
     implementation(libs.jackson.databind)
     implementation(libs.picocli)
 
@@ -135,7 +136,7 @@ val generateLicenseOverrides = tasks.register("generateLicenseOverrides") {
 
     doLast {
         val apache = "Apache License, Version 2.0|https://www.apache.org/licenses/LICENSE-2.0"
-        val product = listOf("duckdb", "physical-catalog", "query-engine").map {
+        val product = listOf("duckdb", "physical-catalog", "query-engine", "semantic-catalog").map {
             "com.scalar-labs:$it:$productVersion||$apache"
         }
         val upstream = listOf(

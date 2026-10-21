@@ -21,6 +21,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -33,7 +34,12 @@ import org.jspecify.annotations.Nullable;
 public final class Workspace {
   public static final String CONFIG_FILE_NAME = "workspace.json";
   private static final String CONFIG_SCHEMA = "scalardb-analytics/workspace-configuration";
-  private static final String CONFIG_SCHEMA_VERSION = "1";
+  private static final String CONFIG_SCHEMA_VERSION = "2";
+  private static final Set<String> READABLE_SCHEMA_VERSIONS = Set.of("1", "2");
+
+  /** The storage DuckDB of the workspace's Semantic Catalog domain. */
+  public static final String SEMANTIC_CATALOG_FILE_NAME = "semantic-catalog.duckdb";
+
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final Set<PosixFilePermission> PRIVATE_DIRECTORY_PERMISSIONS =
       PosixFilePermissions.fromString("rwx------");
@@ -50,11 +56,17 @@ public final class Workspace {
   private final Path directory;
   private final Configuration configuration;
   private final Secret storePassword;
+  private final Map<String, String> environment;
 
-  private Workspace(Path directory, Configuration configuration, Secret storePassword) {
+  private Workspace(
+      Path directory,
+      Configuration configuration,
+      Secret storePassword,
+      Map<String, String> environment) {
     this.directory = directory;
     this.configuration = configuration;
     this.storePassword = storePassword;
+    this.environment = environment;
   }
 
   public static Workspace load(Path directory, Map<String, String> environment) {
@@ -84,7 +96,7 @@ public final class Workspace {
           "MISSING_CREDENTIAL",
           "The Physical Catalog store password environment variable is not set.");
     }
-    return new Workspace(normalized, configuration, Secret.of(password));
+    return new Workspace(normalized, configuration, Secret.of(password), environment);
   }
 
   public static Workspace initialize(
@@ -93,6 +105,7 @@ public final class Workspace {
       String storeJdbcUrl,
       @Nullable String storeUsername,
       String storePasswordEnv,
+      List<String> semanticsOwners,
       Map<String, String> environment) {
     var configuration =
         new Configuration(
@@ -101,7 +114,8 @@ public final class Workspace {
             catalogName,
             storeJdbcUrl,
             storeUsername,
-            storePasswordEnv);
+            storePasswordEnv,
+            List.copyOf(semanticsOwners));
     configuration.validate("INVALID_REQUEST");
     var password = environment.get(storePasswordEnv);
     if (password == null) {
@@ -115,7 +129,7 @@ public final class Workspace {
       throw new ApplicationFailure(
           "WORKSPACE_ALREADY_EXISTS", "The workspace is already initialized.");
     }
-    var workspace = new Workspace(normalized, configuration, Secret.of(password));
+    var workspace = new Workspace(normalized, configuration, Secret.of(password), environment);
     var configurationWritten = false;
     var configurationFileCreated = false;
     try {
@@ -156,6 +170,12 @@ public final class Workspace {
       if (configurationWritten && !catalogCreated) {
         deleteConfigurationQuietly(path);
       }
+      throw e;
+    }
+    try {
+      SemanticCatalogs.create(workspace, semanticsOwners.getFirst());
+    } catch (RuntimeException e) {
+      deleteConfigurationQuietly(path);
       throw e;
     }
     return workspace;
@@ -231,6 +251,21 @@ public final class Workspace {
     return configuration.catalogName();
   }
 
+  /** The principals that may decide on Semantic Catalog candidates, or none for a v1 workspace. */
+  public List<String> semanticsOwners() {
+    var owners = configuration.semanticsOwners();
+    return owners == null ? List.of() : owners;
+  }
+
+  public Path semanticCatalogFile() {
+    return directory.resolve(SEMANTIC_CATALOG_FILE_NAME);
+  }
+
+  /** The process environment, which carries credentials and the language model selection. */
+  public Map<String, String> environment() {
+    return environment;
+  }
+
   public ApplicationRuntime openRuntime() {
     return ApplicationRuntime.start(catalogSettings());
   }
@@ -249,10 +284,15 @@ public final class Workspace {
       String catalogName,
       String storeJdbcUrl,
       @Nullable String storeUsername,
-      String storePasswordEnv) {
+      String storePasswordEnv,
+      @Nullable List<String> semanticsOwners) {
     void validate(String errorCode) {
       if (!CONFIG_SCHEMA.equals(schema)
-          || !CONFIG_SCHEMA_VERSION.equals(schemaVersion)
+          || !READABLE_SCHEMA_VERSIONS.contains(schemaVersion)
+          || (CONFIG_SCHEMA_VERSION.equals(schemaVersion)
+              && (semanticsOwners == null
+                  || semanticsOwners.isEmpty()
+                  || semanticsOwners.stream().anyMatch(String::isBlank)))
           || catalogName == null
           || catalogName.isBlank()
           || storeJdbcUrl == null

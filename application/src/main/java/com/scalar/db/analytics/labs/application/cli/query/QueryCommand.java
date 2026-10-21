@@ -7,6 +7,7 @@ package com.scalar.db.analytics.labs.application.cli.query;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.scalar.db.analytics.labs.application.ApplicationFailure;
+import com.scalar.db.analytics.labs.application.ArrowValues;
 import com.scalar.db.analytics.labs.application.cli.CliOutput;
 import com.scalar.db.analytics.labs.application.workspace.Workspace;
 import com.scalar.db.analytics.labs.query.QueryEngineException;
@@ -14,16 +15,11 @@ import com.scalar.db.analytics.labs.query.QueryError;
 import com.scalar.db.analytics.labs.query.QueryResult;
 import java.io.IOException;
 import java.io.InputStream;
-import java.math.BigDecimal;
-import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.time.temporal.TemporalAccessor;
 import java.util.ArrayList;
-import java.util.Base64;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -33,7 +29,6 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 import org.apache.arrow.vector.types.pojo.Field;
-import org.apache.arrow.vector.util.Text;
 import org.jspecify.annotations.Nullable;
 import picocli.CommandLine.ArgGroup;
 import picocli.CommandLine.Command;
@@ -162,7 +157,7 @@ public final class QueryCommand implements Callable<Integer>, AutoCloseable {
         reader.getVectorSchemaRoot().getSchema().getFields().stream()
             .map(QueryCommand::toOutputField)
             .toList();
-    var rows = new ArrayList<List<Object>>();
+    var rows = new ArrayList<List<@Nullable Object>>();
     var truncated = false;
     while (reader.loadNextBatch()) {
       var root = reader.getVectorSchemaRoot();
@@ -171,9 +166,9 @@ public final class QueryCommand implements Callable<Integer>, AutoCloseable {
           truncated = true;
           break;
         }
-        var row = new ArrayList<>(root.getFieldVectors().size());
+        var row = new ArrayList<@Nullable Object>(root.getFieldVectors().size());
         for (var vector : root.getFieldVectors()) {
-          row.add(toJsonValue(vector.getObject(rowIndex)));
+          row.add(ArrowValues.toJson(vector.getObject(rowIndex)));
         }
         rows.add(row);
       }
@@ -195,36 +190,6 @@ public final class QueryCommand implements Callable<Integer>, AutoCloseable {
         field.getType().toString(),
         field.isNullable(),
         field.getChildren().stream().map(QueryCommand::toOutputField).toList());
-  }
-
-  private static Object toJsonValue(Object value) {
-    if (value == null || value instanceof Boolean || value instanceof String) {
-      return value;
-    }
-    if (value instanceof Text text) {
-      return text.toString();
-    }
-    if (value instanceof BigInteger integer) {
-      return integer.toString();
-    }
-    if (value instanceof BigDecimal decimal) {
-      return decimal.toPlainString();
-    }
-    if (value instanceof byte[] bytes) {
-      return Base64.getEncoder().encodeToString(bytes);
-    }
-    if (value instanceof TemporalAccessor || value instanceof UUID) {
-      return value.toString();
-    }
-    if (value instanceof List<?> list) {
-      return list.stream().map(QueryCommand::toJsonValue).toList();
-    }
-    if (value instanceof Map<?, ?> map) {
-      var result = new LinkedHashMap<String, Object>();
-      map.forEach((key, item) -> result.put(String.valueOf(key), toJsonValue(item)));
-      return result;
-    }
-    return value;
   }
 
   private String readSql() throws IOException {
@@ -270,7 +235,7 @@ public final class QueryCommand implements Callable<Integer>, AutoCloseable {
       String schemaVersion,
       String executionId,
       List<QueryFieldOutput> fields,
-      List<List<Object>> rows,
+      List<List<@Nullable Object>> rows,
       boolean truncated) {}
 
   private record QueryFieldOutput(
