@@ -82,7 +82,8 @@ public final class JoinAndIdentifierInference implements Generator {
             + support.renderQuestionTimeInput()
             + "\n"
             + "Rules:\n"
-            + "- A join goes from the referencing Dataset to the referenced one; on lists [fromColumn, toColumn] pairs.\n"
+            + "- A join goes from the referencing Dataset to the referenced one; on lists [fromColumn, toColumn] pairs. Propose a join only when the stored values match exactly;"
+            + " when they match only after normalization (letter case, whitespace), propose an identifier correspondence with that normalization instead, and no join.\n"
             + "- An identifier correspondence pairs two Fields whose values identify the same object. normalization is how values compare: none, lower-trim (case-insensitive after trimming), or text.\n"
             + "- definition states, in business terms, why the two identify the same object; cite documents (D1, D2, ...).\n"
             + "- Do not propose joins that a foreign key already declares, or anything already in the catalog.\n"

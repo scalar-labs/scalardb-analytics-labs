@@ -42,7 +42,7 @@ import org.jspecify.annotations.Nullable;
  * {@code D1}, {@code D2}, and so on.
  */
 final class LlmSupport {
-  static final String PROMPT_VERSION = "1";
+  static final String PROMPT_VERSION = "2";
   private static final int SAMPLE_ROWS = 5;
   private static final int PROFILED_VALUES = 8;
   private static final Pattern FENCE = Pattern.compile("```(?:json)?\\s*(.*?)```", Pattern.DOTALL);
