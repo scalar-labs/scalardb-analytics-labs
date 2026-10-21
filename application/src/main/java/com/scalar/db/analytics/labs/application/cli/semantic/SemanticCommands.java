@@ -136,10 +136,15 @@ final class BuildCommand extends SemanticCommand.Base {
 
   record Registered(@Nullable String resource, String recorded) {}
 
+  /**
+   * @param remainingTasks created tasks not run yet, for a later {@code --no-refetch} build
+   * @param failedTasks failed tasks, which only {@code semantic resume} runs again
+   */
   record Output(
       List<Registered> registered,
       List<SemanticCommands.RunSummary> runs,
       int remainingTasks,
+      List<String> failedTasks,
       Outputs.SnapshotSummary summary) {}
 
   @Override
@@ -159,6 +164,9 @@ final class BuildCommand extends SemanticCommand.Base {
               registered,
               SemanticCommands.summarize(session, runs),
               session.remainingTasks().size(),
+              session.catalog().reads().tasks(null, BuildTask.State.FAILED).stream()
+                  .map(BuildTask::id)
+                  .toList(),
               session.catalog().reads().summary());
         });
   }
