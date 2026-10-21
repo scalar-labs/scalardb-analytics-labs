@@ -4,6 +4,7 @@
  */
 package com.scalar.db.analytics.labs.application.cli.query;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.scalar.db.analytics.labs.application.ApplicationFailure;
@@ -56,6 +57,25 @@ public final class QueryCommand implements Callable<Integer>, AutoCloseable {
 
   @ArgGroup(exclusive = true, multiplicity = "1")
   private @Nullable QueryInput queryInput;
+
+  @Option(
+      names = "--snapshot",
+      paramLabel = "URN",
+      description =
+          "The Catalog Snapshot whose knowledge the SQL was composed from, for the citation.")
+  private @Nullable String snapshot;
+
+  @Option(
+      names = "--cite",
+      paramLabel = "URN",
+      description = "A Fact Revision the SQL relies on, for the citation; repeatable.")
+  private List<String> citedRevisions = new ArrayList<>();
+
+  @Option(
+      names = "--question",
+      paramLabel = "URN",
+      description = "The question URN, for the citation.")
+  private @Nullable String question;
 
   @Spec private @Nullable CommandSpec commandSpec;
 
@@ -180,8 +200,18 @@ public final class QueryCommand implements Callable<Integer>, AutoCloseable {
         break;
       }
     }
+    var citation =
+        snapshot == null && citedRevisions.isEmpty() && question == null
+            ? null
+            : new Citation(snapshot, List.copyOf(citedRevisions), question);
     return new QueryOutput(
-        "scalardb-analytics/query-result", "3", result.executionId(), fields, rows, truncated);
+        "scalardb-analytics/query-result",
+        "3",
+        result.executionId(),
+        fields,
+        rows,
+        truncated,
+        citation);
   }
 
   private static QueryFieldOutput toOutputField(Field field) {
@@ -236,7 +266,15 @@ public final class QueryCommand implements Callable<Integer>, AutoCloseable {
       String executionId,
       List<QueryFieldOutput> fields,
       List<List<@Nullable Object>> rows,
-      boolean truncated) {}
+      boolean truncated,
+      @JsonInclude(JsonInclude.Include.NON_NULL) @Nullable Citation citation) {}
+
+  /**
+   * What the answer to a question cites: the Catalog Snapshot read and the Fact Revisions used
+   * (public-api.md 4.3). The CLI echoes it so the agent's report carries it with the result.
+   */
+  private record Citation(
+      @Nullable String snapshot, List<String> factRevisions, @Nullable String question) {}
 
   private record QueryFieldOutput(
       String name, String type, boolean nullable, List<QueryFieldOutput> children) {}

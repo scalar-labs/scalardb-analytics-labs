@@ -7,6 +7,7 @@ package com.scalar.db.analytics.labs.application.cli;
 import com.scalar.db.analytics.labs.application.cli.catalog.MetadataCommand;
 import com.scalar.db.analytics.labs.application.cli.catalog.SourceCommand;
 import com.scalar.db.analytics.labs.application.cli.query.QueryCommand;
+import com.scalar.db.analytics.labs.application.cli.semantic.SemanticCommand;
 import com.scalar.db.analytics.labs.application.cli.workspace.WorkspaceCommand;
 import java.io.InputStream;
 import java.io.PrintStream;
@@ -41,6 +42,7 @@ public final class ScalarDbAnalyticsCli implements AutoCloseable {
     commandLine.addSubcommand("workspace", WorkspaceCommand.create(environment));
     commandLine.addSubcommand("source", SourceCommand.create(standardInput, environment));
     commandLine.addSubcommand("metadata", MetadataCommand.create(environment));
+    commandLine.addSubcommand("semantic", SemanticCommand.create(standardInput, environment));
     commandLine.setOut(new java.io.PrintWriter(standardOutput, true, StandardCharsets.UTF_8));
     commandLine.setErr(new java.io.PrintWriter(standardError, true, StandardCharsets.UTF_8));
   }

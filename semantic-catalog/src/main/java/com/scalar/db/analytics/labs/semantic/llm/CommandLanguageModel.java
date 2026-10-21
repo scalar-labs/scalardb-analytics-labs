@@ -36,13 +36,20 @@ public final class CommandLanguageModel implements LanguageModel {
   public static final String MODEL_VARIABLE = "SCALARDB_ANALYTICS_LLM_MODEL";
   public static final String TIMEOUT_VARIABLE = "SCALARDB_ANALYTICS_LLM_TIMEOUT_SECONDS";
 
+  /**
+   * For the {@code command} provider: a shell command that reads the prompt on standard input and
+   * writes the model's answer on standard output, so another harness can be plugged in.
+   */
+  public static final String COMMAND_VARIABLE = "SCALARDB_ANALYTICS_LLM_COMMAND";
+
   private static final String SYSTEM_PROMPT =
       "You are a component of a data catalog application. Answer with exactly one JSON object and"
           + " nothing else. Do not use tools.";
 
   public enum Provider {
     CLAUDE,
-    CODEX
+    CODEX,
+    COMMAND
   }
 
   private final Provider provider;
@@ -74,6 +81,14 @@ public final class CommandLanguageModel implements LanguageModel {
           new CommandLanguageModel(
               Provider.CLAUDE, model == null ? "sonnet" : model, timeout, logDirectory);
       case "codex" -> new CommandLanguageModel(Provider.CODEX, model, timeout, logDirectory);
+      case "command" -> {
+        var command = environment.get(COMMAND_VARIABLE);
+        if (command == null || command.isBlank()) {
+          throw new IllegalArgumentException(
+              COMMAND_VARIABLE + " is required for the command provider.");
+        }
+        yield new CommandLanguageModel(Provider.COMMAND, command, timeout, logDirectory);
+      }
       case "none" -> LanguageModel.UNAVAILABLE;
       default ->
           throw new IllegalArgumentException("Unknown " + PROVIDER_VARIABLE + " provider: " + name);
@@ -82,8 +97,11 @@ public final class CommandLanguageModel implements LanguageModel {
 
   @Override
   public String identity() {
-    var name = provider == Provider.CLAUDE ? "claude" : "codex";
-    return model == null ? name : name + "/" + model;
+    return switch (provider) {
+      case CLAUDE -> model == null ? "claude" : "claude/" + model;
+      case CODEX -> model == null ? "codex" : "codex/" + model;
+      case COMMAND -> "command";
+    };
   }
 
   @Override
@@ -94,9 +112,11 @@ public final class CommandLanguageModel implements LanguageModel {
       var directory = Files.createTempDirectory("sdba-llm-");
       try {
         answer =
-            provider == Provider.CLAUDE
-                ? runClaude(directory, prompt)
-                : runCodex(directory, prompt);
+            switch (provider) {
+              case CLAUDE -> runClaude(directory, prompt);
+              case CODEX -> runCodex(directory, prompt);
+              case COMMAND -> runCommand(directory, prompt);
+            };
       } finally {
         deleteQuietly(directory);
       }
@@ -168,6 +188,20 @@ public final class CommandLanguageModel implements LanguageModel {
           "codex: exit " + result.exitCode + ": " + tail(result.stderr));
     }
     return Files.readString(output, StandardCharsets.UTF_8);
+  }
+
+  private String runCommand(Path directory, String prompt)
+      throws IOException, LanguageModelException {
+    var result =
+        run(
+            List.of("sh", "-c", java.util.Objects.requireNonNull(model)),
+            directory,
+            SYSTEM_PROMPT + "\n\n" + prompt);
+    if (result.exitCode != 0) {
+      throw new LanguageModelException(
+          "command: exit " + result.exitCode + ": " + tail(result.stderr));
+    }
+    return result.stdout;
   }
 
   private record Result(int exitCode, String stdout, String stderr) {}
