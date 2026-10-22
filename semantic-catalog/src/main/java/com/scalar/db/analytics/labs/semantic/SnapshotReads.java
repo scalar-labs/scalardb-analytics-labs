@@ -452,6 +452,21 @@ public final class SnapshotReads {
       @Nullable PresentationKind kind,
       @Nullable String target,
       @Nullable String question) {
+    return reviewQueue(snapshot, kind, target, question, false);
+  }
+
+  /**
+   * The list awaiting review.
+   *
+   * @param unpresentedOnly keep only the items no review presentation has targeted yet, so an
+   *     agent can present what newly became reviewable; a prototype addition
+   */
+  public ReviewQueue reviewQueue(
+      @Nullable String snapshot,
+      @Nullable PresentationKind kind,
+      @Nullable String target,
+      @Nullable String question,
+      boolean unpresentedOnly) {
     var c = point(snapshot);
     var items = new ArrayList<SortableItem>();
     for (var fact : state.factRecords().values()) {
@@ -493,6 +508,7 @@ public final class SnapshotReads {
     var filtered =
         items.stream()
             .filter(entry -> kind == null || entry.item.kind() == kind)
+            .filter(entry -> !unpresentedOnly || entry.item.presentations().isEmpty())
             .filter(
                 entry ->
                     target == null
@@ -601,6 +617,7 @@ public final class SnapshotReads {
         reviewQueue(null, null, null, null).items().size(),
         conflicts,
         tasks.stream().filter(t -> t.state() == BuildTask.State.CREATED).count(),
+        tasks.stream().filter(t -> t.state() == BuildTask.State.RUNNING).count(),
         tasks.stream().filter(t -> t.state() == BuildTask.State.FAILED).count(),
         state.policyAt(c).id());
   }

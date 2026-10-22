@@ -222,20 +222,27 @@ class SemanticCliIntegrationTest {
         "--text",
         "売上 is the sum of amount over orders that are not cancelled.");
 
-    var build =
-        ok(
-            environment,
-            "",
-            "scalardb-analytics/semantic-build",
-            "semantic",
-            "build",
-            "--workspace",
-            workspace);
-    assertThat(build.path("runs"))
-        .allSatisfy(run -> assertThat(run.path("state").asText()).isEqualTo("succeeded"));
-    assertThat(build.path("summary").path("awaitingReview").asInt()).isPositive();
-
-    for (var round = 0; round < 8; round++) {
+    // The agent starts a watching build in the background, then presents and answers whatever has
+    // become reviewable while the build keeps running the tasks the answers create.
+    var watcher =
+        java.util.concurrent.CompletableFuture.supplyAsync(
+            () ->
+                run(
+                    environment,
+                    "",
+                    "semantic",
+                    "build",
+                    "--workspace",
+                    workspace,
+                    "--watch",
+                    "--idle-seconds",
+                    "8",
+                    "--poll-seconds",
+                    "1"));
+    var deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MINUTES.toNanos(3);
+    var round = 0;
+    var answeredFacts = 0;
+    while (System.nanoTime() < deadline) {
       var queue =
           ok(
               environment,
@@ -244,10 +251,29 @@ class SemanticCliIntegrationTest {
               "semantic",
               "review",
               "--workspace",
-              workspace);
+              workspace,
+              "--unpresented");
       if (queue.path("items").isEmpty()) {
-        break;
+        var status =
+            ok(
+                environment,
+                "",
+                "scalardb-analytics/semantic-status",
+                "semantic",
+                "status",
+                "--workspace",
+                workspace);
+        var summary = status.path("summary");
+        if (answeredFacts > 0
+            && summary.path("createdTasks").asInt() == 0
+            && summary.path("runningTasks").asInt() == 0
+            && summary.path("awaitingReview").asInt() == 0) {
+          break;
+        }
+        Thread.sleep(500);
+        continue;
       }
+      round++;
       var facts = new ArrayList<String>();
       queue
           .path("items")
@@ -295,12 +321,31 @@ class SemanticCliIntegrationTest {
               workspace,
               "--principal",
               "owner",
-              "--stdin",
-              "--run-tasks");
+              "--stdin");
       assertThat(answered.path("submitted").path("answers"))
           .allSatisfy(
               answer -> assertThat(answer.path("transition").asText()).isEqualTo("confirmed"));
+      answeredFacts += facts.size();
     }
+    var watched = watcher.get(2, java.util.concurrent.TimeUnit.MINUTES);
+    var lines = watched.strip().split("\n");
+    var events =
+        java.util.Arrays.stream(lines)
+            .limit(lines.length - 1L)
+            .map(SemanticCliIntegrationTest::json)
+            .toList();
+    assertThat(events)
+        .isNotEmpty()
+        .allSatisfy(
+            event -> {
+              assertThat(event.path("schema").asText())
+                  .isEqualTo("scalardb-analytics/semantic-build-event");
+              assertThat(event.path("state").asText()).isEqualTo("succeeded");
+            });
+    var finished = json(lines[lines.length - 1]);
+    assertThat(finished.path("schema").asText()).isEqualTo("scalardb-analytics/semantic-build");
+    assertThat(finished.path("failedTasks")).isEmpty();
+    assertThat(round).isGreaterThan(1);
 
     var question =
         ok(
@@ -402,6 +447,32 @@ class SemanticCliIntegrationTest {
             "--workspace",
             workspace);
     assertThat(verification.path("consistent").asBoolean()).isTrue();
+  }
+
+  private static JsonNode json(String line) {
+    try {
+      return JSON.readTree(line);
+    } catch (java.io.IOException e) {
+      throw new IllegalStateException(line, e);
+    }
+  }
+
+  /** Runs the CLI and returns its standard output, failing on a non-zero exit. */
+  private static String run(Map<String, String> environment, String input, String... arguments) {
+    var standardOutput = new ByteArrayOutputStream();
+    var standardError = new ByteArrayOutputStream();
+    int exitCode;
+    try (var cli =
+        new ScalarDbAnalyticsCli(
+            new ByteArrayInputStream(input.getBytes(StandardCharsets.UTF_8)),
+            new PrintStream(standardOutput, true, StandardCharsets.UTF_8),
+            new PrintStream(standardError, true, StandardCharsets.UTF_8),
+            environment)) {
+      exitCode = cli.execute(arguments);
+    }
+    var output = standardOutput.toString(StandardCharsets.UTF_8);
+    assertThat(exitCode).as(output + standardError.toString(StandardCharsets.UTF_8)).isZero();
+    return output;
   }
 
   private static JsonNode ok(

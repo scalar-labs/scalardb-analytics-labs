@@ -122,6 +122,47 @@ public final class SemanticSession implements AutoCloseable {
     return runs;
   }
 
+  /**
+   * Runs build tasks as they are created, by this or another process, until none has been created
+   * for the idle time. Another process may answer while a task runs; the tasks its answers create
+   * are picked up on the next poll.
+   *
+   * @param listener receives each run as it finishes
+   */
+  public List<TaskRun> watch(
+      java.time.Duration idle,
+      java.time.Duration poll,
+      java.util.function.Consumer<TaskRun> listener) {
+    var runs = new ArrayList<TaskRun>();
+    var lastWork = java.time.Instant.now();
+    while (true) {
+      var created = catalog.createdTasks();
+      if (!created.isEmpty()) {
+        try {
+          var run = catalog.runTask(created.getFirst().id());
+          runs.add(run);
+          listener.accept(run);
+        } catch (SemanticCatalogException e) {
+          // Another watching process claimed the task first.
+          if (e.kind() != SemanticCatalogException.Kind.NOT_ACCEPTED_IN_STATE) {
+            throw e;
+          }
+        }
+        lastWork = java.time.Instant.now();
+        continue;
+      }
+      if (java.time.Duration.between(lastWork, java.time.Instant.now()).compareTo(idle) >= 0) {
+        return runs;
+      }
+      try {
+        Thread.sleep(poll);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        return runs;
+      }
+    }
+  }
+
   public List<BuildTask> remainingTasks() {
     return catalog.createdTasks();
   }

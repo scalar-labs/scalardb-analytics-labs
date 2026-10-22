@@ -153,6 +153,7 @@ public final class Outputs {
       long awaitingReview,
       long conflicts,
       long createdTasks,
+      long runningTasks,
       long failedTasks,
       String policyVersion) {}
 }

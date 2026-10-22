@@ -818,11 +818,24 @@ public final class SemanticCatalog implements AutoCloseable {
   }
 
   public TaskRun runTask(String taskId) {
-    return run(taskId, BuildTask.State.CREATED, "The build task is not created.");
+    return run(taskId, java.util.Set.of(BuildTask.State.CREATED), "The build task is not created.");
   }
 
   public TaskRun resumeTask(String taskId) {
-    return run(taskId, BuildTask.State.FAILED, "The build task has not failed.");
+    return resumeTask(taskId, false);
+  }
+
+  /**
+   * Resumes a failed build task, or, when asked, one left {@code running} by a process that
+   * stopped during the run (the resumption after a stop the application owns).
+   */
+  public TaskRun resumeTask(String taskId, boolean includeRunning) {
+    return run(
+        taskId,
+        includeRunning
+            ? java.util.Set.of(BuildTask.State.FAILED, BuildTask.State.RUNNING)
+            : java.util.Set.of(BuildTask.State.FAILED),
+        "The build task has not failed.");
   }
 
   /**
@@ -832,7 +845,7 @@ public final class SemanticCatalog implements AutoCloseable {
    * can answer or select in between; the result is judged against the state at the time it is
    * recorded.
    */
-  private TaskRun run(String taskId, BuildTask.State expected, String notAccepted) {
+  private TaskRun run(String taskId, java.util.Set<BuildTask.State> expected, String notAccepted) {
     var claimed =
         outsideLog(
             () -> {
@@ -840,7 +853,7 @@ public final class SemanticCatalog implements AutoCloseable {
               if (task == null) {
                 throw SemanticCatalogException.notFound("Build task not found.");
               }
-              if (task.state() != expected) {
+              if (!expected.contains(task.state())) {
                 throw SemanticCatalogException.notAccepted(notAccepted);
               }
               var generator = task.generator() == null ? null : generators.get(task.generator());

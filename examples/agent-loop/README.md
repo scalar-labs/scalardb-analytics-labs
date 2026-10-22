@@ -67,6 +67,8 @@ docker compose up -d --wait
 ## 3. Initialize the workspace
 
 The workspace binds a directory to one Physical Catalog catalog and one Semantic Catalog domain.
+Both are stored in the catalog store database. The Semantic Catalog keeps its tables in that
+database's `semantic_catalog` schema, so several CLI processes can work on it at the same time.
 `--semantics-owner` names who may judge candidates; this runbook uses `owner`:
 
 ```console
@@ -122,7 +124,8 @@ follow it. The CLI is ../../application/build/install/scalardb-analytics-*/bin/s
 the workspace is ./workspace, and every command needs CATALOG_PASSWORD=catalog-password. I am the
 semantics owner "owner".
 
-First build the Semantic Catalog and have me review the candidates until nothing awaits review.
+Start a watching build in the background, and present the candidates to me for review as they
+become reviewable, until nothing awaits review.
 Then answer: 2026年9月に EC と店舗の両方で購入した顧客の、9月の EC 売上の合計は?
 ```
 
@@ -131,12 +134,14 @@ you can also run them by hand.
 
 ## 6. Build and review (what the agent does)
 
+The agent starts a watching build in the background and reviews with you while it runs:
+
 ```console
-"$CLI" semantic build --workspace ./workspace
+"$CLI" semantic build --workspace ./workspace --watch --idle-seconds 600 &
 ```
 
-The build takes about half a minute. It refetches the four tables' metadata and registers it.
-Then it runs build tasks:
+The build refetches the four tables' metadata and registers it. It then keeps running build tasks,
+printing one `semantic-build-event` JSON line per finished task:
 
 - Schema interpretation confirms the Datasets and Fields, keys, uniqueness, foreign-key joins, and
   date types by machine judgement. The sources declare and enforce these.
@@ -144,20 +149,30 @@ Then it runs build tasks:
 - The language model proposes row and Field meanings from the names, the data, and the glossary.
   The policy asks for consent to these, because data cannot verify them.
 
-The output's `summary.awaitingReview` counts what awaits the owner. The agent reads the queue,
-presents it to you, records the presentation, and submits your answers:
+The first reviewable items appear within about half a minute. The agent polls for what it has not
+shown you yet, presents it, records the presentation, and submits your answers:
 
 ```console
-"$CLI" semantic review --workspace ./workspace
+"$CLI" semantic review --workspace ./workspace --unpresented
 "$CLI" semantic present --workspace ./workspace --kind confirmation --to owner \
   --context "Reviewed in chat" --fact <fact-urn> ...
-"$CLI" semantic answer --workspace ./workspace --principal owner --file answers.json --run-tasks
+"$CLI" semantic answer --workspace ./workspace --principal owner --file answers.json
 ```
 
-Confirmed Field meanings trigger further Generators. They propose the Measures EC売上 and 店舗売上,
-the business terms that name them, and the identifier correspondence between customer and member
-email addresses, compared ignoring letter case. A data check then measures that correspondence's
-set relationship. Expect about three review rounds.
+The watching build picks up the tasks your answers create. Confirmed Field meanings trigger
+further Generators, which propose these:
+
+- the Measures EC売上 and 店舗売上, and the business terms that name them;
+- the identifier correspondence between customer and member email addresses, compared ignoring
+  letter case.
+
+A data check then measures that correspondence's set relationship. New items keep appearing for
+about three rounds. The review is done when `semantic review` returns no items, and
+`semantic status` shows `createdTasks` and `runningTasks` of 0.
+
+To follow it by hand, use two terminals in this directory, with `CLI` and `CATALOG_PASSWORD` set
+in both. Run the watching build in one. Run `review --unpresented`, `present`, and `answer` in the
+other.
 
 Read the catalog at any time:
 
@@ -232,5 +247,6 @@ rm -rf workspace
 | `NO_AUTHORITY` from `semantic answer` | `--principal` must be one of the workspace's `--semantics-owner` values |
 | `ALREADY_EXISTS` from `workspace init` | The store already has the catalog `sales`. Reset the databases with `docker compose down -v` and `docker compose up -d --wait` |
 | You want to see what the model was asked | Read the prompts and answers under `workspace/llm-log/` |
+| A watching build was stopped during a run, and its task stays `running` | `semantic resume --task <id> --running` |
 | You want to check the catalog's integrity | `semantic verify` replays the log and compares it with the materialized state |
 | The agent runs in a sandbox, and builds fail with `ERR_PROXY_TUNNEL` or DuckDB cannot extract its native library | The model CLI needs network access to its provider, and the JVM needs a writable temporary directory. Allow the network for the CLI, and set `JAVA_OPTS=-Djava.io.tmpdir=$TMPDIR` |

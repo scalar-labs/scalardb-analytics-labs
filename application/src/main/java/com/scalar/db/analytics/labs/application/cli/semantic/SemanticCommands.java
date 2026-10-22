@@ -125,6 +125,19 @@ final class BuildCommand extends SemanticCommand.Base {
   @Option(names = "--no-refetch", description = "Only run the build tasks already created.")
   private boolean noRefetch;
 
+  @Option(
+      names = "--watch",
+      description =
+          "Keep running build tasks as answers create them, printing one event line per finished"
+              + " task, until none is created for --idle-seconds.")
+  private boolean watch;
+
+  @Option(names = "--idle-seconds", paramLabel = "SECONDS", defaultValue = "600")
+  private long idleSeconds;
+
+  @Option(names = "--poll-seconds", paramLabel = "SECONDS", defaultValue = "2")
+  private long pollSeconds;
+
   BuildCommand(InputStream standardInput, Map<String, String> environment) {
     super(standardInput, environment);
   }
@@ -159,7 +172,29 @@ final class BuildCommand extends SemanticCommand.Base {
               registered.add(new Registered(observation.inputResource(), observation.recorded()));
             }
           }
-          var runs = session.runCreated(maxTasks);
+          List<Outputs.TaskRun> runs;
+          if (watch) {
+            var out = Objects.requireNonNull(commandSpec).commandLine().getOut();
+            runs =
+                session.watch(
+                    java.time.Duration.ofSeconds(idleSeconds),
+                    java.time.Duration.ofSeconds(pollSeconds),
+                    run -> {
+                      var event =
+                          Json.object()
+                              .put("schema", "scalardb-analytics/semantic-build-event")
+                              .put("schemaVersion", SemanticCommand.SCHEMA_VERSION);
+                      event.setAll(
+                          (com.fasterxml.jackson.databind.node.ObjectNode)
+                              Json.tree(
+                                  SemanticCommands.summarize(session, List.of(run)).getFirst()));
+                      event.put(
+                          "awaitingReview", session.catalog().reads().summary().awaitingReview());
+                      out.println(Json.write(event));
+                    });
+          } else {
+            runs = session.runCreated(maxTasks);
+          }
           return new Output(
               registered,
               SemanticCommands.summarize(session, runs),
@@ -244,6 +279,11 @@ final class ResumeCommand extends SemanticCommand.Base {
       description = "Then run up to N created build tasks.")
   private int maxTasks;
 
+  @Option(
+      names = "--running",
+      description = "Also resume a task left running by a build that stopped during the run.")
+  private boolean running;
+
   ResumeCommand(InputStream standardInput, Map<String, String> environment) {
     super(standardInput, environment);
   }
@@ -260,7 +300,7 @@ final class ResumeCommand extends SemanticCommand.Base {
     return session(
         workspace,
         session -> {
-          var resumed = session.catalog().resumeTask(Objects.requireNonNull(task));
+          var resumed = session.catalog().resumeTask(Objects.requireNonNull(task), running);
           return new Output(
               resumed, SemanticCommands.summarize(session, session.runCreated(maxTasks)));
         });
@@ -289,6 +329,11 @@ final class ReviewCommand extends SemanticCommand.Base {
   @Option(names = "--question", paramLabel = "URN")
   private @Nullable String question;
 
+  @Option(
+      names = "--unpresented",
+      description = "Only the items no review presentation has targeted yet.")
+  private boolean unpresented;
+
   ReviewCommand(InputStream standardInput, Map<String, String> environment) {
     super(standardInput, environment);
   }
@@ -305,7 +350,10 @@ final class ReviewCommand extends SemanticCommand.Base {
     return session(
         workspace,
         session ->
-            session.catalog().reads().reviewQueue(snapshot, presentationKind, target, question));
+            session
+                .catalog()
+                .reads()
+                .reviewQueue(snapshot, presentationKind, target, question, unpresented));
   }
 }
 

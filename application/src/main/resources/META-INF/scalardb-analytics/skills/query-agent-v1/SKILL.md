@@ -34,24 +34,37 @@ v0 covered only source discovery and SQL. Everything in v0 still applies.
 
 ## Workflow A: build and review
 
-1. Check the state: `scalardb-analytics semantic status --workspace <dir>`.
-2. Build. This refetches every source's table metadata, registers it, and runs the build tasks. A
-   first build calls the language model several times and can take a few minutes.
+Building runs in the background while you review with the user. Present what has become
+reviewable as soon as it appears; do not wait for the build to finish. The catalog is stored in
+the workspace's store database, so a running build and your review commands work on it at the
+same time.
+
+1. **Start a watching build in the background.** Run it as a background process of your own; it
+   does not return until it has been idle for `--idle-seconds`:
 
    ```console
-   scalardb-analytics semantic build --workspace <dir>
+   scalardb-analytics semantic build --workspace <dir> --watch --idle-seconds 600
    ```
 
-   - `remainingTasks > 0`: run `semantic build --workspace <dir> --no-refetch` again.
-   - `failedTasks` is not empty: read each run's `failureReason`. A missing or failing language
-     model is the usual cause. A build does not rerun failed tasks. After the cause is fixed, run
-     `semantic resume --workspace <dir> --task <id>` for each one.
+   It refetches every source's table metadata, registers it, and keeps running build tasks,
+   including the tasks your answers create. Each finished task prints one JSON line,
+   `schema: scalardb-analytics/semantic-build-event`, with the task, its Generator, `state`,
+   `accepted`, and `awaitingReview`. The last line is the `semantic-build` result.
+
+   - A line with `state: failed`: read `failureReason`; a missing or failing language model is the
+     usual cause. A build does not rerun failed tasks. After the cause is fixed, run
+     `semantic resume --workspace <dir> --task <id>`.
+   - If the watching build stopped during a run, its task stays `running`. Resume it with
+     `semantic resume --workspace <dir> --task <id> --running`.
    - If you run in a sandbox, the model CLI needs network access to its provider, and the JVM
      needs a writable temporary directory (`JAVA_OPTS=-Djava.io.tmpdir=$TMPDIR`).
-   - To check a candidate against the data before presenting it, run a read-only `query`. No
-     citation is needed for these checks.
-3. Read what awaits a judgement: `scalardb-analytics semantic review --workspace <dir>`. Each item
-   has a `kind`:
+2. **Poll for what you have not presented yet**, every few seconds while the build runs:
+
+   ```console
+   scalardb-analytics semantic review --workspace <dir> --unpresented
+   ```
+
+   Each item has a `kind`:
    - `confirmation`: consent to a candidate;
    - `retirement`: consent to retiring a confirmed Fact;
    - `conflict`: select one of several confirmed Facts.
@@ -62,8 +75,11 @@ v0 covered only source discovery and SQL. Everything in v0 still applies.
    - `checks`: how it was examined. `method` is `declared-enforced`, `declared-unenforced`,
      `data-check`, `document`, or `inference`;
    - `unconfirmedItems`: what no check supports.
-4. Present the items to the user, who must be a semantics owner of the workspace. Choose how to
-   present them; grouping by Dataset reads well. For each Fact, show:
+
+   While nothing is new, tell the user the build is still working, and keep the conversation free
+   for other questions.
+3. **Present the new items to the user**, who must be a semantics owner of the workspace. Choose
+   how to present them; grouping by Dataset reads well. For each Fact, show:
    - what it states, in plain words;
    - why it was proposed (the check methods);
    - what is unconfirmed.
@@ -75,19 +91,22 @@ v0 covered only source discovery and SQL. Everything in v0 still applies.
    - `unknown`: the user cannot tell.
 
    Never answer for the user. If the user is not a semantics owner, stop and say who must answer.
-5. Record what you presented, before submitting the answers:
+   To check a candidate against the data before presenting it, run a read-only `query`; no
+   citation is needed for these checks.
+4. **Record what you presented**, right when you present it:
 
    ```console
    scalardb-analytics semantic present --workspace <dir> --kind confirmation \
      --fact <fact-urn> --fact <fact-urn> ... --to <owner> --context "<what you showed, briefly>"
    ```
 
-   The output carries a `presentation` identifier.
-6. Submit the answers in one call, with the user as `--principal`. `--run-tasks` runs the build
-   tasks the answers trigger, which may propose more candidates.
+   The output carries a `presentation` identifier. Recorded items no longer appear under
+   `--unpresented`.
+5. **Submit the user's answers** in one call, with the user as `--principal`. Do not pass
+   `--run-tasks`; the watching build runs the tasks the answers create.
 
    ```console
-   scalardb-analytics semantic answer --workspace <dir> --principal <owner> --stdin --run-tasks <<'EOF'
+   scalardb-analytics semantic answer --workspace <dir> --principal <owner> --stdin <<'EOF'
    {"answers": [
      {"fact": "<fact-urn>", "type": "consent", "wording": "<the user's words>", "presentation": "<id>"},
      {"fact": "<fact-urn>", "type": "correction", "wording": "<what is right, in the user's words>", "presentation": "<id>"}
@@ -97,11 +116,16 @@ v0 covered only source discovery and SQL. Everything in v0 still applies.
 
    Answer a candidate and the candidates that depend on it in the same call; they are applied in
    dependency order. A correction rejects the candidate. A Generator then proposes a revised
-   candidate from the wording, which appears in a later review.
-7. Repeat steps 3 to 6 until `semantic review` returns no items. New items often appear after a
-   round, because confirmed meanings let further Generators run, for example Measures and
-   identifier correspondences.
-8. For a `conflict` item, present every Fact in it and ask the owner to choose one. Record the
+   candidate from the wording, which appears in a later poll.
+6. **Repeat steps 2 to 5.** Confirmed meanings let further Generators run, for example for
+   Measures and identifier correspondences, so new items keep appearing for a while. The review is
+   done when all three hold:
+   - `semantic review --unpresented` returns no items;
+   - `semantic review` returns no items, so nothing presented is still unanswered;
+   - `semantic status` shows `createdTasks` and `runningTasks` of 0.
+
+   The watching build then exits after its idle time, or stop it yourself.
+7. **For a `conflict` item**, present every Fact in it and ask the owner to choose one. Record the
    choice:
 
    ```console
@@ -109,6 +133,9 @@ v0 covered only source discovery and SQL. Everything in v0 still applies.
      --address <fact-address-urn> --fact <chosen-fact-urn> --not <other-fact-urn> \
      --wording "<the user's words>" --presentation <id>
    ```
+
+Without a background process, `semantic build` (no `--watch`) runs the created tasks once and
+returns. `semantic answer --run-tasks` runs the tasks its answers create before it returns.
 
 To register a document, such as a glossary, that Generators may cite:
 
