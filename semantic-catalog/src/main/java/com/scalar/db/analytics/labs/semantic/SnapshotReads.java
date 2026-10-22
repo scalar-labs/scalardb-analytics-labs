@@ -458,8 +458,8 @@ public final class SnapshotReads {
   /**
    * The list awaiting review.
    *
-   * @param unpresentedOnly keep only the items no review presentation has targeted yet, so an
-   *     agent can present what newly became reviewable; a prototype addition
+   * @param unpresentedOnly keep only the items no review presentation has targeted yet, so an agent
+   *     can present what newly became reviewable; a prototype addition
    */
   public ReviewQueue reviewQueue(
       @Nullable String snapshot,

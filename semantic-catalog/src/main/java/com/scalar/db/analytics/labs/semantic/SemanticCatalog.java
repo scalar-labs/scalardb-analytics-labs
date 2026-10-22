@@ -826,8 +826,8 @@ public final class SemanticCatalog implements AutoCloseable {
   }
 
   /**
-   * Resumes a failed build task, or, when asked, one left {@code running} by a process that
-   * stopped during the run (the resumption after a stop the application owns).
+   * Resumes a failed build task, or, when asked, one left {@code running} by a process that stopped
+   * during the run (the resumption after a stop the application owns).
    */
   public TaskRun resumeTask(String taskId, boolean includeRunning) {
     return run(
