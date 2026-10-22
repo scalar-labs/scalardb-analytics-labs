@@ -119,6 +119,13 @@ class DistributionSmokeTest {
     assertThat(distribution.resolve("bin/scalardb-analytics")).isExecutable();
     assertThat(distribution.resolve("skills/query-agent-v0/SKILL.md")).isRegularFile();
     assertThat(distribution.resolve("skills/query-agent-v1/SKILL.md")).isRegularFile();
+    var plugin = distribution.resolve("plugins/scalardb-analytics");
+    assertThat(plugin.resolve(".claude-plugin/plugin.json"))
+        .content()
+        .contains(requiredProperty("distribution.version"));
+    assertThat(plugin.resolve("skills/query-agent/SKILL.md")).isRegularFile();
+    assertThat(plugin.resolve("commands/build.md")).isRegularFile();
+    assertThat(plugin.resolve("bin/scalardb-analytics")).isExecutable();
     assertThat(distribution.resolve("LICENSE")).isRegularFile();
     assertThat(distribution.resolve("licenses/third-party/THIRD-PARTY.md")).isRegularFile();
     assertThat(distribution.resolve("provenance/physical-catalog.properties")).isRegularFile();

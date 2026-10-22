@@ -1,0 +1,26 @@
+#!/bin/sh
+# Runs the distribution's scalardb-analytics CLI for the agent. A command that needs a workspace
+# and does not give --workspace gets SCALARDB_ANALYTICS_WORKSPACE, or ./workspace when that is an
+# initialized workspace.
+plugin_bin=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+cli="$plugin_bin/../../../bin/scalardb-analytics"
+
+workspace="${SCALARDB_ANALYTICS_WORKSPACE:-}"
+if [ -z "$workspace" ] && [ -f ./workspace/workspace.json ]; then
+  workspace=./workspace
+fi
+
+needs_workspace=true
+case "${1:-}" in
+  "" | version | help | -h | --help | -V | --version) needs_workspace=false ;;
+esac
+for argument in "$@"; do
+  case "$argument" in
+    --workspace | --workspace=* | -h | --help) needs_workspace=false ;;
+  esac
+done
+
+if [ "$needs_workspace" = true ] && [ -n "$workspace" ]; then
+  exec "$cli" "$@" --workspace "$workspace"
+fi
+exec "$cli" "$@"

@@ -220,7 +220,13 @@ final class StatusCommand extends SemanticCommand.Base {
     return "status";
   }
 
-  record Output(Outputs.SnapshotSummary summary, List<BuildTask> unfinishedTasks) {}
+  /**
+   * @param semanticsOwners who may answer and select, from the workspace configuration
+   */
+  record Output(
+      Outputs.SnapshotSummary summary,
+      List<String> semanticsOwners,
+      List<BuildTask> unfinishedTasks) {}
 
   @Override
   Object run(Workspace workspace) {
@@ -232,7 +238,7 @@ final class StatusCommand extends SemanticCommand.Base {
           unfinished.addAll(reads.tasks(null, BuildTask.State.CREATED));
           unfinished.addAll(reads.tasks(null, BuildTask.State.FAILED));
           unfinished.addAll(reads.tasks(null, BuildTask.State.WAITING));
-          return new Output(reads.summary(), unfinished);
+          return new Output(reads.summary(), workspace.semanticsOwners(), unfinished);
         });
   }
 }

@@ -41,7 +41,8 @@ process, with no background service.
 | --- | --- |
 | `bin/scalardb-analytics` | Launcher |
 | `lib/` | Runtime jars, including the packaged DuckDB extensions inside the `duckdb` jar |
-| `skills/query-agent-v0/` | Query Agent Skill v0 |
+| `skills/query-agent-v0/`, `skills/query-agent-v1/` | Query Agent Skills v0 and v1 |
+| `plugins/scalardb-analytics/` | Claude Code plugin (`claude --plugin-dir`): Skill v1 and `/scalardb-analytics:*` commands |
 | `LICENSE` | Product license |
 | `licenses/` | Third-party inventory (`third-party/THIRD-PARTY.md`), the license files embedded in the bundled jars, and the licenses of the DuckDB and upstream catalog builds |
 | `provenance/` | Distribution version, platform, and source revision; DuckDB extension and Physical Catalog provenance |

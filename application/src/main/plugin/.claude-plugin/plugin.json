@@ -1,0 +1,11 @@
+{
+  "name": "scalardb-analytics",
+  "version": "${version}",
+  "description": "Build and review the ScalarDB Analytics Semantic Catalog with the user, and answer business questions with cited SQL, through the scalardb-analytics CLI.",
+  "author": {
+    "name": "Scalar, Inc.",
+    "url": "https://www.scalar-labs.com"
+  },
+  "license": "Apache-2.0",
+  "keywords": ["scalardb-analytics", "semantic-catalog", "sql"]
+}

@@ -106,31 +106,46 @@ printf '%s\n' pos-reader-password | "$CLI" source register --workspace ./workspa
 
 Every later command needs `CATALOG_PASSWORD` in its environment.
 
-## 5. Hand the workspace to an AI agent
+## 5. Start the agent
 
-The distribution packages Query Agent Skill v1 at `skills/query-agent-v1/SKILL.md`. Start an
-agent, such as Claude Code, in this directory with the skill, and tell it the following:
+The distribution packages a Claude Code plugin at `plugins/scalardb-analytics/`. It holds Query
+Agent Skill v1, slash commands for its workflows, and a CLI wrapper. The wrapper fills in the
+workspace: `SCALARDB_ANALYTICS_WORKSPACE`, or `./workspace`.
 
-- the CLI path;
-- the workspace path;
-- that `CATALOG_PASSWORD` must be set;
-- that you are the semantics owner `owner`.
+From this directory, with `CATALOG_PASSWORD` still exported, start Claude Code with the plugin:
 
-For example:
-
-```text
-Read ../../application/build/install/scalardb-analytics-*/skills/query-agent-v1/SKILL.md and
-follow it. The CLI is ../../application/build/install/scalardb-analytics-*/bin/scalardb-analytics,
-the workspace is ./workspace, and every command needs CATALOG_PASSWORD=catalog-password. I am the
-semantics owner "owner".
-
-Start a watching build in the background, and present the candidates to me for review as they
-become reviewable, until nothing awaits review.
-Then answer: 2026年9月に EC と店舗の両方で購入した顧客の、9月の EC 売上の合計は?
+```console
+claude --plugin-dir ../../application/build/install/scalardb-analytics-osx_arm64/plugins/scalardb-analytics
 ```
 
-The agent then runs the two workflows of the skill. Steps 6 and 7 show the commands it runs, so
-you can also run them by hand.
+In Claude Code, run:
+
+| Command | What it does |
+| --- | --- |
+| `/scalardb-analytics:setup` | Checks the workspace, the store password, and who you are among the semantics owners, and reports the catalog's state |
+| `/scalardb-analytics:build` | Starts a watching build in the background and reviews candidates with you as they become reviewable |
+| `/scalardb-analytics:ask <question>` | Answers a question with SQL composed from confirmed knowledge, with citations |
+| `/scalardb-analytics:status` | Summarizes the catalog, the review queue, and build tasks |
+
+For this runbook:
+
+```text
+/scalardb-analytics:setup
+/scalardb-analytics:build
+```
+
+Claude Code asks before it runs the CLI. Choose the option that stops asking for that command, or
+start Claude Code with `--allowedTools "Bash(<plugin path>/bin/scalardb-analytics:*)"`. Then
+answer the candidates the agent shows you, for example "all OK", or name the ones that are wrong
+and say why. When nothing is left to review:
+
+```text
+/scalardb-analytics:ask 2026年9月に EC と店舗の両方で購入した顧客の、9月の EC 売上の合計は?
+```
+
+To use another agent, give it `skills/query-agent-v1/SKILL.md`, the CLI path, the workspace path,
+and your principal. Steps 6 and 7 show the commands the agent runs, so you can also run them by
+hand.
 
 ## 6. Build and review (what the agent does)
 

@@ -252,6 +252,22 @@ distributions {
             from("src/main/resources/META-INF/scalardb-analytics/skills") {
                 into("skills")
             }
+            // The Claude Code plugin, loaded with `claude --plugin-dir plugins/scalardb-analytics`:
+            // the latest Agent Skill, slash commands for its workflows, and a CLI wrapper that
+            // fills in the workspace.
+            val productVersion = project.version.toString()
+            from("src/main/plugin") {
+                into("plugins/scalardb-analytics")
+                filesMatching(".claude-plugin/plugin.json") {
+                    expand("version" to productVersion)
+                }
+                filesMatching("bin/**") {
+                    permissions { unix("rwxr-xr-x") }
+                }
+            }
+            from("src/main/resources/META-INF/scalardb-analytics/skills/query-agent-v1") {
+                into("plugins/scalardb-analytics/skills/query-agent")
+            }
             from(generateDistributionProvenance) {
                 into("provenance")
             }
