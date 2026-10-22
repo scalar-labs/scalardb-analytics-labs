@@ -7,54 +7,40 @@ package com.scalar.db.analytics.labs.application.workspace;
 import com.scalar.db.analytics.labs.application.ApplicationFailure;
 import com.scalar.db.analytics.labs.semantic.SemanticCatalog;
 import com.scalar.db.analytics.labs.semantic.SemanticCatalogException;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.attribute.PosixFilePermissions;
 
 /**
- * Places the workspace's Semantic Catalog domain: one storage DuckDB file in the workspace
- * directory, readable and writable only by its owner. The domain is named after the workspace's
- * Physical Catalog catalog.
+ * Places the workspace's Semantic Catalog domain in the Physical Catalog's store database, which
+ * must be PostgreSQL for now. The domain is named after the workspace's Physical Catalog catalog.
  */
 public final class SemanticCatalogs {
   private SemanticCatalogs() {}
 
   /** Creates the domain and records its initial user policy version. */
   public static void create(Workspace workspace, String principal) {
-    var file = workspace.semanticCatalogFile();
     try {
       SemanticCatalog.create(
-              file, workspace.catalogName(), principal, SemanticCatalog.Configuration.READ_ONLY)
+              workspace.semanticStorage(),
+              workspace.catalogName(),
+              principal,
+              SemanticCatalog.Configuration.READ_ONLY)
           .close();
     } catch (SemanticCatalogException e) {
       throw failure(e);
     }
-    restrict(file);
   }
 
   public static SemanticCatalog open(
       Workspace workspace, SemanticCatalog.Configuration configuration) {
-    if (!Files.isRegularFile(workspace.semanticCatalogFile())) {
-      throw new ApplicationFailure(
-          "SEMANTIC_CATALOG_NOT_INITIALIZED",
-          "The workspace has no Semantic Catalog. Initialize a new workspace to create one.");
-    }
     try {
-      return SemanticCatalog.open(workspace.semanticCatalogFile(), configuration);
+      return SemanticCatalog.open(
+          workspace.semanticStorage(), workspace.catalogName(), configuration);
     } catch (SemanticCatalogException e) {
-      throw failure(e);
-    }
-  }
-
-  private static void restrict(Path file) {
-    try {
-      if (Files.getFileStore(file).supportsFileAttributeView("posix")) {
-        Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-------"));
+      if (e.kind() == SemanticCatalogException.Kind.TARGET_NOT_FOUND) {
+        throw new ApplicationFailure(
+            "SEMANTIC_CATALOG_NOT_INITIALIZED",
+            "The workspace has no Semantic Catalog. Initialize a new workspace to create one.");
       }
-    } catch (IOException e) {
-      throw new ApplicationFailure(
-          "WORKSPACE_WRITE_FAILED", "Could not restrict the Semantic Catalog storage.");
+      throw failure(e);
     }
   }
 

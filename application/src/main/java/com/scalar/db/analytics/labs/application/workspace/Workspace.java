@@ -11,6 +11,7 @@ import com.scalar.db.analytics.labs.application.ApplicationFailure;
 import com.scalar.db.analytics.labs.application.ApplicationRuntime;
 import com.scalar.db.analytics.labs.physical.PhysicalCatalogSettings;
 import com.scalar.db.analytics.labs.physical.Secret;
+import com.scalar.db.analytics.labs.semantic.StorageSettings;
 import java.io.IOException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -36,9 +37,6 @@ public final class Workspace {
   private static final String CONFIG_SCHEMA = "scalardb-analytics/workspace-configuration";
   private static final String CONFIG_SCHEMA_VERSION = "2";
   private static final Set<String> READABLE_SCHEMA_VERSIONS = Set.of("1", "2");
-
-  /** The storage DuckDB of the workspace's Semantic Catalog domain. */
-  public static final String SEMANTIC_CATALOG_FILE_NAME = "semantic-catalog.duckdb";
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final Set<PosixFilePermission> PRIVATE_DIRECTORY_PERMISSIONS =
@@ -257,8 +255,13 @@ public final class Workspace {
     return owners == null ? List.of() : owners;
   }
 
-  public Path semanticCatalogFile() {
-    return directory.resolve(SEMANTIC_CATALOG_FILE_NAME);
+  /**
+   * The store of the workspace's Semantic Catalog domain: the Physical Catalog's store database,
+   * with the same connection settings.
+   */
+  public StorageSettings semanticStorage() {
+    return new StorageSettings(
+        configuration.storeJdbcUrl(), configuration.storeUsername(), storePassword.reveal());
   }
 
   /** The process environment, which carries credentials and the language model selection. */

@@ -17,9 +17,7 @@ import com.scalar.db.analytics.labs.semantic.model.ElementKind;
 import com.scalar.db.analytics.labs.semantic.model.Json;
 import com.scalar.db.analytics.labs.semantic.model.Predicates;
 import com.scalar.db.analytics.labs.semantic.model.Urns;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.attribute.PosixFilePermissions;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.HashMap;
@@ -144,10 +142,6 @@ class SemanticSessionIntegrationTest {
   @Test
   void declaredConstraintsAndDataChecksBecomeConfirmedKnowledge() throws Exception {
     var workspace = workspace();
-    assertThat(
-            PosixFilePermissions.toString(
-                Files.getPosixFilePermissions(workspace.semanticCatalogFile())))
-        .isEqualTo("rw-------");
 
     var runs =
         SemanticSession.execute(

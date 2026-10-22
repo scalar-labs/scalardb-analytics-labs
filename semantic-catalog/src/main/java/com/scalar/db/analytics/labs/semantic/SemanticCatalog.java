@@ -37,8 +37,6 @@ import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ObservationKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.PresentationKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Preset;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Target;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -78,14 +76,11 @@ public final class SemanticCatalog implements AutoCloseable {
       LanguageModel model) {
     this.storage = storage;
     this.domain = domain;
-    this.state = replay(storage, domain);
+    this.state = new CatalogState(domain);
     generators.forEach(generator -> this.generators.put(generator.name(), generator));
     this.sql = sql;
     this.model = model;
-    storage.tasks().forEach(task -> tasks.put(task.id(), task));
-    storage
-        .presentations()
-        .forEach(presentation -> presentations.put(presentation.id(), presentation));
+    refresh();
   }
 
   /** What the catalog runs build tasks with. */
@@ -99,12 +94,14 @@ public final class SemanticCatalog implements AutoCloseable {
    * auto}, not counting {@code declared-unenforced} as deterministic.
    */
   public static SemanticCatalog create(
-      Path file, String domain, String principal, Configuration configuration) {
-    if (Files.exists(file)) {
-      throw SemanticCatalogException.invalid("The Semantic Catalog storage already exists.");
+      StorageSettings settings, String domain, String principal, Configuration configuration) {
+    var storage = Storage.open(settings, domain);
+    try {
+      storage.createDomain();
+    } catch (RuntimeException e) {
+      storage.close();
+      throw e;
     }
-    var storage = Storage.open(file);
-    storage.createDomain(domain);
     var catalog =
         new SemanticCatalog(
             storage,
@@ -126,24 +123,44 @@ public final class SemanticCatalog implements AutoCloseable {
     return catalog;
   }
 
-  public static SemanticCatalog open(Path file, Configuration configuration) {
-    if (!Files.isRegularFile(file)) {
-      throw SemanticCatalogException.notFound("The Semantic Catalog storage does not exist.");
-    }
-    var storage = Storage.open(file);
-    var domain = storage.domainName();
-    if (domain == null) {
+  public static SemanticCatalog open(
+      StorageSettings settings, String domain, Configuration configuration) {
+    var storage = Storage.open(settings, domain);
+    if (!storage.domainExists()) {
       storage.close();
-      throw new SemanticCatalogException(Kind.STORAGE_FAILURE, "The storage has no domain.");
+      throw SemanticCatalogException.notFound("The Semantic Catalog domain does not exist.");
     }
     return new SemanticCatalog(
         storage, domain, configuration.generators(), configuration.sql(), configuration.model());
   }
 
+  /**
+   * Catches up on the commits written since this instance last read the log, by this or another
+   * process, and reloads the records kept outside the log.
+   */
+  private void refresh() {
+    if (broken) {
+      throw new SemanticCatalogException(
+          Kind.STORAGE_FAILURE, "The catalog must be reopened after a storage failure.");
+    }
+    apply(state, storage.readLog(state.commit()));
+    tasks.clear();
+    storage.tasks().forEach(task -> tasks.put(task.id(), task));
+    presentations.clear();
+    storage
+        .presentations()
+        .forEach(presentation -> presentations.put(presentation.id(), presentation));
+  }
+
   private static CatalogState replay(Storage storage, String domain) {
     var state = new CatalogState(domain);
+    apply(state, storage.readLog(0));
+    return state;
+  }
+
+  private static void apply(CatalogState state, List<Commit.LogRecord> records) {
     long current = -1;
-    for (var record : storage.readLog()) {
+    for (var record : records) {
       if (record.commit() != current) {
         if (current >= 0) {
           state.endCommit(current);
@@ -155,7 +172,6 @@ public final class SemanticCatalog implements AutoCloseable {
     if (current >= 0) {
       state.endCommit(current);
     }
-    return state;
   }
 
   public String domain() {
@@ -170,8 +186,9 @@ public final class SemanticCatalog implements AutoCloseable {
     return Urns.snapshot(domain, state.commit());
   }
 
-  /** Read access for the public API's reads. */
+  /** Read access for the public API's reads, as of the latest commit in storage. */
   public SnapshotReads reads() {
+    refresh();
     return new SnapshotReads(state, tasks.values(), presentations.values());
   }
 
@@ -187,10 +204,28 @@ public final class SemanticCatalog implements AutoCloseable {
       @Nullable String callId,
       @Nullable Object input,
       Function<Commit, Function<Effects, T>> body) {
-    if (broken) {
-      throw new SemanticCatalogException(
-          Kind.STORAGE_FAILURE, "The catalog must be reopened after a storage failure.");
+    try {
+      return storage.writeTransaction(() -> operationLocked(name, principal, callId, input, body));
+    } catch (SemanticCatalogException e) {
+      if (e.kind() == Kind.STORAGE_FAILURE) {
+        broken = true;
+      }
+      throw e;
+    } catch (RuntimeException e) {
+      broken = true;
+      throw e;
     }
+  }
+
+  private <T> T operationLocked(
+      String name,
+      String principal,
+      @Nullable String callId,
+      @Nullable Object input,
+      Function<Commit, Function<Effects, T>> body) {
+    refresh();
+    pendingPresentations.clear();
+    pendingDerived = null;
     String inputDigest = null;
     if (callId != null) {
       inputDigest =
@@ -254,23 +289,35 @@ public final class SemanticCatalog implements AutoCloseable {
   private final List<ReviewPresentation> pendingPresentations = new ArrayList<>();
   private Storage.@Nullable DerivedRecord pendingDerived;
 
+  /** Writes inside the current write transaction. */
   private void write(
       @Nullable Commit commit,
       java.util.Collection<BuildTask> changedTasks,
       java.util.Collection<ReviewPresentation> changedPresentations,
       Storage.@Nullable CallRecord call,
       Storage.@Nullable DerivedRecord derived) {
+    storage.write(
+        new Storage.Write(
+            commit,
+            state,
+            List.copyOf(changedTasks),
+            List.copyOf(changedPresentations),
+            call,
+            derived));
+  }
+
+  /** Runs a write that changes only records kept outside the log, after catching up. */
+  private <T> T outsideLog(java.util.function.Supplier<T> body) {
     try {
-      storage.write(
-          new Storage.Write(
-              commit,
-              state,
-              List.copyOf(changedTasks),
-              List.copyOf(changedPresentations),
-              call,
-              derived));
+      return storage.writeTransaction(
+          () -> {
+            refresh();
+            return body.get();
+          });
     } catch (SemanticCatalogException e) {
-      broken = commit != null;
+      if (e.kind() == Kind.STORAGE_FAILURE) {
+        broken = true;
+      }
       throw e;
     }
   }
@@ -395,6 +442,7 @@ public final class SemanticCatalog implements AutoCloseable {
       String resourceIdentifier,
       String version,
       JsonNode metadata) {
+    refresh();
     var resource = Urns.tableResource(domain, resourceIdentifier);
     var input = Json.object().put("resource", resourceIdentifier).put("version", version);
     input.set("metadata", metadata);
@@ -473,6 +521,7 @@ public final class SemanticCatalog implements AutoCloseable {
       @Nullable String inputResource,
       @Nullable String question,
       JsonNode content) {
+    refresh();
     if (kind == ObservationKind.PHYSICAL_SCHEMA || kind == ObservationKind.DATA) {
       throw SemanticCatalogException.invalid(
           "Physical schema and data observations are not registered this way.");
@@ -527,6 +576,7 @@ public final class SemanticCatalog implements AutoCloseable {
       @Nullable String callId,
       @Nullable String authorityCheck,
       List<AnswerInput> answers) {
+    refresh();
     if (authorityCheck == null || authorityCheck.isBlank()) {
       throw new SemanticCatalogException(
           Kind.NO_AUTHORITY_CHECK, "The answers have no authority check result.");
@@ -646,6 +696,7 @@ public final class SemanticCatalog implements AutoCloseable {
       List<String> notSelected,
       String wording,
       @Nullable String presentation) {
+    refresh();
     if (authorityCheck == null || authorityCheck.isBlank()) {
       throw new SemanticCatalogException(
           Kind.NO_AUTHORITY_CHECK, "The selection has no authority check result.");
@@ -695,6 +746,7 @@ public final class SemanticCatalog implements AutoCloseable {
       Preset preset,
       boolean countDeclaredUnenforced,
       String reason) {
+    refresh();
     var input =
         Json.object()
             .put("preset", Judge.presetName(preset))
@@ -724,6 +776,17 @@ public final class SemanticCatalog implements AutoCloseable {
     if (facts.isEmpty()) {
       throw SemanticCatalogException.invalid("A presentation needs at least one target Fact.");
     }
+    return outsideLog(
+        () -> registerPresentationLocked(kind, facts, presentedTo, presentedAt, context, question));
+  }
+
+  private PresentationRegistered registerPresentationLocked(
+      PresentationKind kind,
+      List<String> facts,
+      String presentedTo,
+      @Nullable String presentedAt,
+      String context,
+      @Nullable String question) {
     var targets = new ArrayList<ReviewPresentation.Target>();
     for (var urn : facts) {
       var fact = state.factRecord(urn);
@@ -750,43 +813,54 @@ public final class SemanticCatalog implements AutoCloseable {
   // Running build tasks (3.5, 3.6)
 
   public List<BuildTask> createdTasks() {
+    refresh();
     return tasks.values().stream().filter(task -> task.state() == BuildTask.State.CREATED).toList();
   }
 
   public TaskRun runTask(String taskId) {
-    var task = tasks.get(taskId);
-    if (task == null) {
-      throw SemanticCatalogException.notFound("Build task not found.");
-    }
-    if (task.state() != BuildTask.State.CREATED) {
-      throw SemanticCatalogException.notAccepted("The build task is not created.");
-    }
-    return run(task);
+    return run(taskId, BuildTask.State.CREATED, "The build task is not created.");
   }
 
   public TaskRun resumeTask(String taskId) {
-    var task = tasks.get(taskId);
-    if (task == null) {
-      throw SemanticCatalogException.notFound("Build task not found.");
-    }
-    if (task.state() != BuildTask.State.FAILED) {
-      throw SemanticCatalogException.notAccepted("The build task has not failed.");
-    }
-    return run(task);
+    return run(taskId, BuildTask.State.FAILED, "The build task has not failed.");
   }
 
-  private TaskRun run(BuildTask task) {
-    var generator = task.generator() == null ? null : generators.get(task.generator());
-    if (task.kind() == BuildTask.Kind.GENERATOR_RUN && generator == null) {
-      throw SemanticCatalogException.notAccepted("The build task's Generator is not configured.");
-    }
-    var running =
-        task.running(generator == null ? null : generator.version(), Instant.now().toString());
-    tasks.put(running.id(), running);
-    write(null, List.of(running), List.of(), null, null);
+  /**
+   * Runs a build task in three steps, so the Generator, which may wait on a language model for
+   * long, runs without holding the domain's writer lock: claim the task, run the Generator against
+   * the state as of the claim, then catch up and record the result in one commit. Other processes
+   * can answer or select in between; the result is judged against the state at the time it is
+   * recorded.
+   */
+  private TaskRun run(String taskId, BuildTask.State expected, String notAccepted) {
+    var claimed =
+        outsideLog(
+            () -> {
+              var task = tasks.get(taskId);
+              if (task == null) {
+                throw SemanticCatalogException.notFound("Build task not found.");
+              }
+              if (task.state() != expected) {
+                throw SemanticCatalogException.notAccepted(notAccepted);
+              }
+              var generator = task.generator() == null ? null : generators.get(task.generator());
+              if (task.kind() == BuildTask.Kind.GENERATOR_RUN && generator == null) {
+                throw SemanticCatalogException.notAccepted(
+                    "The build task's Generator is not configured.");
+              }
+              var running =
+                  task.running(
+                      generator == null ? null : generator.version(), Instant.now().toString());
+              tasks.put(running.id(), running);
+              write(null, List.of(running), List.of(), null, null);
+              return running;
+            });
+    return run(claimed);
+  }
 
-    var nextCommit = state.commit() + 1;
-    var data = new RecordingDataAccess(nextCommit);
+  private TaskRun run(BuildTask running) {
+    var generator = running.generator() == null ? null : generators.get(running.generator());
+    var data = new RecordingDataAccess();
     GeneratorResult result = null;
     String failure = null;
     if (generator != null) {
@@ -800,12 +874,37 @@ public final class SemanticCatalog implements AutoCloseable {
       var failed =
           running.finished(
               BuildTask.State.FAILED, null, data.read(), null, failure, Instant.now().toString());
-      tasks.put(failed.id(), failed);
-      write(null, List.of(failed), List.of(), null, null);
+      outsideLog(
+          () -> {
+            tasks.put(failed.id(), failed);
+            write(null, List.of(failed), List.of(), null, null);
+            return failed;
+          });
       return new TaskRun(
           failed.id(), failed.state(), null, null, failure, new Effects(null, List.of()));
     }
 
+    var finalResult = result;
+    try {
+      return storage.writeTransaction(() -> record(running, generator, finalResult, data));
+    } catch (SemanticCatalogException e) {
+      if (e.kind() == Kind.STORAGE_FAILURE) {
+        broken = true;
+      }
+      throw e;
+    } catch (RuntimeException e) {
+      broken = true;
+      throw e;
+    }
+  }
+
+  private TaskRun record(
+      BuildTask running,
+      @Nullable Generator generator,
+      @Nullable GeneratorResult result,
+      RecordingDataAccess data) {
+    refresh();
+    var nextCommit = state.commit() + 1;
     var commit = new Commit(state, "run-task", "system");
     var outcome = Json.object();
     var accepted = Json.array();
@@ -915,13 +1014,10 @@ public final class SemanticCatalog implements AutoCloseable {
    * the run's commit so their identifiers are known while the Generator runs.
    */
   private final class RecordingDataAccess implements DataAccess {
-    private final long commitNumber;
     private final List<LogEntry.Observe> pending = new ArrayList<>();
     private final List<String> read = new ArrayList<>();
 
-    RecordingDataAccess(long commitNumber) {
-      this.commitNumber = commitNumber;
-    }
+    RecordingDataAccess() {}
 
     @Override
     public DataObservation query(String check, Object target, String sqlText, List<String> tables)
@@ -960,7 +1056,8 @@ public final class SemanticCatalog implements AutoCloseable {
         }
       }
       if (urn == null) {
-        urn = Urns.observation(domain, "c" + commitNumber + "." + (pending.size() + 1));
+        // Not tied to a log position: the run's commit number is known only when it is recorded.
+        urn = Urns.observation(domain, "data-" + java.util.UUID.randomUUID());
         pending.add(
             new LogEntry.Observe(urn, resource, ObservationKind.DATA, digest, content, null, null));
       }
@@ -984,6 +1081,7 @@ public final class SemanticCatalog implements AutoCloseable {
    * in storage.
    */
   public Verification verify() {
+    refresh();
     var replayed = replay(storage, domain);
     var expected = MaterializedRows.all(replayed);
     var actual = storage.materializedRows();

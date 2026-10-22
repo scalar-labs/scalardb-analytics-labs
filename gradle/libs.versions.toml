@@ -52,6 +52,8 @@ slf4j-nop = { module = "org.slf4j:slf4j-nop" }
 spring-boot-dependencies = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "spring-boot" }
 spring-boot-autoconfigure = { module = "org.springframework.boot:spring-boot-autoconfigure" }
 spring-boot-jdbc = { module = "org.springframework.boot:spring-boot-jdbc" }
+spring-data-jdbc = { module = "org.springframework.data:spring-data-jdbc" }
+hikaricp = { module = "com.zaxxer:HikariCP" }
 testcontainers-junit-jupiter = { module = "org.testcontainers:junit-jupiter", version.ref = "testcontainers" }
 testcontainers-mysql = { module = "org.testcontainers:mysql", version.ref = "testcontainers" }
 testcontainers-postgresql = { module = "org.testcontainers:postgresql", version.ref = "testcontainers" }

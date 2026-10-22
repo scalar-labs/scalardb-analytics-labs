@@ -14,6 +14,7 @@ import com.scalar.db.analytics.labs.semantic.SemanticCatalog.AnswerInput;
 import com.scalar.db.analytics.labs.semantic.SemanticCatalog.Configuration;
 import com.scalar.db.analytics.labs.semantic.SnapshotReads.Request;
 import com.scalar.db.analytics.labs.semantic.SqlExecutor;
+import com.scalar.db.analytics.labs.semantic.TestStore;
 import com.scalar.db.analytics.labs.semantic.generator.DataAccess.DataAccessException;
 import com.scalar.db.analytics.labs.semantic.model.ElementKind;
 import com.scalar.db.analytics.labs.semantic.model.Json;
@@ -22,7 +23,6 @@ import com.scalar.db.analytics.labs.semantic.model.Urns;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.AnswerType;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ObservationKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Target;
-import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
@@ -32,7 +32,6 @@ import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Runs the standard Generators over two tables served by an in-memory DuckDB, with a scripted
@@ -44,7 +43,6 @@ class GeneratorsTest {
   private static final String ORDERS = Urns.dataset(DOMAIN, "shop.public.orders");
   private static final String CUSTOMERS = Urns.dataset(DOMAIN, "shop.public.customers");
 
-  @TempDir Path directory;
   private Connection data;
   private final List<String> prompts = new ArrayList<>();
 
@@ -133,8 +131,7 @@ class GeneratorsTest {
 
   private SemanticCatalog create() {
     var configuration = new Configuration(Generators.standard(model), sql(), model);
-    return SemanticCatalog.create(
-        directory.resolve("catalog.duckdb"), DOMAIN, OWNER, configuration);
+    return SemanticCatalog.create(TestStore.freshStore(), DOMAIN, OWNER, configuration);
   }
 
   private static JsonNode metadata(String json) {

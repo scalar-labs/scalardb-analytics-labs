@@ -32,7 +32,6 @@ import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ObservationKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.PresentationKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.RetirementReason;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Target;
-import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
@@ -40,7 +39,6 @@ import java.util.Objects;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 class SemanticCatalogTest {
   private static final String DOMAIN = "sales";
@@ -48,15 +46,13 @@ class SemanticCatalogTest {
   private static final String DATASET = Urns.dataset(DOMAIN, "shop.public.orders");
   private static final String STATUS = Urns.field(DATASET, "status");
 
-  @TempDir Path directory;
-
   private final ScriptedGenerator generator = new ScriptedGenerator();
-  private Path file;
+  private StorageSettings store;
 
   @BeforeEach
   void setUp() {
-    file = directory.resolve("semantic-catalog.duckdb");
-    SemanticCatalog.create(file, DOMAIN, OWNER, configuration()).close();
+    store = TestStore.freshStore();
+    SemanticCatalog.create(store, DOMAIN, OWNER, configuration()).close();
   }
 
   private Configuration configuration() {
@@ -65,7 +61,7 @@ class SemanticCatalogTest {
   }
 
   private SemanticCatalog open() {
-    return SemanticCatalog.open(file, configuration());
+    return SemanticCatalog.open(store, DOMAIN, configuration());
   }
 
   /** Registers a document and runs the build task it creates with the scripted candidates. */
@@ -422,6 +418,49 @@ class SemanticCatalogTest {
   }
 
   @Test
+  void anotherProcessCanAnswerWhileAGeneratorRuns() {
+    try (var builder = open();
+        var reviewer = open()) {
+      build(builder, List.of(datasetExists(), fieldExists(), meaning("Order status code")));
+      var meaning = meaningFact("Order status code");
+      var unitValue = Json.object().put("unit", "code");
+      var unit =
+          new Candidate(
+              STATUS,
+              null,
+              Predicates.UNIT,
+              Scope.UNRESTRICTED,
+              unitValue,
+              List.of(new DependencyRef.OnFact(meaning)),
+              List.of(inference()),
+              List.of());
+      // While the builder's Generator runs, the reviewer, another instance on the same domain,
+      // consents to the meaning the new candidate depends on.
+      generator.during =
+          () ->
+              reviewer.submitAnswers(
+                  OWNER,
+                  null,
+                  "authz:owner",
+                  List.of(
+                      new AnswerInput(
+                          meaning, Target.CONFIRMATION, AnswerType.CONSENT, "Yes", null)));
+
+      build(builder, List.of(unit));
+
+      // The candidate was judged against the state that includes the reviewer's commit, so it is
+      // evaluated and awaits consent, and both instances read the same catalog.
+      var unitFact = Facts.fact(DOMAIN, STATUS, Predicates.UNIT, Scope.UNRESTRICTED, unitValue);
+      var queue = reviewer.reads().reviewQueue(null, PresentationKind.CONFIRMATION, null, null);
+      assertThat(queue.items())
+          .extracting(item -> item.facts().getFirst().fact())
+          .containsExactly(unitFact);
+      assertThat(builder.verify().consistent()).isTrue();
+      assertThat(reviewer.verify().consistent()).isTrue();
+    }
+  }
+
+  @Test
   void aFailingGeneratorLeavesTheTaskFailedAndResumable() {
     try (var catalog = open()) {
       generator.failNext = true;
@@ -505,6 +544,7 @@ class SemanticCatalogTest {
   private static final class ScriptedGenerator implements Generator {
     final Deque<GeneratorResult> next = new ArrayDeque<>();
     boolean failNext;
+    Runnable during = () -> {};
 
     @Override
     public String name() {
@@ -524,6 +564,8 @@ class SemanticCatalogTest {
     @Override
     public GeneratorResult run(GeneratorContext context)
         throws com.scalar.db.analytics.labs.semantic.generator.GeneratorException {
+      during.run();
+      during = () -> {};
       if (failNext) {
         failNext = false;
         throw new com.scalar.db.analytics.labs.semantic.generator.GeneratorException(

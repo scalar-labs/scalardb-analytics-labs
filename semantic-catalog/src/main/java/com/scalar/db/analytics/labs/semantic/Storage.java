@@ -8,147 +8,240 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.scalar.db.analytics.labs.semantic.SemanticCatalogException.Kind;
 import com.scalar.db.analytics.labs.semantic.model.Json;
 import com.scalar.db.analytics.labs.semantic.model.LogEntry;
-import java.nio.file.Path;
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.SQLException;
+import com.scalar.db.analytics.labs.semantic.storage.Repositories;
+import com.scalar.db.analytics.labs.semantic.storage.Rows;
+import com.scalar.db.analytics.labs.semantic.storage.StorageConfiguration;
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.TreeSet;
+import java.util.function.Supplier;
+import javax.sql.DataSource;
 import org.jspecify.annotations.Nullable;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.dao.DataAccessException;
+import org.springframework.data.jdbc.core.JdbcAggregateOperations;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcOperations;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * The storage adapter: one embedded DuckDB database per domain, separate from the Query Engine's.
+ * The storage adapter: the Semantic Catalog's tables in the Physical Catalog's store database, in
+ * the {@code semantic_catalog} schema, accessed through Spring Data JDBC. PostgreSQL is assumed.
  *
- * <p>The log, the materialized state, and the records kept outside the log share one database, so
- * one transaction writes a commit together with the build task and review presentation updates and
- * the call identifier it belongs to. DuckDB admits one writing process per database file, which
- * makes this process the domain's single serialized writer. No DuckDB type leaves this class.
+ * <p>Every domain shares the tables, keyed by domain. Writers to one domain are serialized by a
+ * PostgreSQL advisory lock held for the write transaction, so several processes can work on one
+ * domain: each takes the lock, catches up on the commits others wrote, and then writes the next
+ * commit, together with the build task and review presentation updates and the call identifier it
+ * belongs to. No database type leaves this class.
  */
 final class Storage implements AutoCloseable {
+  private static final String SCHEMA = Rows.SCHEMA;
+
   /** Schema migrations, applied in order; the index plus one is the schema version. */
   private static final List<List<String>> MIGRATIONS =
       List.of(
           List.of(
-              "CREATE TABLE schema_version (version INTEGER NOT NULL)",
-              "CREATE TABLE domain_info (name VARCHAR NOT NULL, created_at TIMESTAMP NOT NULL)",
-              "CREATE TABLE commits (commit_no BIGINT PRIMARY KEY, written_at TIMESTAMP NOT NULL,"
-                  + " operation VARCHAR NOT NULL, principal VARCHAR NOT NULL)",
-              "CREATE TABLE log_records (commit_no BIGINT NOT NULL, ordinal INTEGER NOT NULL,"
-                  + " record_type VARCHAR NOT NULL, payload VARCHAR NOT NULL,"
-                  + " PRIMARY KEY (commit_no, ordinal))",
-              "CREATE TABLE fact_records (fact_urn VARCHAR PRIMARY KEY, address_urn VARCHAR NOT NULL,"
-                  + " state VARCHAR NOT NULL, latest_revision VARCHAR NOT NULL)",
-              "CREATE TABLE presentable_periods (fact_urn VARCHAR NOT NULL,"
+              "CREATE TABLE "
+                  + SCHEMA
+                  + ".domains (name TEXT PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL)",
+              "CREATE TABLE "
+                  + SCHEMA
+                  + ".commits (domain TEXT NOT NULL, commit_no BIGINT NOT NULL,"
+                  + " written_at TIMESTAMPTZ NOT NULL, operation TEXT NOT NULL, principal TEXT NOT NULL,"
+                  + " PRIMARY KEY (domain, commit_no))",
+              "CREATE TABLE "
+                  + SCHEMA
+                  + ".log_records (domain TEXT NOT NULL, commit_no BIGINT NOT NULL,"
+                  + " ordinal INTEGER NOT NULL, record_type TEXT NOT NULL, payload TEXT NOT NULL,"
+                  + " PRIMARY KEY (domain, commit_no, ordinal))",
+              "CREATE TABLE "
+                  + SCHEMA
+                  + ".fact_records (domain TEXT NOT NULL, fact_urn TEXT NOT NULL,"
+                  + " address_urn TEXT NOT NULL, state TEXT NOT NULL, latest_revision TEXT NOT NULL,"
+                  + " PRIMARY KEY (domain, fact_urn))",
+              "CREATE TABLE "
+                  + SCHEMA
+                  + ".presentable_periods (domain TEXT NOT NULL, fact_urn TEXT NOT NULL,"
                   + " confirmed_commit BIGINT NOT NULL, retired_commit BIGINT)",
-              "CREATE TABLE address_selections (address_urn VARCHAR NOT NULL,"
-                  + " from_commit BIGINT NOT NULL, to_commit BIGINT, selected_fact VARCHAR,"
-                  + " eligible VARCHAR NOT NULL)",
-              "CREATE TABLE build_tasks (task_id VARCHAR PRIMARY KEY, seq BIGINT NOT NULL,"
-                  + " record VARCHAR NOT NULL)",
-              "CREATE TABLE review_presentations (presentation_id VARCHAR PRIMARY KEY,"
-                  + " record VARCHAR NOT NULL)",
-              "CREATE TABLE call_records (call_id VARCHAR PRIMARY KEY, operation VARCHAR NOT NULL,"
-                  + " input_digest VARCHAR NOT NULL, output VARCHAR NOT NULL,"
-                  + " recorded_at TIMESTAMP NOT NULL)",
-              "CREATE TABLE derived_records (input_resource VARCHAR NOT NULL,"
-                  + " version VARCHAR NOT NULL, record VARCHAR NOT NULL,"
-                  + " recorded_at TIMESTAMP NOT NULL, PRIMARY KEY (input_resource, version))"));
+              "CREATE INDEX presentable_periods_fact ON "
+                  + SCHEMA
+                  + ".presentable_periods (domain, fact_urn)",
+              "CREATE TABLE "
+                  + SCHEMA
+                  + ".address_selections (domain TEXT NOT NULL, address_urn TEXT NOT NULL,"
+                  + " from_commit BIGINT NOT NULL, to_commit BIGINT, selected_fact TEXT, eligible TEXT NOT NULL)",
+              "CREATE INDEX address_selections_address ON "
+                  + SCHEMA
+                  + ".address_selections (domain, address_urn)",
+              "CREATE TABLE "
+                  + SCHEMA
+                  + ".build_tasks (id TEXT PRIMARY KEY, domain TEXT NOT NULL,"
+                  + " seq BIGINT NOT NULL, record TEXT NOT NULL)",
+              "CREATE TABLE "
+                  + SCHEMA
+                  + ".review_presentations (id TEXT PRIMARY KEY, domain TEXT NOT NULL,"
+                  + " seq BIGINT NOT NULL, record TEXT NOT NULL)",
+              "CREATE TABLE "
+                  + SCHEMA
+                  + ".call_records (id TEXT PRIMARY KEY, domain TEXT NOT NULL,"
+                  + " operation TEXT NOT NULL, input_digest TEXT NOT NULL, output TEXT NOT NULL,"
+                  + " recorded_at TIMESTAMPTZ NOT NULL)",
+              "CREATE TABLE "
+                  + SCHEMA
+                  + ".derived_records (domain TEXT NOT NULL, input_resource TEXT NOT NULL,"
+                  + " version TEXT NOT NULL, record TEXT NOT NULL, recorded_at TIMESTAMPTZ NOT NULL,"
+                  + " PRIMARY KEY (domain, input_resource, version))"));
 
   /** Provisional: how long call identifiers are retained for resend detection. */
   static final Duration CALL_RETENTION = Duration.ofDays(30);
 
-  private final Connection connection;
+  private final AnnotationConfigApplicationContext context;
+  private final String domain;
+  private final NamedParameterJdbcOperations jdbc;
+  private final JdbcAggregateOperations aggregates;
+  private final TransactionTemplate transactions;
+  private final Repositories.Domains domains;
+  private final Repositories.BuildTasks buildTasks;
+  private final Repositories.Presentations presentations;
+  private final Repositories.Calls calls;
 
-  private Storage(Connection connection) {
-    this.connection = connection;
+  private Storage(AnnotationConfigApplicationContext context, String domain) {
+    this.context = context;
+    this.domain = domain;
+    jdbc = context.getBean(NamedParameterJdbcOperations.class);
+    aggregates = context.getBean(JdbcAggregateOperations.class);
+    transactions = context.getBean(TransactionTemplate.class);
+    domains = context.getBean(Repositories.Domains.class);
+    buildTasks = context.getBean(Repositories.BuildTasks.class);
+    presentations = context.getBean(Repositories.Presentations.class);
+    calls = context.getBean(Repositories.Calls.class);
   }
 
-  static Storage open(Path file) {
+  /** Connects to the store, migrates the schema, and binds the storage to one domain. */
+  static Storage open(StorageSettings settings, String domain) {
+    HikariDataSource dataSource = null;
+    AnnotationConfigApplicationContext context = null;
     try {
-      Class.forName("org.duckdb.DuckDBDriver");
-      var connection = DriverManager.getConnection("jdbc:duckdb:" + file.toAbsolutePath());
-      var storage = new Storage(connection);
+      var config = new HikariConfig();
+      config.setJdbcUrl(settings.jdbcUrl());
+      if (settings.username() != null) {
+        config.setUsername(settings.username());
+      }
+      config.setPassword(settings.password());
+      config.setMaximumPoolSize(4);
+      config.setConnectionTimeout(10_000);
+      config.setPoolName("semantic-catalog");
+      dataSource = new HikariDataSource(config);
+      var source = dataSource;
+      context = new AnnotationConfigApplicationContext();
+      context.registerBean("dataSource", DataSource.class, () -> source);
+      context.register(StorageConfiguration.class);
+      context.refresh();
+      var storage = new Storage(context, domain);
       storage.migrate();
       return storage;
-    } catch (ClassNotFoundException | SQLException e) {
+    } catch (RuntimeException e) {
+      if (context != null) {
+        context.close();
+      }
+      if (dataSource != null) {
+        dataSource.close();
+      }
       throw failure("Could not open the Semantic Catalog storage.", e);
     }
   }
 
-  private void migrate() throws SQLException {
-    var current = 0;
-    try (var statement = connection.createStatement()) {
-      var exists =
-          statement.executeQuery(
-              "SELECT count(*) FROM information_schema.tables WHERE table_name = 'schema_version'");
-      exists.next();
-      if (exists.getLong(1) > 0) {
-        var version = statement.executeQuery("SELECT max(version) FROM schema_version");
-        version.next();
-        current = version.getInt(1);
-      }
-    }
-    for (var index = current; index < MIGRATIONS.size(); index++) {
-      connection.setAutoCommit(false);
-      try (var statement = connection.createStatement()) {
-        for (var sql : MIGRATIONS.get(index)) {
-          statement.execute(sql);
-        }
-        statement.execute("INSERT INTO schema_version VALUES (" + (index + 1) + ")");
-        connection.commit();
-      } catch (SQLException e) {
-        connection.rollback();
-        throw e;
-      } finally {
-        connection.setAutoCommit(true);
-      }
-    }
+  private void migrate() {
+    transactions.executeWithoutResult(
+        status -> {
+          // One process migrates at a time.
+          jdbc.getJdbcOperations()
+              .execute("SELECT pg_advisory_xact_lock(hashtextextended('sdba:migration', 0))");
+          jdbc.getJdbcOperations().execute("CREATE SCHEMA IF NOT EXISTS " + SCHEMA);
+          jdbc.getJdbcOperations()
+              .execute(
+                  "CREATE TABLE IF NOT EXISTS "
+                      + SCHEMA
+                      + ".schema_version (version INTEGER NOT NULL)");
+          var current =
+              Objects.requireNonNullElse(
+                  jdbc.queryForObject(
+                      "SELECT max(version) FROM " + SCHEMA + ".schema_version",
+                      Map.of(),
+                      Integer.class),
+                  0);
+          for (var index = current; index < MIGRATIONS.size(); index++) {
+            for (var sql : MIGRATIONS.get(index)) {
+              jdbc.getJdbcOperations().execute(sql);
+            }
+            jdbc.update(
+                "INSERT INTO " + SCHEMA + ".schema_version VALUES (:version)",
+                Map.of("version", index + 1));
+          }
+        });
   }
 
-  @Nullable String domainName() {
-    try (var statement = connection.createStatement()) {
-      var rows = statement.executeQuery("SELECT name FROM domain_info");
-      return rows.next() ? rows.getString(1) : null;
-    } catch (SQLException e) {
-      throw failure("Could not read the domain.", e);
-    }
+  boolean domainExists() {
+    return guarded(() -> domains.existsById(domain));
   }
 
-  void createDomain(String name) {
-    try (var statement = connection.prepareStatement("INSERT INTO domain_info VALUES (?, ?)")) {
-      statement.setString(1, name);
-      statement.setTimestamp(2, Timestamp.from(Instant.now()));
-      statement.executeUpdate();
-    } catch (SQLException e) {
-      throw failure("Could not create the domain.", e);
-    }
+  void createDomain() {
+    guarded(
+        () -> {
+          if (domains.existsById(domain)) {
+            throw new SemanticCatalogException(
+                Kind.INVALID_INPUT, "The Semantic Catalog domain already exists.");
+          }
+          aggregates.insert(new Rows.DomainRow(domain, Instant.now()));
+          return null;
+        });
   }
 
-  List<Commit.LogRecord> readLog() {
-    var records = new ArrayList<Commit.LogRecord>();
-    try (var statement = connection.createStatement()) {
-      var rows =
-          statement.executeQuery(
-              "SELECT commit_no, ordinal, payload FROM log_records ORDER BY commit_no, ordinal");
-      while (rows.next()) {
-        records.add(
-            new Commit.LogRecord(
-                rows.getLong(1), rows.getInt(2), Json.read(rows.getString(3), LogEntry.class)));
-      }
-      return records;
-    } catch (SQLException e) {
-      throw failure("Could not read the log.", e);
-    }
+  /**
+   * Runs a write in one transaction that holds the domain's writer lock, so the body sees every
+   * commit written before it and no other writer interleaves.
+   */
+  <T> T writeTransaction(Supplier<T> body) {
+    return guarded(
+        () ->
+            transactions.execute(
+                status -> {
+                  jdbc.query(
+                      "SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))",
+                      Map.of("key", "sdba:domain:" + domain),
+                      (org.springframework.jdbc.core.ResultSetExtractor<@Nullable Void>)
+                          rows -> null);
+                  return body.get();
+                }));
   }
 
-  /** Everything one transaction writes. A null commit writes only records kept outside the log. */
+  /** The log records after a commit, in order. */
+  List<Commit.LogRecord> readLog(long afterCommit) {
+    return guarded(
+        () ->
+            jdbc.query(
+                "SELECT commit_no, ordinal, payload FROM "
+                    + SCHEMA
+                    + ".log_records"
+                    + " WHERE domain = :domain AND commit_no > :after ORDER BY commit_no, ordinal",
+                Map.of("domain", domain, "after", afterCommit),
+                (row, index) ->
+                    new Commit.LogRecord(
+                        row.getLong(1),
+                        row.getInt(2),
+                        Json.read(row.getString(3), LogEntry.class))));
+  }
+
+  /** Everything one write records. A null commit writes only records kept outside the log. */
   record Write(
       @Nullable Commit commit,
       @Nullable CatalogState state,
@@ -161,246 +254,247 @@ final class Storage implements AutoCloseable {
 
   record DerivedRecord(String inputResource, String version, JsonNode record) {}
 
+  /** Writes inside a {@link #writeTransaction}. */
   void write(Write write) {
-    try {
-      connection.setAutoCommit(false);
-      var now = Timestamp.from(Instant.now());
-      var commit = write.commit();
-      if (commit != null && !commit.empty()) {
-        try (var statement =
-            connection.prepareStatement("INSERT INTO commits VALUES (?, ?, ?, ?)")) {
-          statement.setLong(1, commit.number);
-          statement.setTimestamp(2, now);
-          statement.setString(3, commit.operation);
-          statement.setString(4, commit.principal);
-          statement.executeUpdate();
-        }
-        try (var statement =
-            connection.prepareStatement("INSERT INTO log_records VALUES (?, ?, ?, ?)")) {
-          for (var record : commit.records()) {
-            var payload = Json.tree(record.entry());
-            statement.setLong(1, record.commit());
-            statement.setInt(2, record.ordinal());
-            statement.setString(3, payload.path("record").asText());
-            statement.setString(4, Json.write(payload));
-            statement.addBatch();
-          }
-          statement.executeBatch();
-        }
-        materialize(
-            java.util.Objects.requireNonNull(write.state()), commit.facts(), commit.addresses());
+    var now = Timestamp.from(Instant.now());
+    var commit = write.commit();
+    if (commit != null && !commit.empty()) {
+      jdbc.update(
+          "INSERT INTO "
+              + SCHEMA
+              + ".commits VALUES (:domain, :commit, :now, :operation, :principal)",
+          new MapSqlParameterSource()
+              .addValue("domain", domain)
+              .addValue("commit", commit.number)
+              .addValue("now", now)
+              .addValue("operation", commit.operation)
+              .addValue("principal", commit.principal));
+      var batch = new ArrayList<MapSqlParameterSource>();
+      for (var record : commit.records()) {
+        var payload = Json.tree(record.entry());
+        batch.add(
+            new MapSqlParameterSource()
+                .addValue("domain", domain)
+                .addValue("commit", record.commit())
+                .addValue("ordinal", record.ordinal())
+                .addValue("type", payload.path("record").asText())
+                .addValue("payload", Json.write(payload)));
       }
-      for (var task : write.tasks()) {
-        try (var statement =
-            connection.prepareStatement("INSERT OR REPLACE INTO build_tasks VALUES (?, ?, ?)")) {
-          statement.setString(1, task.id());
-          statement.setLong(2, task.sequence());
-          statement.setString(3, Json.write(task));
-          statement.executeUpdate();
-        }
-      }
-      for (var presentation : write.presentations()) {
-        try (var statement =
-            connection.prepareStatement(
-                "INSERT OR REPLACE INTO review_presentations VALUES (?, ?)")) {
-          statement.setString(1, presentation.id());
-          statement.setString(2, Json.write(presentation));
-          statement.executeUpdate();
-        }
-      }
-      var call = write.call();
-      if (call != null) {
-        try (var statement =
-            connection.prepareStatement("INSERT INTO call_records VALUES (?, ?, ?, ?, ?)")) {
-          statement.setString(1, call.callId());
-          statement.setString(2, call.operation());
-          statement.setString(3, call.inputDigest());
-          statement.setString(4, Json.write(call.output()));
-          statement.setTimestamp(5, now);
-          statement.executeUpdate();
-        }
-        try (var statement =
-            connection.prepareStatement("DELETE FROM call_records WHERE recorded_at < ?")) {
-          statement.setTimestamp(1, Timestamp.from(Instant.now().minus(CALL_RETENTION)));
-          statement.executeUpdate();
-        }
-      }
-      var derived = write.derived();
-      if (derived != null) {
-        try (var statement =
-            connection.prepareStatement(
-                "INSERT OR REPLACE INTO derived_records VALUES (?, ?, ?, ?)")) {
-          statement.setString(1, derived.inputResource());
-          statement.setString(2, derived.version());
-          statement.setString(3, Json.write(derived.record()));
-          statement.setTimestamp(4, now);
-          statement.executeUpdate();
-        }
-      }
-      connection.commit();
-    } catch (SQLException | RuntimeException e) {
-      try {
-        connection.rollback();
-      } catch (SQLException rollbackFailure) {
-        e.addSuppressed(rollbackFailure);
-      }
-      throw failure("Could not write to the Semantic Catalog storage.", e);
-    } finally {
-      try {
-        connection.setAutoCommit(true);
-      } catch (SQLException ignored) {
-        // The next write reports a broken connection.
-      }
+      jdbc.batchUpdate(
+          "INSERT INTO "
+              + SCHEMA
+              + ".log_records VALUES (:domain, :commit, :ordinal, :type, :payload)",
+          batch.toArray(MapSqlParameterSource[]::new));
+      materialize(Objects.requireNonNull(write.state()), commit.facts(), commit.addresses());
+    }
+    for (var task : write.tasks()) {
+      upsert(
+          new Rows.BuildTaskRow(
+              domain + "/" + task.id(), domain, task.sequence(), Json.write(task)),
+          buildTasks.existsById(domain + "/" + task.id()));
+    }
+    for (var presentation : write.presentations()) {
+      var id = domain + "/" + presentation.id();
+      var sequence =
+          Long.parseLong(presentation.id().substring(presentation.id().lastIndexOf('-') + 1));
+      upsert(
+          new Rows.PresentationRow(id, domain, sequence, Json.write(presentation)),
+          presentations.existsById(id));
+    }
+    var call = write.call();
+    if (call != null) {
+      aggregates.insert(
+          new Rows.CallRow(
+              domain + "/" + call.callId(),
+              domain,
+              call.operation(),
+              call.inputDigest(),
+              Json.write(call.output()),
+              Instant.now()));
+      calls.deleteRecordedBefore(Instant.now().minus(CALL_RETENTION));
+    }
+    var derived = write.derived();
+    if (derived != null) {
+      jdbc.update(
+          "INSERT INTO "
+              + SCHEMA
+              + ".derived_records VALUES (:domain, :resource, :version, :record, :now)"
+              + " ON CONFLICT (domain, input_resource, version) DO UPDATE SET record = EXCLUDED.record",
+          new MapSqlParameterSource()
+              .addValue("domain", domain)
+              .addValue("resource", derived.inputResource())
+              .addValue("version", derived.version())
+              .addValue("record", Json.write(derived.record()))
+              .addValue("now", now));
+    }
+  }
+
+  /** Writes records kept outside the log in a transaction of their own. */
+  void writeOutsideLog(Write write) {
+    writeTransaction(
+        () -> {
+          write(write);
+          return null;
+        });
+  }
+
+  private <T> void upsert(T row, boolean exists) {
+    if (exists) {
+      aggregates.update(row);
+    } else {
+      aggregates.insert(row);
     }
   }
 
   /** Rewrites the materialized rows of the Facts and Fact Addresses a commit touched. */
   private void materialize(
-      CatalogState state, Collection<String> facts, Collection<String> addresses)
-      throws SQLException {
+      CatalogState state, Collection<String> facts, Collection<String> addresses) {
     for (var urn : facts) {
       var fact = state.requireFact(urn);
-      delete("DELETE FROM fact_records WHERE fact_urn = ?", urn);
-      delete("DELETE FROM presentable_periods WHERE fact_urn = ?", urn);
+      var key = Map.of("domain", domain, "urn", urn);
+      jdbc.update(
+          "DELETE FROM " + SCHEMA + ".fact_records WHERE domain = :domain AND fact_urn = :urn",
+          key);
+      jdbc.update(
+          "DELETE FROM "
+              + SCHEMA
+              + ".presentable_periods WHERE domain = :domain AND fact_urn = :urn",
+          key);
       for (var row : MaterializedRows.fact(fact)) {
-        insert("INSERT INTO fact_records VALUES (?, ?, ?, ?)", row);
+        insert("fact_records", row);
       }
       for (var row : MaterializedRows.periods(fact)) {
-        insert("INSERT INTO presentable_periods VALUES (?, ?, ?)", row);
+        insert("presentable_periods", row);
       }
     }
     for (var urn : addresses) {
-      var address = java.util.Objects.requireNonNull(state.address(urn));
-      delete("DELETE FROM address_selections WHERE address_urn = ?", urn);
+      var address = Objects.requireNonNull(state.address(urn));
+      jdbc.update(
+          "DELETE FROM "
+              + SCHEMA
+              + ".address_selections WHERE domain = :domain AND address_urn = :urn",
+          Map.of("domain", domain, "urn", urn));
       for (var row : MaterializedRows.selections(address)) {
-        insert("INSERT INTO address_selections VALUES (?, ?, ?, ?, ?)", row);
+        insert("address_selections", row);
       }
     }
   }
 
-  private void delete(String sql, String key) throws SQLException {
-    try (var statement = connection.prepareStatement(sql)) {
-      statement.setString(1, key);
-      statement.executeUpdate();
+  private void insert(String table, List<@Nullable Object> row) {
+    var parameters = new MapSqlParameterSource().addValue("p0", domain);
+    var names = new StringBuilder(":p0");
+    for (var i = 0; i < row.size(); i++) {
+      parameters.addValue("p" + (i + 1), row.get(i));
+      names.append(", :p").append(i + 1);
     }
-  }
-
-  private void insert(String sql, List<@Nullable Object> row) throws SQLException {
-    try (PreparedStatement statement = connection.prepareStatement(sql)) {
-      for (var i = 0; i < row.size(); i++) {
-        statement.setObject(i + 1, row.get(i));
-      }
-      statement.executeUpdate();
-    }
+    jdbc.update("INSERT INTO " + SCHEMA + "." + table + " VALUES (" + names + ")", parameters);
   }
 
   /** The materialized rows as stored, for the invariant check. */
   TreeSet<String> materializedRows() {
-    var rows = new TreeSet<String>();
-    try (var statement = connection.createStatement()) {
-      var facts = statement.executeQuery("SELECT * FROM fact_records");
-      while (facts.next()) {
-        rows.add(
-            MaterializedRows.encode(
-                "fact",
-                facts.getString(1),
-                facts.getString(2),
-                facts.getString(3),
-                facts.getString(4)));
-      }
-      var periods = statement.executeQuery("SELECT * FROM presentable_periods");
-      while (periods.next()) {
-        var retired = periods.getObject(3);
-        rows.add(
-            MaterializedRows.encode(
-                "period",
-                periods.getString(1),
-                periods.getLong(2),
-                retired == null ? null : periods.getLong(3)));
-      }
-      var selections = statement.executeQuery("SELECT * FROM address_selections");
-      while (selections.next()) {
-        var to = selections.getObject(3);
-        rows.add(
-            MaterializedRows.encode(
-                "selection",
-                selections.getString(1),
-                selections.getLong(2),
-                to == null ? null : selections.getLong(3),
-                selections.getString(4),
-                selections.getString(5)));
-      }
-      return rows;
-    } catch (SQLException e) {
-      throw failure("Could not read the materialized state.", e);
-    }
+    return guarded(
+        () -> {
+          var rows = new TreeSet<String>();
+          var key = Map.of("domain", domain);
+          jdbc.query(
+              "SELECT fact_urn, address_urn, state, latest_revision FROM "
+                  + SCHEMA
+                  + ".fact_records WHERE domain = :domain",
+              key,
+              (row, index) ->
+                  rows.add(
+                      MaterializedRows.encode(
+                          "fact",
+                          row.getString(1),
+                          row.getString(2),
+                          row.getString(3),
+                          row.getString(4))));
+          jdbc.query(
+              "SELECT fact_urn, confirmed_commit, retired_commit FROM "
+                  + SCHEMA
+                  + ".presentable_periods WHERE domain = :domain",
+              key,
+              (row, index) ->
+                  rows.add(
+                      MaterializedRows.encode(
+                          "period",
+                          row.getString(1),
+                          row.getLong(2),
+                          row.getObject(3) == null ? null : row.getLong(3))));
+          jdbc.query(
+              "SELECT address_urn, from_commit, to_commit, selected_fact, eligible FROM "
+                  + SCHEMA
+                  + ".address_selections WHERE domain = :domain",
+              key,
+              (row, index) ->
+                  rows.add(
+                      MaterializedRows.encode(
+                          "selection",
+                          row.getString(1),
+                          row.getLong(2),
+                          row.getObject(3) == null ? null : row.getLong(3),
+                          row.getString(4),
+                          row.getString(5))));
+          return rows;
+        });
   }
 
   List<BuildTask> tasks() {
-    var tasks = new ArrayList<BuildTask>();
-    try (var statement = connection.createStatement()) {
-      var rows = statement.executeQuery("SELECT record FROM build_tasks ORDER BY seq");
-      while (rows.next()) {
-        tasks.add(Json.read(rows.getString(1), BuildTask.class));
-      }
-      return tasks;
-    } catch (SQLException e) {
-      throw failure("Could not read build tasks.", e);
-    }
+    return guarded(
+        () ->
+            buildTasks.findByDomainOrderBySeq(domain).stream()
+                .map(row -> Json.read(row.record(), BuildTask.class))
+                .toList());
   }
 
   List<ReviewPresentation> presentations() {
-    var presentations = new ArrayList<ReviewPresentation>();
-    try (var statement = connection.createStatement()) {
-      var rows =
-          statement.executeQuery(
-              "SELECT record FROM review_presentations ORDER BY presentation_id");
-      while (rows.next()) {
-        presentations.add(Json.read(rows.getString(1), ReviewPresentation.class));
-      }
-      return presentations;
-    } catch (SQLException e) {
-      throw failure("Could not read review presentations.", e);
-    }
+    return guarded(
+        () ->
+            presentations.findByDomainOrderBySeq(domain).stream()
+                .map(row -> Json.read(row.record(), ReviewPresentation.class))
+                .toList());
   }
 
   Optional<CallRecord> call(String callId) {
-    try (var statement =
-        connection.prepareStatement(
-            "SELECT operation, input_digest, output FROM call_records WHERE call_id = ?")) {
-      statement.setString(1, callId);
-      var rows = statement.executeQuery();
-      if (!rows.next()) {
-        return Optional.empty();
-      }
-      return Optional.of(
-          new CallRecord(
-              callId, rows.getString(1), rows.getString(2), Json.read(rows.getString(3))));
-    } catch (SQLException e) {
-      throw failure("Could not read call identifiers.", e);
-    }
+    return guarded(
+        () ->
+            calls
+                .findById(domain + "/" + callId)
+                .map(
+                    row ->
+                        new CallRecord(
+                            callId, row.operation(), row.inputDigest(), Json.read(row.output()))));
   }
 
   boolean derivedRecordExists(String inputResource, String version) {
-    try (var statement =
-        connection.prepareStatement(
-            "SELECT count(*) FROM derived_records WHERE input_resource = ? AND version = ?")) {
-      statement.setString(1, inputResource);
-      statement.setString(2, version);
-      var rows = statement.executeQuery();
-      rows.next();
-      return rows.getLong(1) > 0;
-    } catch (SQLException e) {
-      throw failure("Could not read derived records.", e);
-    }
+    return guarded(
+        () ->
+            Objects.requireNonNullElse(
+                    jdbc.queryForObject(
+                        "SELECT count(*) FROM "
+                            + SCHEMA
+                            + ".derived_records"
+                            + " WHERE domain = :domain AND input_resource = :resource AND version = :version",
+                        Map.of("domain", domain, "resource", inputResource, "version", version),
+                        Long.class),
+                    0L)
+                > 0);
   }
 
   @Override
   public void close() {
+    var dataSource = context.getBean(DataSource.class);
+    context.close();
+    if (dataSource instanceof HikariDataSource hikari) {
+      hikari.close();
+    }
+  }
+
+  private static <T> T guarded(Supplier<T> body) {
     try {
-      connection.close();
-    } catch (SQLException e) {
-      throw failure("Could not close the Semantic Catalog storage.", e);
+      return body.get();
+    } catch (DataAccessException e) {
+      throw failure("Could not access the Semantic Catalog storage.", e);
     }
   }
 
