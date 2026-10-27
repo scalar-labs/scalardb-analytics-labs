@@ -33,9 +33,11 @@ import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Target;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -471,11 +473,7 @@ public final class SnapshotReads {
     var items = new ArrayList<SortableItem>();
     for (var fact : state.factRecords().values()) {
       var factState = fact.stateAt(c);
-      if (factState == FactState.CANDIDATE
-          && !fact.unknownAnswered
-          && state.dependenciesConfirmed(fact)
-          && fact.latestConfirmationEvaluation != null
-          && fact.latestConfirmationEvaluation.result() == PolicyResult.REQUEST_CONSENT) {
+      if (factState == FactState.CANDIDATE && awaitsConsent(fact, new HashSet<>())) {
         items.add(
             item(PresentationKind.CONFIRMATION, fact, fact.latestConfirmationEvaluationId, c));
       }
@@ -531,6 +529,37 @@ public final class SnapshotReads {
     return new ReviewQueue(snapshot(c), filtered);
   }
 
+  /**
+   * Whether a candidate awaits consent. A candidate whose dependencies are confirmed awaits it when
+   * the user policy requested consent. A prototype addition: a candidate that depends on other
+   * candidates awaiting consent is listed with them, when the policy will request consent once they
+   * are confirmed, so an element and the Facts that depend on it are reviewed in one round and
+   * answered in one submission, in dependency order.
+   */
+  private boolean awaitsConsent(FactRecord fact, Set<String> visited) {
+    if (fact.state != FactState.CANDIDATE || fact.unknownAnswered || !visited.add(fact.urn)) {
+      return false;
+    }
+    if (state.dependenciesConfirmed(fact)) {
+      return fact.latestConfirmationEvaluation != null
+          && fact.latestConfirmationEvaluation.result() == PolicyResult.REQUEST_CONSENT;
+    }
+    for (var urn : fact.factDependencies()) {
+      var dependency = state.factRecord(urn);
+      if (dependency == null
+          || (dependency.state != FactState.CONFIRMED
+              && !awaitsConsent(dependency, new HashSet<>(visited)))) {
+        return false;
+      }
+    }
+    var c = state.commit();
+    var policy = state.policyAt(c).version();
+    return Judge.decideConfirmation(
+                state, fact, policy.preset(), policy.countDeclaredUnenforced(), c + 1)
+            .result()
+        == PolicyResult.REQUEST_CONSENT;
+  }
+
   private record SortableItem(long commit, ReviewItem item) {}
 
   private record RetirementEvaluation(String id, long commit, PolicyResult result) {}
@@ -551,7 +580,9 @@ public final class SnapshotReads {
   private SortableItem item(
       PresentationKind kind, FactRecord fact, @Nullable String evaluation, long c) {
     var commit =
-        evaluation == null ? 0 : Long.parseLong(evaluation.substring(1, evaluation.indexOf('.')));
+        evaluation == null
+            ? fact.revisions.getLast().commit()
+            : Long.parseLong(evaluation.substring(1, evaluation.indexOf('.')));
     return new SortableItem(
         commit,
         new ReviewItem(

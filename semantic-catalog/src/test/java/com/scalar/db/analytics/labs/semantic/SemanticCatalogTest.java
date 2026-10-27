@@ -153,6 +153,65 @@ class SemanticCatalogTest {
   }
 
   @Test
+  void aCandidateIsReviewedInTheSameRoundAsTheCandidateItDependsOn() {
+    try (var catalog = open()) {
+      var concept = Urns.node(DOMAIN, ElementKind.CONCEPT, "order");
+      var conceptExists =
+          Candidate.existence(
+              ElementDescriptor.node(concept, ElementKind.CONCEPT, null, "order"),
+              List.of(),
+              List.of(inference()));
+      var conceptExistsFact =
+          Facts.fact(
+              DOMAIN,
+              concept,
+              Predicates.EXISTS,
+              Scope.UNRESTRICTED,
+              Json.object().put("exists", true));
+      var conceptMeaning =
+          new Candidate(
+              concept,
+              null,
+              Predicates.MEANING,
+              Scope.UNRESTRICTED,
+              Json.object().put("text", "An order a customer placed"),
+              List.of(new DependencyRef.OnFact(conceptExistsFact)),
+              List.of(inference()),
+              List.of());
+      var conceptMeaningFact =
+          Facts.fact(
+              DOMAIN,
+              concept,
+              Predicates.MEANING,
+              Scope.UNRESTRICTED,
+              Json.object().put("text", "An order a customer placed"));
+      build(catalog, List.of(conceptExists, conceptMeaning));
+
+      var queue = catalog.reads().reviewQueue(null, PresentationKind.CONFIRMATION, null, null);
+      assertThat(queue.items())
+          .extracting(item -> item.facts().getFirst().fact())
+          .containsExactly(conceptExistsFact, conceptMeaningFact);
+
+      var submitted =
+          catalog.submitAnswers(
+              OWNER,
+              null,
+              "authz:owner",
+              List.of(
+                  new AnswerInput(
+                      conceptMeaningFact, Target.CONFIRMATION, AnswerType.CONSENT, "Yes", null),
+                  new AnswerInput(
+                      conceptExistsFact, Target.CONFIRMATION, AnswerType.CONSENT, "Yes", null)));
+
+      assertThat(submitted.answers())
+          .extracting(Outputs.AnswerResult::transition)
+          .containsOnly("confirmed");
+      assertThat(catalog.factState(conceptMeaningFact)).isEqualTo(FactState.CONFIRMED);
+      assertThat(catalog.reads().reviewQueue(null, null, null, null).items()).isEmpty();
+    }
+  }
+
+  @Test
   void resendingWithTheSameCallIdentifierWritesNothing() {
     try (var catalog = open()) {
       build(catalog, List.of(datasetExists(), fieldExists(), meaning("Order status code")));

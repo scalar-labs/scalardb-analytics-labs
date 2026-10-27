@@ -50,25 +50,51 @@ How to run it here:
        esac
        last_failed=$failed
      fi
-     sleep 10
+     sleep 3
    done
    ```
 
    When it expires and the build is still working, arm it again. Stop it with `TaskStop` when you
    finish.
-3. On a `reviewable` notification, run `semantic review --unpresented` and present the new items to
-   the user, in plain Japanese if the user writes Japanese:
-   - group them by Dataset or element;
-   - give a short list the user can answer at once, for example by number;
-   - for each item, say what it states, why it was proposed (the check methods), and what is
-     unconfirmed.
+3. On a `reviewable` notification, run `semantic review --unpresented`. Gather the evidence and
+   sort the items into **routine** and **needs judgement**, as step 3 of the skill's Workflow A
+   describes, and present them in plain Japanese if the user writes Japanese.
 
-   Record the presentation with `semantic present` right away, so the same items are not
-   notified again. Then end your turn and wait for the user's answers.
+   Use this layout, and no other list markup:
+   - One number per element (a column, a Dataset, a Measure), covering all of its Facts in this
+     round, for example a column's meaning and value kind together. Use plain integers that
+     continue across rounds in this conversation; never letters.
+   - **Routine** first: one Markdown table per Dataset, one row per element:
+
+     ```markdown
+     #### shop.public.orders（EC 注文）
+     | # | 列 | 提案 | 根拠 |
+     |---|---|---|---|
+     | 12 | ordered_on | 注文日（日付） | 2026-09-01〜09-30 の日付のみ |
+     | 13 | status | 配送状況の区分値 | delivered 5 / shipped 2 / cancelled 1 |
+     ```
+
+   - **Needs judgement** after it, each as a short block:
+
+     ```markdown
+     **35. pos.members.member_rank の意味**
+     提案: 会員ランク（gold / silver / regular）
+     根拠: 3 値のみ。各ランクの条件を示す資料はない
+     気になる点: ランク名が正式名称か不明
+     見立て: 区分値としては妥当。正式名称があれば修正を
+     ```
+
+   - End with one line on how to answer, for example: 「定型は "定型OK"、要判断は番号ごとに
+     OK / NG / 修正 / 不明 で」.
+
+   Keep the evidence queries few: one `query` per Dataset usually covers its Fields' sample
+   values and counts. Record the presentation with `semantic present` right away, so the same
+   items are not notified again. Then end your turn and wait for the user's answers.
 4. Submit the user's answers with `semantic answer --principal <owner> --stdin`, without
-   `--run-tasks`. Never answer for the user. If the user says "all OK", that is consent to every
-   item you presented. The watching build picks up the tasks the answers create, and the monitor
-   notifies you of what they produce.
+   `--run-tasks`. Never answer for the user. An answer to a number applies to every Fact under
+   it; if the user corrects only one of them, ask which. "Routine OK" consents to the routine
+   list; "all OK" consents to every item you presented. The watching build picks up the tasks the answers
+   create, and the monitor notifies you of what they produce.
 5. On a `failed` notification, run `semantic tasks --state failed` and tell the user each
    `failureReason`. On `review check failed`, tell the user the error. While nothing new is
    reviewable, say briefly that the build is still working, and keep the conversation free for

@@ -78,11 +78,26 @@ same time.
 
    While nothing is new, tell the user the build is still working, and keep the conversation free
    for other questions.
-3. **Present the new items to the user**, who must be a semantics owner of the workspace. Choose
-   how to present them; grouping by Dataset reads well. For each Fact, show:
-   - what it states, in plain words;
-   - why it was proposed (the check methods);
-   - what is unconfirmed.
+3. **Present the new items to the user**, who must be a semantics owner of the workspace. The
+   user judges from what you show, so show the evidence, not only the claim.
+
+   Before presenting, gather the evidence for each Fact:
+   - the data: run a read-only `query` for sample values, distinct values with counts, or row
+     counts of the element. No citation is needed for these checks;
+   - the documents: quote the passage of a registered document that the check cites, if any;
+   - the consequence: what consent decides, for example which aggregation or join will use it.
+
+   Then sort the Facts into two groups:
+   - **Routine**: the name, the data, and the documents all agree, and nothing in the data
+     contradicts the claim. Show these as one compact list, one line each with its key evidence,
+     and ask for consent to the whole list at once. The user may pick out any of them.
+   - **Needs judgement**: the evidence is missing, ambiguous, or conflicting, or the Fact decides
+     a business definition, such as what an amount includes or which rows a term covers. Present
+     each one on its own: what it states, the evidence for and against, what is unconfirmed, and
+     your own reading of which answer is more likely and why.
+
+   A Fact that depends on another candidate is listed together with it. Present them together, and
+   say that rejecting the one it depends on rejects it too.
 
    Ask for one answer per Fact:
    - `consent`: it is right;
@@ -90,9 +105,8 @@ same time.
    - `correction`: it is wrong, and the user says what is right;
    - `unknown`: the user cannot tell.
 
-   Never answer for the user. If the user is not a semantics owner, stop and say who must answer.
-   To check a candidate against the data before presenting it, run a read-only `query`; no
-   citation is needed for these checks.
+   Never answer for the user. Sorting a Fact as routine is a suggestion; only the user's answer
+   consents to it. If the user is not a semantics owner, stop and say who must answer.
 4. **Record what you presented**, right when you present it:
 
    ```console
