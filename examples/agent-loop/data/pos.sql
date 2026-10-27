@@ -14,7 +14,7 @@ CREATE TABLE store_sales (
     member_id       INT         NULL,
     store_code      VARCHAR(10) NOT NULL,
     sold_on         DATE        NOT NULL,
-    amount_excl_tax INT         NOT NULL,
+    amount          INT         NOT NULL,
     FOREIGN KEY (member_id) REFERENCES members (member_id)
 );
 
@@ -28,7 +28,7 @@ INSERT INTO members (member_id, email, member_rank, joined_on) VALUES
     (506, 'watanabe@example.com',  'G', '2026-05-05');
 
 -- A sale without a member card has no member_id.
-INSERT INTO store_sales (sale_id, member_id, store_code, sold_on, amount_excl_tax) VALUES
+INSERT INTO store_sales (sale_id, member_id, store_code, sold_on, amount) VALUES
     (9001, 501,  'S01', '2026-09-03', 5000),
     (9002, 502,  'S02', '2026-09-10', 2200),
     (9003, NULL, 'S01', '2026-09-11',  800),

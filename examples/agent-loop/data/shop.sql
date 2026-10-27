@@ -12,7 +12,7 @@ CREATE TABLE orders (
     customer_id     INTEGER NOT NULL REFERENCES customers (id),
     ordered_on      DATE    NOT NULL,
     status          TEXT    NOT NULL,
-    amount_excl_tax BIGINT  NOT NULL,
+    amount          BIGINT  NOT NULL,
     tax             BIGINT  NOT NULL
 );
 
@@ -26,7 +26,7 @@ INSERT INTO customers (id, email, name, registered_on) VALUES
     (7, 'yamamoto@example.com',  '山本', '2026-03-30'),
     (8, 'nakamura@example.com',  '中村', '2026-06-18');
 
-INSERT INTO orders (id, customer_id, ordered_on, status, amount_excl_tax, tax) VALUES
+INSERT INTO orders (id, customer_id, ordered_on, status, amount, tax) VALUES
     (1001, 1, '2026-08-28', 'delivered',  4000,  400),
     (1002, 1, '2026-09-02', 'delivered', 12000, 1200),
     (1003, 2, '2026-09-05', 'shipped',    3500,  350),
