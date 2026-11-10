@@ -4,9 +4,8 @@ This glossary defines the terms used only inside the Semantic Catalog. Each entr
 that explains the term in context.
 
 Terms shared with the rest of the product, such as Fact, Fact Record, Catalog Snapshot, Input
-Observation, closed core, user policy, and confirmation, are defined in the product architecture
-[glossary](https://github.com/scalar-labs/scalardb-analytics-enterprise/blob/docs-main/20261013-product-architecture/glossary.md)
-and are not repeated here.
+Observation, closed core, user policy, and confirmation, are defined in the product
+[glossary](../glossary.md) and are not repeated here.
 
 The glossary keeps names and definitions consistent and does not override the documents. When an
 entry and a document disagree, fix the disagreement.

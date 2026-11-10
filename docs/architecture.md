@@ -6,6 +6,8 @@ assembled from independently owned Java, C++, and Rust build units. It presents 
 lifecycle and machine-readable CLI while preserving the native build systems and extension
 boundaries required by its components.
 
+Terms shared across these documents are defined in [`glossary.md`](glossary.md).
+
 ## The problem and the cycle
 
 A Query Engine alone cannot tell business meaning beyond table names and column types, and a catalog
