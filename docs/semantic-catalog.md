@@ -93,7 +93,8 @@ The surrounding components keep the following responsibilities:
 - **Application.** It decides when build tasks run and how many run at once, because it owns
   startup, shutdown, and resource release as one lifecycle. It provides the Semantic Catalog with
   SQL execution for data checks, name resolution from a Physical Catalog table to its current name,
-  and re-retrieval of table metadata. It calls the Semantic Catalog only through the public API in
+  and re-retrieval of table metadata. See [`application.md`](application.md). It calls the Semantic
+  Catalog only through the public API in
   [`semantic-catalog/public-api.md`](semantic-catalog/public-api.md).
 - **Query Agent.** Its model, knowledge discovery, SQL generation, and result interpretation are
   outside this component. It reads knowledge and reports what it used through the application.

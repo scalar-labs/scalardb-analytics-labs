@@ -5,6 +5,16 @@ product-owned capability. Its public data-plane contract is an Apache Arrow stre
 keeps JDBC and DuckDB-specific types out of application use cases while preserving Arrow schemas,
 types, and batches across engine integrations.
 
+DuckDB is the first embedded Query Engine and works as an engine within one domain. A Query Engine
+integration binds Physical Catalog tables and Analytics types into the engine, takes connector
+Arrow output as engine scans, offers pushdown candidates to connectors and rewrites its plan by
+their answer, and maps stale registrations, unsupported types, and source failures to product
+errors. The connector repository is authoritative for that model: see
+[Plan pushdown with Query Engine planners](https://github.com/scalar-labs/scalardb-analytics-connectors/blob/main/docs/plan-pushdown-with-query-engine-planners.md),
+[Query Engine pushdown](https://github.com/scalar-labs/scalardb-analytics-connectors/blob/main/docs/query-engine-pushdown.md),
+and the [connector contract](https://github.com/scalar-labs/scalardb-analytics-connectors/blob/main/docs/connector-contract.md).
+This document explains how the integration is built here.
+
 ## Boundary and lifecycle
 
 `application` depends on the `QueryEngine` and `QueryResult` interfaces in the `query-engine`
@@ -112,6 +122,39 @@ packaged scanners. Every source-type-specific decision of this path lives in the
 
 The scanner path does not yet derive table metadata from its own connections, and the Physical
 Catalog still resolves source schemas when a data source is registered.
+
+The scanner path keeps the rule that one party interprets each source: the scanner both reads rows
+and, over the same connection, produces table metadata in the shape the connector contract defines.
+A source belongs to exactly one path at a time, and only DuckDB reads through the scanner path.
+The path is held to the connector path's results:
+
+- A column the scanner path types must have the same Analytics type and values as on the connector
+  path, using only value-preserving conversions; MySQL `INT UNSIGNED` arrives as `UINTEGER` and can
+  be widened to `BIGINT`. Any other column is unsupported, with the same reason a connector gives.
+- Scanner settings that change types or values, such as reading MySQL `TINYINT(1)` as boolean or
+  the MySQL session time zone, are fixed as part of the path.
+- Values are verified against the connector conformance fixtures by a separate test runner.
+- Its retrieval information names the scanner path implementation and the DuckDB extension and
+  version, with no ADBC driver. It returns no read provenance and performs no schema check; DuckDB's
+  type comparison stands in for the latter.
+
+A source moves to the connector path once its connector passes the metadata and data-read
+conformance tests, covers at least the scanner path's columns, and returns at least the same items,
+such as constraints and source-side identifiers. Switching then changes only the retrieval
+information, turns some unsupported columns into typed ones, starts read provenance and the schema
+check, and leaves every typed column's type and values unchanged. The application switches one
+source as one administrative operation:
+
+1. Retrieve the table metadata of every registered table of the source through the connector. If
+   this fails, nothing switches.
+2. Stop accepting new queries on the source and wait for running ones.
+3. Store the new table metadata in the Physical Catalog and switch reading to the connector. If this
+   fails, restore the previous metadata and scanner reading.
+4. Resume accepting queries.
+
+The changed retrieval information makes a new version, which reaches the Semantic Catalog like any
+other retrieval. PostgreSQL, MySQL, SQLite, Parquet, Iceberg, and Delta Lake start on the scanner
+path with DuckDB's official extensions; Oracle has no such extension and is connector-only.
 
 ## Extension model
 

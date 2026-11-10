@@ -33,3 +33,10 @@ dependency. Neither an extra build invocation nor an intermediate repository is 
   upstream releases of these dependencies.
 - ScalarDB SQL is distributed under the Scalar Commercial License, and the provenance records it.
   Redistributing it in the product distribution needs a licensing decision.
+- The boundary is a baseline, not something to preserve for its own sake. Moving the catalog
+  implementation into this repository, or consolidating related code, becomes the better choice when
+  one feature repeatedly needs simultaneous changes here and upstream, the `physical-catalog`
+  adapter duplicates upstream logic, native-image support repeatedly needs changes to upstream
+  internals, two CI and release pipelines must move together for compatibility, or keeping the
+  submodule boundary needs an internal API more complex than what it separates. Co-change frequency,
+  duplicated code, release waits, and compatibility failures are the evidence for that decision.

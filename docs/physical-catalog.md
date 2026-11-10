@@ -1,7 +1,9 @@
 # Physical Catalog
 
-The Physical Catalog records which source databases are registered as logical data sources and
-what their schemas contain. ScalarDB Analytics does not reimplement it: the application embeds the
+The Physical Catalog records which source databases are registered as logical data sources and what
+their schemas contain, so that a Query Engine can bind names and types without first connecting to
+each source. It holds only what query planning, execution, and browsing need, plus what it needs to
+manage the versions they use. ScalarDB Analytics does not reimplement it: the application embeds the
 existing catalog from the public `scalardb-analytics` repository and owns only the boundary around
 it. That boundary decides who may call the catalog, keeps source credentials inside it, and ties its
 lifetime to the application process.
@@ -83,6 +85,102 @@ and with the data sources registered in it at that moment, and closes the engine
 catalog, so the extension can never call a stopped catalog. Every state-bearing CLI invocation
 loads one workspace configuration, starts this runtime against its catalog store, and exits after
 the requested operation.
+
+## Catalog model
+
+The catalog provides catalog and data-source registration, listing, lookup, and unregistration;
+retrieval of the table metadata of registered tables; versioned persistence of the parts of that
+metadata used for planning; a resource identifier for each table; name resolution for Query Engines,
+including from a resource identifier to the current table name; and change notifications from
+registration and re-retrieval. The application drives retrieval and hands the same metadata to the
+Semantic Catalog; see [`application.md`](application.md#table-metadata-retrieval).
+
+The catalog's model is owned by the upstream repository, so changes to it are made there, not in
+this repository. In the target composition, registration and re-retrieval obtain table metadata
+through the connector's metadata retrieval rather than the upstream `schema-resolver`. The connector
+reads the source's own catalog and returns source types and Analytics types, and the catalog stores
+the parts used for planning and execution without reinterpreting them. `DataType` and `ColumnSchema`
+become able to hold structured types (`ARRAY`, `MAP`, `STRUCT`) and extension-encoded types, and the
+gRPC `ColumnSchema.type` becomes a structured message. Until a source's connector is complete, the
+interim scanner path produces table metadata of the same shape; see
+[`query-engine.md`](query-engine.md#interim-scanner-path).
+
+Table metadata is divided between the two catalogs so that no source declaration is copied where
+nothing uses it:
+
+| Item | Physical Catalog | Semantic Catalog |
+| --- | --- | --- |
+| Catalog, namespace, table name, and table kind | Persisted; used for name resolution | Part of its input |
+| Column name, ordinal, nullability, and source type | Persisted; used for planning and for showing unsupported columns | Part of its input |
+| Column Analytics type, or unsupported | Persisted; used for planning | Kept as a derived record |
+| Constraints (primary keys, unique constraints and indexes, foreign keys, CHECK constraints) | Not persisted | Part of its input |
+| Source-side identifier | Not persisted | Part of its input |
+| Source schema version | Not persisted | Not recorded; it changes on non-schema events, so it cannot detect a change |
+| Completeness, missing items, and "does not exist" | Persisted; used to avoid inferring deletions from missing information | Part of its input |
+| "Not retrieved" | Not made a version; reported in the change notification | Not received |
+| Retrieval information and content digest | Persisted with the version; used for version management | Kept as a derived record |
+
+Query Engines do not use constraints, so their absence from the Physical Catalog changes neither
+planning nor execution. Users and Query Agents who need keys and constraints get them from the
+Semantic Catalog. Collation, character set, and comments are needed by the Semantic Catalog to judge
+joins and propose meanings, but they are not yet items of table metadata.
+
+A **resource identifier** points to one registered table. The catalog issues one per combination of
+data-source registration, namespace, and table name, and keeps it until an administrator removes
+that table's or source's registration. A column is the pair of a resource identifier and a column
+name. The catalog never judges table identity; whether a table was renamed or replaced is a Semantic
+Catalog Fact.
+[`design/physical-catalog-resource-identifier.md`](design/physical-catalog-resource-identifier.md)
+records why identity is by name.
+
+| Change at the source | In the Physical Catalog |
+| --- | --- |
+| Table renamed | The old name's identifier gets a "does not exist" version. The new name gets a new identifier when a user registers it |
+| Dropped and re-created under the same name | Same identifier. A source that returns source-side identifiers produces a new version; one that does not produces none if columns and constraints are also unchanged |
+| Dropped | A "does not exist" version. A table later created under the name is a new version of the same identifier |
+
+A **table metadata version** is a monotonically increasing generation per resource identifier. A new
+version is created when the content digest differs from the current version's, or when the
+connector, its version, the library version, the ADBC driver, its version, or the fixed settings in
+the retrieval information differ, because any of those can change Analytics types for the same
+source. A change of retrieval time alone updates the time of last confirmation. Digests are compared
+only between metadata from the same library MAJOR.MINOR. A different library version always makes a
+new version, so a library or connector update passes every table to the Semantic Catalog once, and
+the Semantic Catalog records only a derived record where source declarations did not change. "Not
+retrieved" metadata is never a version, so missing privileges or a transient failure cannot remove
+columns used for planning. Incomplete metadata is a version, and the catalog infers no deletion from
+a missing item.
+
+A **change notification**, returned per table by each retrieval, carries the resource identifier,
+the source, namespace, and table name, the previous and new versions, and a state of new, changed,
+does not exist, not retrieved, or unchanged.
+
+Analytics types are persisted in a normalized relational form in the ScalarDB store, with the type
+category, nesting, sharing, and references visible in the schema;
+[`design/physical-catalog-type-persistence.md`](design/physical-catalog-type-persistence.md) records
+the shape. The structure of Analytics types themselves is defined by the connectors' [Analytics type
+model](https://github.com/scalar-labs/scalardb-analytics-connectors/blob/main/docs/analytics-types.md).
+
+## Ownership
+
+The catalog is authoritative for the physical schemas and Analytics types used for planning and
+execution and does not depend on the Semantic Catalog. A new version becomes new Semantic Catalog
+input, never a direct change to a confirmed Fact. Creating a catalog or data source is an explicit
+administrative operation; startup, extension loading, and `ATTACH` never create one. Administrative
+operations and query-time name resolution use the same catalog use cases.
+
+The catalog does not own:
+
+- business meaning, Facts, candidates, validation results, provenance, or human decisions;
+- persistence of source declarations that planning does not use, such as constraints and source-side
+  identifiers;
+- judging table identity;
+- Query Agent discovery or SQL generation;
+- reading data rows or executing queries;
+- pushdown decisions, which connectors make against current source and session facts rather than the
+  catalog's older observation;
+- access-policy evaluation or enforcement for a principal; or
+- new per-source Java implementations of source-specific behavior.
 
 ## Source boundary
 
