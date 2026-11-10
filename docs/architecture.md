@@ -63,6 +63,14 @@ source uses the interim scanner path; see
 not use that composition yet, because the CLI has no catalog store configuration. See
 [`physical-catalog.md`](physical-catalog.md) for the boundary and its credential handling.
 
+The Semantic Catalog also runs inside the application process. It keeps its records in its own
+schema of the Physical Catalog's store database, accessed directly rather than through ScalarDB,
+and that storage is equally unreachable from SQL. The two catalogs never call each other: the
+application passes each retrieved table's metadata to both, and gives the Semantic Catalog SQL
+execution for data checks and name resolution for its references to Physical Catalog tables. See
+[`semantic-catalog.md`](semantic-catalog.md) for its model of recorded knowledge and how that
+knowledge is built and read.
+
 ## Build and runtime boundaries
 
 Root Gradle is the repository-wide entry point. It builds Java modules directly and delegates C++

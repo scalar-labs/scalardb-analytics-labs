@@ -10,7 +10,9 @@ links to the architectural units needed for deeper understanding.
 ## Documentation layers
 
 - Top-level `docs/*.md` files explain one coherent architectural unit: its purpose, ownership,
-  relationships, constraints, and representative flows.
+  relationships, constraints, and representative flows. When one file cannot hold a unit's mental
+  model, `docs/<unit>.md` stays the unit's overview and entry point, and `docs/<unit>/*.md` files
+  each explain one part of that unit in depth. Every part is reachable from the overview.
 - `docs/design/*.md` files preserve the current answer and rationale for one explicit design
   question. These records are mutable and must be rewritten when the decision changes.
 - Module READMEs provide only enough local orientation to use or change that module and link back
