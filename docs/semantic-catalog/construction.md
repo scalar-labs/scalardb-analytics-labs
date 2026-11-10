@@ -200,6 +200,10 @@ weighs how far a judgement unblocks further construction against its impact on d
 mistake would spread, and the load on the deciding party, never the count of follow-on candidates
 alone.
 
+The Semantic Catalog does not define presentation conditions, grouping, presentation content, or the
+answer format. The consuming side assembles presentations from the review list and sends judgements
+by submitting answers (see [`public-api.md`](public-api.md)).
+
 What was presented, to whom, and when is kept as a **review presentation record**, outside the log,
 because presenting changes no Fact's state. It holds the presentation kind, the target Facts and
 Fact Address, the recipient and time, a reference to the context shown, the triggering question URN

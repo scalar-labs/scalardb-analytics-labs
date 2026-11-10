@@ -104,8 +104,10 @@ to reference. Data observations have one Input Resource per kind and target of c
 join, or a correspondence), because one check can read several tables and different queries in one
 Input Resource could not be compared with their predecessors. An observation holds the query, its
 result, the physical schema observations of the tables read, and the read provenance the application
-returns. A result equal to the previous observation of the same Input Resource is not recorded
-again.
+returns. The interim scanner path returns no read provenance, so an observation read through it
+records that there is none, together with the path's implementation and the names and versions of
+its DuckDB extensions. A result equal to the previous observation of the same Input Resource is not
+recorded again.
 
 ## Schema interpretation
 
