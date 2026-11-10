@@ -160,10 +160,13 @@ when:
 
 Case 1 starts without waiting for a user, because queries on that table would fail until then. It
 touches only the registered tables that triggered it and only brings their versions in line with the
-source, so it makes no change the user did not intend. It finds only mismatches in the columns a
-query reads, so added columns and changed constraints arrive through cases 2 and 3. The application
-never reruns failed queries: if Analytics types changed, the same SQL can mean something else, and
-the user or Query Agent recomposes it. Re-retrieval never registers new tables.
+source. What follows in the Semantic Catalog still goes through its user policy. Under the default
+policy, for example, a column found to have disappeared without a same-type replacement is retired
+by machine judgement, together with the confirmed joins and Measures that have it as a premise. It
+finds only mismatches in the columns a query reads, so added columns and changed constraints arrive
+through cases 2 and 3. The application never reruns failed queries: if Analytics types changed, the
+same SQL can mean something else, and the user or Query Agent recomposes it. Re-retrieval never
+registers new tables.
 
 ## Startup, configuration, and isolation
 
