@@ -208,16 +208,16 @@ The state of a Fact Record is defined by which Fact Events it accepts next:
 
 Transitions need the events they rest on:
 
-- `confirm` requires every Fact in the dependency references to be `confirmed`, and either a latest
-  policy evaluation that chose machine judgement or a consent answer.
+- `confirm` requires every premise dependency to be `confirmed`, and either a latest policy
+  evaluation that chose machine judgement or a consent answer.
 - `retire` requires an open retirement proposal with a machine-judgement evaluation or a consent
-  answer, or the retirement of a Fact it depends on.
+  answer, or the retirement of a premise dependency.
 - A retirement proposal against a `candidate` rejects it instead.
 
 A retirement proposal ends with retirement, rejection, or a rejection or correction answer. An
 unknown answer does not end it, but the proposal is not presented again until a new dependency
-reference arrives. An answer to a candidate whose dependencies are not all confirmed is recorded
-without a transition; the candidate is judged again, from policy evaluation, once they are.
+reference arrives. An answer to a candidate whose premise dependencies are not all confirmed is
+recorded without a transition; the candidate is judged again, from policy evaluation, once they are.
 
 Retirement covers both an element that no longer exists and a confirmation that was wrong; the
 reason and validation result say which. "No longer exists" is a change in treatment, not a value.
@@ -270,6 +270,13 @@ the Input Observation actually used, used to reproduce past content. A dependenc
 the Fact and the Fact Revision used. A locator such as a URL or table name never stands alone as the
 record of an input. Fact Events add and remove dependencies; a Fact Revision shows the set in
 effect.
+
+A dependency on another Fact is one of two kinds. A **premise dependency** points to a Fact at
+another Fact Address, such as the existence of the element or of a join: the candidate holds only if
+that Fact holds. A **replacement dependency** points to an earlier Fact at the same Fact Address:
+the candidate was made taking that Fact into account, which is what lets it replace that Fact once
+confirmed. Confirmation waits only for premise dependencies, and only premise dependencies cascade
+rejection and retirement, so retiring a Fact that has been replaced leaves its replacement standing.
 
 Three invariants hold. Any Input Observation a check references is also a dependency, so a candidate
 is re-examined when that input changes. A Fact Revision a check references need not be one, because

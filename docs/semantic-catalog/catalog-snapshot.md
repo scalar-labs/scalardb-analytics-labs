@@ -26,13 +26,14 @@ A confirmed Fact is **presentable** from the commit at which it became `confirme
 before it became `retired`. A retired Fact can return to `candidate` with a new dependency reference
 and be confirmed again, so a Fact can have several presentable periods.
 
-Two invariants keep this simple. A candidate is evaluated only after every Fact it depends on is
-confirmed, so the dependencies of a confirmed Fact are always confirmed. When a Fact is retired,
-every confirmed Fact depending on it is retired in the same commit, so knowledge never stays
-presented without its premise. Retirement propagates per Fact; Facts with no dependency on the
-retired one keep being presented. Judging presentability therefore never requires following
-dependencies. Traceability also holds by construction: every confirmation references a policy
-evaluation or answer, and every acceptance holds its validation result and provenance.
+Two invariants keep this simple. A candidate is evaluated only after every premise dependency is
+confirmed, so the premises of a confirmed Fact are always confirmed. When a Fact is retired, every
+confirmed Fact that has it as a premise is retired in the same commit, so knowledge never stays
+presented without its premise. Retirement propagates per Fact; a Fact that only replaced the retired
+one, and Facts with no dependency on it, keep being presented. Judging presentability therefore
+never requires following dependencies. Traceability also holds by construction: every confirmation
+references a policy evaluation or answer, and every acceptance holds its validation result and
+provenance.
 
 Presentability within the Catalog Snapshot, together with the judgement at request time of whether a
 Fact applies to the requested target, is **semantic presentability**. It does not include whether

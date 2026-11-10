@@ -89,7 +89,8 @@ provenance.
 - Input Observations and the Fact Revisions of selected confirmed Facts are inputs read and also
   dependency references.
 - Rejected or retired Facts, and related Facts of feedback that are not selected, are inputs read
-  only. As dependencies they would make the candidate unconfirmable and reject it by cascade.
+  only. As a premise they would make the candidate unconfirmable and reject it by cascade, and as a
+  replacement dependency they would give it nothing presentable to replace.
 
 An answer is an input read, referenced by its log record. It is neither a dependency, because it
 never changes, nor a check reference, so a deciding party's wording never counts as support for a
@@ -222,10 +223,10 @@ party's judgement becomes the main source.
 Correction interpretation gives the model the feedback's content and context and the related Facts'
 content, and asks for a revised value or applicability scope for the same element and predicate. Its
 candidate always depends on the feedback observation. If the related Fact was a rejected candidate,
-the new candidate does not depend on it, since that would reject it by cascade, but it carries over
-the dependencies it still needs, such as the join's existence. If the related Fact is the selected
-confirmed Fact, the new candidate depends on it and replaces it once confirmed. When the wording
-yields no value or scope, the build task records that and the unreadable correction.
+the new candidate does not depend on it, since a rejected candidate is nothing to replace, but it
+carries over the dependencies it still needs, such as the join's existence. If the related Fact is
+the selected confirmed Fact, the new candidate depends on it and replaces it once confirmed. When
+the wording yields no value or scope, the build task records that and the unreadable correction.
 
 ## Generation strategy
 

@@ -115,10 +115,11 @@ written and the task fails with the reason.
 
 ## Choosing the confirmation path
 
-A candidate goes neither to policy evaluation nor to review until every Fact it depends on is
-confirmed. Asking a person to judge knowledge whose premises are unjudged wastes the judgement if a
-premise is later rejected. A candidate depending on a rejected or retired Fact can never be
-confirmed, so it is rejected, and its Generator is run again with that outcome as input.
+A candidate goes neither to policy evaluation nor to review until every premise dependency is
+confirmed (see [`record-model.md`](record-model.md#validation-results-and-dependencies) for premise
+and replacement dependencies). Asking a person to judge knowledge whose premises are unjudged wastes
+the judgement if a premise is later rejected. A candidate whose premise is rejected or retired can
+never be confirmed, so it is rejected, and its Generator is run again with that outcome as input.
 
 The **user policy** then decides whether machine judgement confirms the candidate or the deciding
 party must consent. Retirement proposals are decided the same way. A user policy version holds a
@@ -180,9 +181,12 @@ The following each write one commit, so a half-written state is never a readable
 In any commit where a Fact becomes `confirmed`, `rejected`, or `retired`, the dependent Facts move
 next in the same commit:
 
-- A dependent `candidate` whose dependencies are now all confirmed has its policy evaluated.
-- A dependent `candidate` of a rejected or retired Fact is rejected.
-- A dependent `confirmed` Fact of a retired Fact is retired.
+- A `candidate` whose premise dependencies are now all confirmed has its policy evaluated.
+- A `candidate` whose premise is rejected or retired is rejected.
+- A `confirmed` Fact whose premise is retired is retired.
+
+Replacement dependencies do not cascade. A Fact that replaced a now-retired Fact stays as it is, and
+a Fact whose replacement is retired becomes eligible again under the selection rules.
 
 Facts rejected or retired by cascade record that cause, and their Generators remake them as build
 tasks.
