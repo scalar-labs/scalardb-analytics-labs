@@ -184,7 +184,9 @@ Physical Catalog's connections live inside ScalarDB and cannot be shared.
 
 The invariant that materialized records equal the result of replaying the log is checked by
 replaying the whole log from empty and comparing the result, URNs included, with the materialized
-tables. The module's tests must run this check, and an operation runs it on a live store. It takes
+tables. The latest received version on `input_resources` is the one column not derived from the log:
+it equals the highest version among the table's derived records and is compared against those
+instead. The module's tests must run this check, and an operation runs it on a live store. It takes
 time proportional to the log, so it does not run at every startup.
 
 ## Retaining call identifiers
