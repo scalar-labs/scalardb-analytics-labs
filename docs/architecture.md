@@ -144,12 +144,13 @@ organization permits. Use alone is never evidence that a Fact is correct.
 
 **[Planned]** This section describes design that is not implemented yet.
 
-Application use is always traceable. The product records the correspondence between an answer and
-the versions of knowledge it used, what each review presented and how the judgement proceeded, and
-the sequence of use for one question: its text, the knowledge searched for and used, any missing
-knowledge or conflict met, the query and its execution, and the user's acceptance or correction.
-These records let quality be evaluated after the fact and turn what use reveals into input for the
-next construction.
+The product always provides the means to trace application use, and the user organization chooses
+what is acquired. The product records the correspondence between an answer and the versions of
+knowledge it used, what each review presented and how the judgement proceeded, and the sequence of
+use for one question: its text, the knowledge searched for and used, any missing knowledge or
+conflict met, the query and its execution, and the user's acceptance or correction. These records
+let quality be evaluated after the fact and turn what use reveals into input for the next
+construction.
 
 For a Query Agent the user brings, only what that agent reports is recorded. An organization that
 cannot retain question text can stop acquiring trace records and stop passing them to Generators;
