@@ -22,8 +22,13 @@ A transaction-level advisory lock per domain also gives that guarantee, but adds
 and a domain-to-integer mapping to maintain, and transactions with a unique key already provide the
 same outcome. `READ COMMITTED` is not enough. It takes a new snapshot per statement, so a
 transaction could judge on an old state and then read and use a commit number written after another
-transaction committed. `SERIALIZABLE` is not needed. Every writer of a domain collides on the same
-`commits` key, so write skew between writers cannot occur.
+transaction committed. `SERIALIZABLE` is not needed. Every write that judges against the log appends
+a commit, so any two of them collide on the same `commits` key and write skew between them cannot
+occur. The writes that append no commit (a derived-record-only observation, a review presentation, a
+resume, and a build task finishing without candidates) decide only about the rows they themselves
+write: a derived record keyed by table and version, a newly numbered presentation, or one
+`build_tasks` row. Primary keys and updates of the same row make overlapping ones collide, and no
+decision of theirs depends on log rows that a concurrent commit could change.
 
 ## Consequences
 
