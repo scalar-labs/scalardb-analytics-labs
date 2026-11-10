@@ -7,9 +7,12 @@ package com.scalar.db.analytics.labs.semantic.storage;
 import com.scalar.db.analytics.labs.semantic.model.SemanticCatalogException;
 import com.zaxxer.hikari.HikariDataSource;
 import java.sql.SQLException;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
 import org.jspecify.annotations.Nullable;
 import org.springframework.boot.jdbc.DataSourceBuilder;
+import org.springframework.dao.ConcurrencyFailureException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.support.JdbcTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -26,6 +29,9 @@ import org.springframework.transaction.support.TransactionTemplate;
  */
 public final class JdbcStore implements AutoCloseable {
   private static final String POSTGRESQL = "PostgreSQL";
+
+  /** How many times a write that keeps colliding is attempted before it fails. */
+  private static final int WRITE_ATTEMPTS = 100;
 
   private final HikariDataSource dataSource;
   private final JdbcClient jdbc;
@@ -92,8 +98,45 @@ public final class JdbcStore implements AutoCloseable {
   }
 
   /**
-   * Runs work that writes in one {@code REPEATABLE READ} transaction. An exception thrown by the
-   * work rolls the transaction back, so nothing it wrote remains.
+   * Runs work that appends a commit, in one {@code REPEATABLE READ} transaction, as if writes to
+   * one domain ran one at a time (see {@code docs/design/semantic-catalog-write-serialization.md}).
+   *
+   * <p>The work inserts a commit numbered one past the last commit in its snapshot. When a
+   * concurrent writer committed that number first, the insert fails with {@link
+   * StoreTransaction.CommitNumberTaken}, and the work runs again from the start in a new
+   * transaction, judging on top of the commit that landed first. A serialization failure is retried
+   * the same way. Nothing the failed attempt wrote remains.
+   *
+   * <p>Every writer of a domain collides on the commit number before it writes anything else, so
+   * any other unique violation means a record escaped the identity matching done in the
+   * transaction. It is reported at once rather than retried.
+   *
+   * @throws SemanticCatalogException when the attempts run out, or when a unique constraint other
+   *     than the commit number is violated
+   */
+  public <T> T write(Function<StoreTransaction, T> work) {
+    for (var attempt = 1; ; attempt++) {
+      try {
+        return run(writes, work);
+      } catch (StoreTransaction.CommitNumberTaken | ConcurrencyFailureException e) {
+        if (attempt >= WRITE_ATTEMPTS) {
+          throw new SemanticCatalogException(
+              "A write kept colliding with concurrent writers after " + attempt + " attempts", e);
+        }
+        backOff(attempt);
+      } catch (DuplicateKeyException e) {
+        throw new SemanticCatalogException(
+            "A write violated a unique constraint that identity matching should have satisfied: "
+                + e.getMostSpecificCause().getMessage(),
+            e);
+      }
+    }
+  }
+
+  /**
+   * Runs work that writes in one {@code REPEATABLE READ} transaction, without retrying, for writes
+   * that append no commit. An exception thrown by the work rolls the transaction back, so nothing
+   * it wrote remains.
    */
   public <T> T writeOnce(Function<StoreTransaction, T> work) {
     return run(writes, work);
@@ -111,6 +154,19 @@ public final class JdbcStore implements AutoCloseable {
       throw new IllegalStateException("Store work returns a result");
     }
     return result;
+  }
+
+  /**
+   * Waits a short random time before the next attempt, so colliding writers do not retry in lock
+   * step.
+   */
+  private static void backOff(int attempt) {
+    try {
+      Thread.sleep(ThreadLocalRandom.current().nextLong(1, 2L + Math.min(attempt, 20)));
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new SemanticCatalogException("Interrupted while retrying a write", e);
+    }
   }
 
   /** Closes the connection pool. */

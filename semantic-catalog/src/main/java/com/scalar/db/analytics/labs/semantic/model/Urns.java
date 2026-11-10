@@ -8,10 +8,16 @@ import java.util.regex.Pattern;
 
 /**
  * The form of URNs: {@code urn:scalardb:analytics:<domain>:<record kind>:<identifier>} (see {@code
- * docs/semantic-catalog/record-model.md}, "Identity and URNs").
+ * docs/semantic-catalog/record-model.md}, "Identity and URNs", and {@code
+ * docs/semantic-catalog/storage.md}, "Identifiers").
  *
  * <p>The domain comes first after the namespace, so a domain identifier is embedded in every URN
  * the domain issues and must keep that form parseable.
+ *
+ * <p>A record created by a log record is identified by that log record's {@linkplain LogPosition
+ * position}, such as {@code urn:scalardb:analytics:sales:fact:c3.1}. Log positions are never
+ * reused, so the same URNs are issued again when the log is replayed from empty. The identifier
+ * carries none of the record's content.
  */
 public final class Urns {
   /** The namespace of every URN; the product defines no abbreviation of its name. */
@@ -23,6 +29,14 @@ public final class Urns {
    * URN.
    */
   public static final Pattern DOMAIN = Pattern.compile("[a-z0-9][a-z0-9-]{0,62}");
+
+  public static final String ELEMENT = "element";
+  public static final String FACT_ADDRESS = "fact-address";
+  public static final String FACT = "fact";
+  public static final String INPUT_RESOURCE = "input-resource";
+  public static final String INPUT_OBSERVATION = "input-observation";
+  public static final String LOG_RECORD = "log-record";
+  public static final String CATALOG_SNAPSHOT = "catalog-snapshot";
 
   private Urns() {}
 
@@ -37,4 +51,46 @@ public final class Urns {
           "A domain identifier consists of lowercase letters, digits, and hyphens: " + domain);
     }
   }
+
+  public static String of(String domain, String kind, LogPosition position) {
+    return PREFIX + domain + ":" + kind + ":" + position;
+  }
+
+  public static String logRecord(String domain, LogPosition position) {
+    return of(domain, LOG_RECORD, position);
+  }
+
+  public static String catalogSnapshot(String domain, long commit) {
+    return PREFIX + domain + ":" + CATALOG_SNAPSHOT + ":" + commit;
+  }
+
+  /** The log position that issued a position-based URN, such as a Fact or a log record. */
+  public static LogPosition position(String urn) {
+    var parsed = parse(urn);
+    if (parsed.kind().equals(CATALOG_SNAPSHOT)) {
+      throw new IllegalArgumentException("Not identified by one log position: " + urn);
+    }
+    return LogPosition.parse(parsed.identifier());
+  }
+
+  public static String kind(String urn) {
+    return parse(urn).kind();
+  }
+
+  public static String domain(String urn) {
+    return parse(urn).domain();
+  }
+
+  private static Parsed parse(String urn) {
+    if (!urn.startsWith(PREFIX)) {
+      throw new IllegalArgumentException("Not a Semantic Catalog URN: " + urn);
+    }
+    var parts = urn.substring(PREFIX.length()).split(":", 3);
+    if (parts.length != 3) {
+      throw new IllegalArgumentException("Not a Semantic Catalog URN: " + urn);
+    }
+    return new Parsed(parts[0], parts[1], parts[2]);
+  }
+
+  private record Parsed(String domain, String kind, String identifier) {}
 }

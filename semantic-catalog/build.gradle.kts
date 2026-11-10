@@ -19,6 +19,7 @@ dependencies {
 
     // The Semantic Catalog keeps its records in the Physical Catalog's PostgreSQL database and
     // accesses its own schema directly through Spring Boot JDBC over its own connection pool.
+    api(libs.jackson.databind)
     api(libs.jspecify)
     implementation(libs.spring.boot.jdbc)
     implementation(libs.hikaricp)

@@ -8,6 +8,10 @@
  * refer to them, and the errors operations report (see {@code
  * docs/semantic-catalog/record-model.md}).
  *
+ * <p>Log records refer to other records by {@link com.scalar.db.analytics.labs.semantic.model.Ref}.
+ * A caller writing a commit refers to records of the same commit by temporary numbers; the records
+ * stored in the log hold only issued URNs.
+ *
  * <p>Types here carry no storage concerns; tables and SQL stay in the storage package.
  */
 @NullMarked

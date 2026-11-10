@@ -117,7 +117,7 @@ The log:
 | Table | Primary key | Holds |
 | --- | --- | --- |
 | `domains` | Domain | Creation time |
-| `commits` | Domain, commit number | Time, kind of operation, using party |
+| `commits` | Domain, commit number | Time, kind of operation, author (the person or agent behind the call) |
 | `log_records` | Domain, commit number, order | Record kind, target Fact, target Input Resource, content |
 
 `log_records` is append-only. Fact Events, Observation Events, Input Observations, and policy
@@ -135,8 +135,8 @@ it no longer does.
 | `address_selections` | Fact Address, selected and eligible Facts per commit range | Reads at a point |
 | `dependencies` | Dependent Fact, the Fact or Input Resource depended on, whether used for confirmation | Cascades, impact judgement targets, newer-observation checks |
 | `elements` | Element, kind, parent, and for edges the kind, ends, direction, and identifying part | Edge identity, filtering by parent |
-| `fact_addresses` | Fact Address, element, predicate, scope description, scope URNs, free-description definition | Finding empty-scope Fact Addresses |
-| `facts` | Fact, Fact Address, matching value | Matching closed-range Facts, finding elements by technical reference |
+| `fact_addresses` | Fact Address, element, predicate, scope description, scope URNs, predicate definition of a free-description predicate | Finding empty-scope Fact Addresses |
+| `facts` | Fact, Fact Address, identity key | Matching closed-range Facts, finding elements by technical reference |
 | `input_resources` | Input Resource, kind, Physical Catalog table identifier, latest table metadata version received, question URN | Lookup by table identifier and by question, ignoring versions already received, and serializing registrations for one table |
 
 Unique constraints enforce the identity rules that can be expressed as uniqueness:
@@ -146,8 +146,8 @@ Unique constraints enforce the identity rules that can be expressed as uniquenes
 - `fact_addresses`: element and predicate, for rows with an empty scope and a closed-core or
   Generator-declared predicate. Free-description rows are matched only by pointing and are not
   unique.
-- `facts`: Fact Address and matching value, for rows that have one. The matching value consists of
-  the closed choices and references in the value, with sets such as Field sets sorted by URN.
+- `facts`: Fact Address and identity key, for rows that have one. The identity key consists of the
+  closed choices and references in the value, with sets such as Field sets sorted by URN.
 - `input_resources`: table identifier, and question URN, each where present.
 
 Dataset and Field identity depends on the state of technical-reference Facts, so it is kept by the

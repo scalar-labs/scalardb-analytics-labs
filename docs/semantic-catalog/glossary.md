@@ -22,7 +22,7 @@ entry and a document disagree, fix the disagreement.
 
 | Term | Code identifier | Definition | Explained in |
 | --- | --- | --- | --- |
-| Observation Event | — | The log record of one observation of an Input Resource. It is written in the same commit as the Input Observation it records. | [`record-model.md`](record-model.md) |
+| Observation Event | `LogRecord.ObservationEvent` | The log record of one observation of an Input Resource. It is written in the same commit as the Input Observation it records. | [`record-model.md`](record-model.md) |
 | inputs read | — | What a Generator read to produce a candidate, recorded in the `accept` and `propose-retire` Fact Events and in provenance. Input Observations and the Fact Revisions of selected confirmed Facts are also dependency references; rejected or retired Facts, unselected related Facts of feedback, and answers are inputs read only. | [`generators.md`](generators.md) |
 | review presentation record | — | The record of what was presented in review, to whom, and when, with the target Facts and Fact Address, a reference to the context shown, any triggering question, and the resulting events. It is kept outside the log because presenting changes no Fact's state. | [`construction.md`](construction.md) |
 
@@ -45,3 +45,11 @@ entry and a document disagree, fix the disagreement.
 | store | `SemanticCatalogStore`, `StoreSettings` | The Physical Catalog's PostgreSQL database, in which the Semantic Catalog keeps its own `semantic_catalog` schema and which it opens with its own connection pool. | [`storage.md`](storage.md) |
 | schema change | `SchemaMigrator.Change` | One entry of the ordered list of changes to the `semantic_catalog` schema. Opening the store applies the changes not yet recorded in the schema version table, each exactly once. | [`storage.md`](storage.md) |
 | domain identifier | `Urns.DOMAIN` | The caller-supplied identifier of a domain: lowercase letters, digits, and hyphens. It is embedded unchanged in every URN the domain issues. | [`record-model.md`](record-model.md) |
+| log record | `LogRecord` | One record of a domain's append-only log: an element, a Fact Address, a Fact, a Fact Event, an Input Resource, an Input Observation, an Observation Event, or a user policy version. Log records are never updated or deleted. | [`record-model.md`](record-model.md) |
+| log position | `LogPosition` | The commit number of a log record and its order within the commit, written `c<commit>.<ordinal>`. URNs of the records a log record creates are issued from it. | [`storage.md`](storage.md) |
+| temporary number | `Ref.Temp`, `CommitRequest` | How a commit request refers to a record of the same request before it is written. Writing the commit replaces it with the issued URN, or with the URN of the existing record the proposal was the same as. | [`storage.md`](storage.md) |
+| element identity | `ElementIdentity` | How a proposed element is identified: unique, always a new element unless the proposer points to an existing one (concepts, Measures, Dimensions, business terms); by the physical object its technical reference names (Datasets and Fields), or by kind, ends, direction, and identifying part (edges). | [`record-model.md`](record-model.md) |
+| identity key | `IdentityKey` | The closed choices and record references in a value, stated by the proposer, that decide sameness: of closed-range Facts at one Fact Address, and of the identifying parts of edges. Compared in a canonical form with reference sets sorted. | [`storage.md`](storage.md) |
+| materialized records | `MaterializedRow` | The rows derived from the log and kept for reading at any commit without replaying it. They must always equal what replaying the log gives. | [`storage.md`](storage.md) |
+| replay check | `ReplayCheck` | Replaying a domain's whole log from empty and comparing the result, URNs included, with the materialized records. | [`storage.md`](storage.md) |
+| commit author | `CommitRequest.author` | The person or agent behind the call that wrote a commit, kept on the commit. | [`storage.md`](storage.md) |

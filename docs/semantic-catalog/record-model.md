@@ -115,6 +115,9 @@ records but never used as a point, because it is neither unique nor monotonic.
 
 The log holds:
 
+- Elements, each written as its own record that states how the element is identified: by pointing,
+  by technical reference, or for an edge by kind, ends, direction, and identifying part. A new
+  element is written in the same commit as the acceptance of a Fact stating its existence.
 - Fact Addresses, Facts, and Fact Events.
 - **Input Resources**, sources of input whose changes are tracked, such as one table's physical
   schema or one registered document. Also **Input Observations**, the content of an Input Resource
