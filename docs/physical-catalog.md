@@ -99,14 +99,16 @@ including from a resource identifier to the current table name; and change notif
 registration and re-retrieval. The application drives retrieval and hands the same metadata to the
 Semantic Catalog; see [`application.md`](application.md#table-metadata-retrieval).
 
-The catalog's model is owned by the upstream repository, so changes to it are made there, not in
-this repository. In the target composition, registration and re-retrieval obtain table metadata
-through the connector's metadata retrieval rather than the upstream `schema-resolver`. The connector
-reads the source's own catalog and returns source types and Analytics types, and the catalog stores
-the parts used for planning and execution without reinterpreting them. `DataType` and `ColumnSchema`
-become able to hold structured types (`ARRAY`, `MAP`, `STRUCT`) and extension-encoded types, and the
-gRPC `ColumnSchema.type` becomes a structured message. Until a source's connector is complete, the
-interim scanner path produces table metadata of the same shape; see
+The catalog's model is owned by the upstream repository. Every change below, including migrating its
+persisted schema, is made upstream, and this repository takes it in by updating the submodule; see
+[`design/physical-catalog-source-boundary.md`](design/physical-catalog-source-boundary.md) for when
+that boundary should change. In the target composition, registration and re-retrieval obtain table
+metadata through the connector's metadata retrieval rather than the upstream `schema-resolver`. The
+connector reads the source's own catalog and returns source types and Analytics types, and the
+catalog stores the parts used for planning and execution without reinterpreting them. `DataType` and
+`ColumnSchema` become able to hold structured types (`ARRAY`, `MAP`, `STRUCT`) and extension-encoded
+types, and the gRPC `ColumnSchema.type` becomes a structured message. Until a source's connector is
+complete, the interim scanner path produces table metadata of the same shape; see
 [`query-engine.md`](query-engine.md#interim-scanner-path).
 
 Table metadata is divided between the two catalogs so that no source declaration is copied where

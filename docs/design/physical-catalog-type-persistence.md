@@ -28,4 +28,5 @@ taken each hide or distort that:
 ## Consequences
 
 - Compatibility with the existing Physical Catalog's persistence is not a constraint, so the
-  existing schema is migrated rather than preserved.
+  existing schema is migrated rather than preserved. The persistence and its migration are changed
+  in the upstream catalog; this repository takes them in through the submodule.
