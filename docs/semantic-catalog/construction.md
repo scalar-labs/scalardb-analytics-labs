@@ -236,8 +236,11 @@ rejected and a new candidate scoped to exclude corporate members follows.
 
 Every answer and selection carries the deciding party and a reference to an authority check, an
 opaque value issued by whoever checked, which the Semantic Catalog records without interpreting and
-only requires to be present. An answer to a Fact already confirmed or rejected by another path after
-presentation is recorded without a transition.
+only requires to be present. The Semantic Catalog therefore does not itself verify that the person
+answering is the deciding party. The separation between producing candidates and confirming them
+holds only as far as the party that issues the reference checks authority, and a Query Agent uses
+the same CLI as the semantics owner, so that party must tell them apart. An answer to a Fact already
+confirmed or rejected by another path after presentation is recorded without a transition.
 
 ## Operations that add records
 

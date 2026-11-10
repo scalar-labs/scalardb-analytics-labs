@@ -96,7 +96,7 @@ Some rules hold across components:
   registration-time types and execution-time values come from one interpreting party. The
   responsibilities of connectors, Query Engine adapters, and the type conversion library are defined
   in the [connector
-architecture](https://github.com/scalar-labs/scalardb-analytics-connectors/blob/main/docs/architecture.md).
+  architecture](https://github.com/scalar-labs/scalardb-analytics-connectors/blob/main/docs/architecture.md).
 - Candidates, confirmed knowledge, physical schemas, and query results stay distinct across every
   boundary.
 - SQL produced by a user or a model never runs on a connection that can reach Semantic Catalog
@@ -118,8 +118,9 @@ as its input.
 a question, or usage feedback becomes input to Semantic Catalog build tasks. Generators produce
 candidates with validation results, and the user policy routes each to machine judgement or the
 deciding party's consent. Confirmed knowledge appears in Catalog Snapshots at later commits. The
-authority to produce candidates is separate from the authority to confirm them, and no new input
-changes a past Catalog Snapshot.
+authority to produce candidates is separate from the authority to confirm them: an answer or
+selection is accepted only with a reference to an authority check made outside the Semantic Catalog.
+No new input changes a past Catalog Snapshot.
 
 **Querying with knowledge.** **[Planned]** The Query Agent or a person reads the knowledge a
 question needs from one Catalog Snapshot and composes SQL.
