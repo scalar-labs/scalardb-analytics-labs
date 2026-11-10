@@ -102,9 +102,10 @@ Registering an observation has two forms.
 
 - *Table metadata*, passed by the application for each retrieved table, with the Physical Catalog
   table identifier and its current table metadata version. The whole metadata is passed exactly as
-  the connector returned it, not the part the Physical Catalog stored. An already-received version
-  records nothing. A new version whose source-declared part is unchanged records only a derived
-  record. Both are successes, and the output says what was recorded. The application passes
+  the connector returned it, not the part the Physical Catalog stored. A version no newer than the
+  latest one already received for that table records nothing, so a retrieval that arrives late
+  cannot roll the table back. A new version whose source-declared part is unchanged records only a
+  derived record. Both are successes, and the output says what was recorded. The application passes
   unchanged tables at every retrieval, so a failure between the Physical Catalog's update and this
   call is repaired by the next retrieval.
 - *Other observations*: documents, missing knowledge at question time, and usage feedback. The input

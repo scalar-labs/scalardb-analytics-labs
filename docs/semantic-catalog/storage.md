@@ -52,7 +52,11 @@ Operations that write no commit detect collisions on the rows they write. These 
 derived-record-only observation, a review presentation, a resume, and a build task finishing without
 candidates. Build task and review presentation numbers are also one past the last number in the
 snapshot and are unique by primary key. State changes and added triggers on a build task update the
-same `build_tasks` row, so overlapping ones also collide and retry.
+same `build_tasks` row, so overlapping ones also collide and retry. Registering table metadata,
+whether it records an observation or only a derived record, updates the latest received version on
+the table's `input_resources` row. A derived-record-only registration judges against the latest
+observation of that table, so this update makes it collide with any concurrent registration for the
+same table, and the retry judges against the observation that won.
 
 Running a build task never holds a transaction while a Generator runs:
 
@@ -133,7 +137,7 @@ it no longer does.
 | `elements` | Element, kind, parent, and for edges the kind, ends, direction, and identifying part | Edge identity, filtering by parent |
 | `fact_addresses` | Fact Address, element, predicate, scope description, scope URNs, free-description definition | Finding empty-scope Fact Addresses |
 | `facts` | Fact, Fact Address, matching value | Matching closed-range Facts, finding elements by technical reference |
-| `input_resources` | Input Resource, kind, Physical Catalog table identifier, question URN | Lookup by table identifier and by question |
+| `input_resources` | Input Resource, kind, Physical Catalog table identifier, latest table metadata version received, question URN | Lookup by table identifier and by question, ignoring versions already received, and serializing registrations for one table |
 
 Unique constraints enforce the identity rules that can be expressed as uniqueness:
 

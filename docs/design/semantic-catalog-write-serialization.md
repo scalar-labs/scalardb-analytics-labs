@@ -24,11 +24,13 @@ same outcome. `READ COMMITTED` is not enough. It takes a new snapshot per statem
 transaction could judge on an old state and then read and use a commit number written after another
 transaction committed. `SERIALIZABLE` is not needed. Every write that judges against the log appends
 a commit, so any two of them collide on the same `commits` key and write skew between them cannot
-occur. The writes that append no commit (a derived-record-only observation, a review presentation, a
-resume, and a build task finishing without candidates) decide only about the rows they themselves
-write: a derived record keyed by table and version, a newly numbered presentation, or one
-`build_tasks` row. Primary keys and updates of the same row make overlapping ones collide, and no
-decision of theirs depends on log rows that a concurrent commit could change.
+occur. Writes that append no commit must collide on some row too. A review presentation, a resume,
+and a build task finishing without candidates decide only about the rows they write, a newly
+numbered presentation or one `build_tasks` row, which primary keys and same-row updates protect. A
+derived-record-only observation does read the log: it compares the table metadata with the latest
+observation of the same table. Every registration for a table therefore also updates that table's
+Input Resource row, so it collides with any concurrent registration for the table, including one
+that commits a new observation.
 
 ## Consequences
 

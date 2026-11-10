@@ -142,7 +142,7 @@ why. The **retrieval operation** runs as follows:
 4. For every table except those not retrieved, the application passes the whole table metadata,
    exactly as the connector returned it, with the table's resource identifier and current version,
    to the Semantic Catalog's observation registration. Tables whose version did not change are
-   passed too; the Semantic Catalog records nothing for a version it already has.
+   passed too; the Semantic Catalog records nothing for a version no newer than one it already has.
 
 Credentials stay in the Physical Catalog's registration and never reach the Semantic Catalog. If
 step 4 fails, the application does not resend a stored copy, because the Physical Catalog stores
