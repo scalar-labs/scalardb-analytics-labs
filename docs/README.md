@@ -27,9 +27,10 @@ needed to understand ownership, dependencies, invariants, or an important end-to
 under `design/` only when it answers one question that could reasonably have had another answer and
 its rationale will help future developers protect or reconsider the choice.
 
-Mark accepted design direction that is not implemented yet with **[Planned]**, on the paragraph,
-list item, or table row it applies to, or once below the title when it covers a whole document. A
-change that implements it removes the marker in the same change.
+Mark accepted design direction that is not implemented yet with **[Planned]**. At the start of a
+paragraph, list item, or table cell, the marker covers that whole unit; inside one, it covers only
+the sentence it begins. Below a document's title, it covers the whole document. A change that
+implements it removes the marker in the same change.
 
 Each settled claim has one canonical home. Other documents may summarize it only as needed for
 their own mental model and should link to that home. Rewrite or remove superseded material instead

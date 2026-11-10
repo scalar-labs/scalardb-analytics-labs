@@ -20,7 +20,9 @@ provide and operate another database.
 ## Consequences
 
 - The store must be PostgreSQL. The Semantic Catalog depends on `REPEATABLE READ` snapshots and
-  `jsonb`, and fails at startup on any other database.
+  `jsonb`, and fails at startup on any other database. The Physical Catalog alone accepts any
+  database ScalarDB JDBC supports, so this decision narrows the workspace's store to PostgreSQL, and
+  the product depends on a PostgreSQL server that the user organization provides and operates.
 - The Semantic Catalog runs its own schema migrations and connection pool. The Physical Catalog's
   migrations belong to the embedded upstream catalog, and its connections live inside ScalarDB.
 - The application must refuse to register the store's database as a data source, and the store's

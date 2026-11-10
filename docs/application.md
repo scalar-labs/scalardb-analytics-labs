@@ -1,11 +1,12 @@
 # Application
 
 The application is what a user starts. It composes the Physical Catalog, the Semantic Catalog, the
-Query Engine, and connectors into one product in one user process, without requiring an independent
-server, an external JVM, or a separate catalog process. It owns the lifecycle, configuration,
-user-facing interfaces, and distribution of that product, and none of the components' domain logic.
-Module-level orientation and the current commands are in
-[`../application/README.md`](../application/README.md).
+Query Engine, and connectors into one product in one user process, without a separate catalog
+process or product server. **[Planned]** It also needs no external JVM; the current distribution
+needs one. The catalogs keep their state in a PostgreSQL database that the user organization
+provides, called the store. It owns the lifecycle, configuration, user-facing interfaces, and
+distribution of that product, and none of the components' domain logic. Module-level orientation and
+the current commands are in [`../application/README.md`](../application/README.md).
 
 ## Responsibilities
 

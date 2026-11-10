@@ -216,7 +216,8 @@ those build units through explicit task dependencies, inputs, and outputs; they 
 CMake, DuckDB extension, or Cargo configuration.
 
 The resulting product is a single process and one user-facing executable entry point, started
-without a separate service. **[Planned]** It also starts without an external JVM; the current
+without a separate product service. The catalogs keep their state in a PostgreSQL database that the
+user organization provides. **[Planned]** It also starts without an external JVM; the current
 distribution needs one. The distribution may also contain shared libraries and loadable extensions.
 This separation preserves DuckDB's extension model while allowing the application to own startup,
 shutdown, and artifact compatibility.
