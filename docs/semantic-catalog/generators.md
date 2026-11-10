@@ -1,5 +1,7 @@
 # Generators and generation strategy
 
+**[Planned]** This document describes accepted design that is not implemented yet.
+
 A Generator holds one interpretation or check rule and produces candidates, with validation results,
 from what it reads. The generation strategy decides what each run aims at and why construction
 stops. This document explains the contract every Generator follows, the Generators the design runs,

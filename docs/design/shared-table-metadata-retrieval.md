@@ -1,5 +1,7 @@
 # Why do both catalogs receive table metadata from one retrieval?
 
+**[Planned]** This decision is accepted but not implemented yet.
+
 ## Current answer
 
 The Physical Catalog and the Semantic Catalog share a single retrieval of table metadata. The

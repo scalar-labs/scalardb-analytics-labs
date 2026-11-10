@@ -1,5 +1,7 @@
 # Which user policy does a new Semantic Catalog domain start with?
 
+**[Planned]** This decision is accepted but not implemented yet.
+
 ## Current answer
 
 The `auto` preset, with `declared-unenforced` not counted as a deterministic validation method.

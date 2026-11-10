@@ -1,5 +1,7 @@
 # Semantic Catalog
 
+**[Planned]** This document describes accepted design that is not implemented yet.
+
 The Semantic Catalog records the knowledge a Query Agent needs to combine data from different
 sources correctly, together with the material needed to judge whether that knowledge can be trusted.
 It builds that knowledge as candidates, routes each candidate to machine judgement or to a person,

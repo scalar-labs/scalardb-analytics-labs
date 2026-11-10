@@ -1,5 +1,7 @@
 # How does the Physical Catalog persist Analytics types?
 
+**[Planned]** This decision is accepted but not implemented yet.
+
 ## Current answer
 
 As normalized relational tables in its ScalarDB store, designed as for an ordinary RDBMS on the

@@ -1,5 +1,7 @@
 # What is the unit of a Semantic Catalog Generator?
 
+**[Planned]** This decision is accepted but not implemented yet.
+
 ## Current answer
 
 One interpretation or check rule is one Generator. Deriving a key from a primary key, deriving a

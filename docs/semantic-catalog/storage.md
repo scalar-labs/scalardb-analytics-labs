@@ -1,5 +1,7 @@
 # Semantic Catalog storage
 
+**[Planned]** This document describes accepted design that is not implemented yet.
+
 This document explains where the Semantic Catalog keeps its records, how one domain's writes stay
 serializable, and how the log, the materialized records, and the records kept outside the log are
 laid out. It covers how the records of [`record-model.md`](record-model.md),

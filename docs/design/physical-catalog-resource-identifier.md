@@ -1,5 +1,7 @@
 # What identifies a table in the Physical Catalog?
 
+**[Planned]** This decision is accepted but not implemented yet.
+
 ## Current answer
 
 A resource identifier, issued per combination of data-source registration, namespace, and table name

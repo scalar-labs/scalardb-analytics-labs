@@ -16,10 +16,12 @@ The application provides:
 - component initialization, dependency wiring, startup order, and shutdown;
 - the user-facing interfaces for data-source registration, catalog access, Semantic Catalog
   construction and decisions, and query execution;
-- the retrieval of table metadata and its hand-off to both catalogs, including re-retrieval;
-- the capabilities the Semantic Catalog needs from outside it: SQL execution for data checks, name
-  resolution, and re-retrieval;
-- the operations that run Semantic Catalog build tasks and expose their state and failures;
+- **[Planned]** the retrieval of table metadata and its hand-off to both catalogs, including
+  re-retrieval;
+- **[Planned]** the capabilities the Semantic Catalog needs from outside it: SQL execution for data
+  checks, name resolution, and re-retrieval;
+- **[Planned]** the operations that run Semantic Catalog build tasks and expose their state and
+  failures;
 - a versioned Agent Skill that teaches a Query Agent to use the CLI safely;
 - structured errors and diagnostics; and
 - assembly of the executable and distribution.
@@ -58,11 +60,11 @@ what is needed to resume.
 | Purpose | Consumer | Interface |
 | --- | --- | --- |
 | Automate SQL | Script, CI, job | Non-interactive CLI |
-| Explore SQL interactively | Data engineer, analyst | Embedded SQL shell |
-| Run SQL from existing tools | SQL client, BI, IDE | Flight SQL |
-| Manage data sources and the Physical Catalog | Administrator, data engineer | CLI, Web UI |
-| Construct, review, and correct the Semantic Catalog | Semantics owner | CLI, Web UI |
-| Query with semantic knowledge | Query Agent | CLI and Agent Skill |
+| Explore SQL interactively | Data engineer, analyst | **[Planned]** Embedded SQL shell |
+| Run SQL from existing tools | SQL client, BI, IDE | **[Planned]** Flight SQL |
+| Manage data sources and the Physical Catalog | Administrator, data engineer | CLI; **[Planned]** Web UI |
+| Construct, review, and correct the Semantic Catalog | Semantics owner | **[Planned]** CLI, Web UI |
+| Query with semantic knowledge | Query Agent | CLI and Agent Skill; **[Planned]** semantic knowledge |
 
 The product runs in one of two launch profiles. Both use the same components, application services,
 and persistence formats.
@@ -72,28 +74,31 @@ and persistence formats.
   waits until it completes, reaches a persisted state awaiting a review decision, or fails
   explicitly, and then stops the runtime and exits. Construction state persists in the workspace, so
   a later invocation can review, decide, and resume without a long-running process.
-- **Local workspace** keeps one foreground process with the workspace open and exposes REST, gRPC,
-  and Flight SQL on loopback, for the Web UI and external SQL clients. It is not a remote or
-  multi-user server.
+- **[Planned]** **Local workspace** keeps one foreground process with the workspace open and exposes
+  REST, gRPC, and Flight SQL on loopback, for the Web UI and external SQL clients. It is not a
+  remote or multi-user server.
 
-Versioned protobuf over gRPC is the programmatic management contract, and the Web UI uses the same
-contract through a REST mapping. Flight SQL is the canonical external SQL protocol. Registration,
-Semantic Catalog updates, confirmation, and credential access are never exposed as Flight SQL
-administrative statements. In standalone, the CLI calls application services in process. A CLI given
-an explicit local-workspace endpoint sends management operations to gRPC and SQL to Flight SQL. A
-CLI without an endpoint runs standalone; it never discovers a running process or switches modes
-implicitly.
+**[Planned]** Versioned protobuf over gRPC is the programmatic management contract, and the Web UI
+uses the same contract through a REST mapping. Flight SQL is the canonical external SQL protocol.
+Registration, Semantic Catalog updates, confirmation, and credential access are never exposed as
+Flight SQL administrative statements. In standalone, the CLI calls application services in process.
+A CLI given an explicit local-workspace endpoint sends management operations to gRPC and SQL to
+Flight SQL. A CLI without an endpoint runs standalone; it never discovers a running process or
+switches modes implicitly.
 
 SQL interpretation and execution belong to the Query Engine. The product adds no SQL parser or
 second execution contract. Non-interactive SQL takes one statement from an argument, a file, or
-standard input. The interactive shell adds editing, history, completion, catalog discovery,
+standard input.
+
+**[Planned]** The interactive shell adds editing, history, completion, catalog discovery,
 cancellation, timing, `EXPLAIN`, result formats, explicit limits and truncation, error positions,
 and a way to trace the Catalog Snapshot and Facts used.
 
-For the Semantic Catalog, the CLI exposes registration, exploration, build tasks and their status,
-candidate review, decisions, corrections, and feedback as automatable, machine-readable operations.
-The Web UI lets a person compare candidates, validation results, conflicts, applicability, and
-impact before deciding. It owns no state transitions or decision rules of its own.
+**[Planned]** For the Semantic Catalog, the CLI exposes registration, exploration, build tasks and
+their status, candidate review, decisions, corrections, and feedback as automatable,
+machine-readable operations. The Web UI lets a person compare candidates, validation results,
+conflicts, applicability, and impact before deciding. It owns no state transitions or decision rules
+of its own.
 
 ## Query Agents
 
@@ -107,16 +112,21 @@ Machine use of the CLI guarantees:
 - separate stdout and stderr, and meaningful exit codes;
 - no prompt in non-interactive mode;
 - explicit pagination, limits, and truncation;
-- references that identify Fact Revisions, Catalog Snapshots, and query executions; and
+- references that identify query executions, and **[Planned]** Fact Revisions and Catalog Snapshots;
+  and
 - no output of credentials, secrets, or unauthorized information.
 
 The application owns, versions, and distributes the Agent Skill with the CLI. It covers operating
-the CLI and interpreting what it returns: the order of knowledge discovery, how to read Fact states,
-how to proceed on missing knowledge or a conflict (resolve it on the spot, run with unconfirmed
-knowledge only when the user explicitly asks, or stop), and how to report feedback after use. It
-does not cover the agent's model, provider, question-specific planning, or SQL-generation prompt.
+the CLI and interpreting what it returns. **[Planned]** It also covers the order of knowledge
+discovery, how to read Fact states, how to proceed on missing knowledge or a conflict (resolve it on
+the spot, run with unconfirmed knowledge only when the user explicitly asks, or stop), and how to
+report feedback after use. It does not cover the agent's model, provider, question-specific
+planning, or SQL-generation prompt.
 
 ## Table metadata retrieval
+
+**[Planned]** This section describes design that is not implemented yet. Today, registration
+resolves source schemas through the upstream catalog.
 
 The Physical Catalog and the Semantic Catalog share one retrieval of table metadata, the record a
 connector returns for one table.
@@ -157,9 +167,9 @@ the user or Query Agent recomposes it. Re-retrieval never registers new tables.
 ## Startup, configuration, and isolation
 
 The application validates configuration and credential references, checks dependency compatibility,
-initializes components, publishes interfaces, and shuts down safely, as one lifecycle. It
-initializes the connector API library once per process, hands it to the Query Engine adapter and the
-Physical Catalog, and finalizes it at shutdown.
+initializes components, publishes interfaces, and shuts down safely, as one lifecycle. **[Planned]**
+It initializes the connector API library once per process, hands it to the Query Engine adapter and
+the Physical Catalog, and finalizes it at shutdown.
 
 The application unifies configuration but does not interpret source-specific provider payloads;
 connectors or the Physical Catalog codec validate and interpret them. Credentials never appear in
@@ -170,16 +180,16 @@ One process does not mean one set of privileges or connections:
 
 - SQL from a user or a model runs on a restricted Query Engine connection that can only read
   registered data.
-- Semantic Catalog storage, administrative table functions, and catalog-changing operations sit
-  behind connections or capabilities that untrusted SQL cannot reach.
-- The databases that store the Physical Catalog and the Semantic Catalog cannot be registered as
-  data sources, so SQL cannot reach them through the Query Engine.
-- Semantic Catalog build tasks receive only the inputs given to them. A build task that checks data
-  values does not call connectors directly. It uses the application's SQL execution, which
-  identifies the build task as the caller, limits what it may read to the inputs the task declared,
-  and caps rows, bytes, and time. The result carries the connector's read provenance, or, on the
-  scanner path, the path's implementation and the names and versions of its DuckDB extensions
-  instead.
+- **[Planned]** Semantic Catalog storage, administrative table functions, and catalog-changing
+  operations sit behind connections or capabilities that untrusted SQL cannot reach.
+- **[Planned]** The databases that store the Physical Catalog and the Semantic Catalog cannot be
+  registered as data sources, so SQL cannot reach them through the Query Engine.
+- **[Planned]** Semantic Catalog build tasks receive only the inputs given to them. A build task
+  that checks data values does not call connectors directly. It uses the application's SQL
+  execution, which identifies the build task as the caller, limits what it may read to the inputs
+  the task declared, and caps rows, bytes, and time. The result carries the connector's read
+  provenance, or, on the scanner path, the path's implementation and the names and versions of its
+  DuckDB extensions instead.
 - External files, URLs, automatic extension downloads, and arbitrary `ATTACH` are denied by default.
 
 The first distribution target is Linux x86_64 with glibc 2.28 or newer and the baseline x86-64

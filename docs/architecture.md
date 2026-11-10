@@ -60,10 +60,10 @@ using party may access it.
 | Component | Ownership |
 | --- | --- |
 | Application | CLI contracts, use-case coordination, process lifecycle, composition, and distribution; see [`application.md`](application.md) |
-| Semantic Catalog | Semantic state, evidence, decisions, and construction of query-facing catalog context; see [`semantic-catalog.md`](semantic-catalog.md) |
+| Semantic Catalog | **[Planned]** Semantic state, evidence, decisions, and construction of query-facing catalog context; see [`semantic-catalog.md`](semantic-catalog.md) |
 | Physical Catalog | Data-source registration, the physical schemas and Analytics types used for planning and execution, and name resolution, through the embedded upstream catalog; see [`physical-catalog.md`](physical-catalog.md) |
 | Query Engine | Embedded DuckDB lifecycle, product extensions, SQL execution, and Arrow result streaming; see [`query-engine.md`](query-engine.md) |
-| Connectors | Metadata retrieval, type mapping, and data read for one source kind, produced by the separate connector repository |
+| Connectors | **[Planned]** Metadata retrieval, type mapping, and data read for one source kind, produced by the separate connector repository |
 
 The application is the composition root, not the owner of component domain logic. Dependencies point
 from application use cases toward component APIs. JDBC, native-library, DuckDB extension, and
@@ -92,10 +92,11 @@ Some rules hold across components:
   parties nor executes SQL. It takes the material for meaning from the table metadata a connector
   returns and from data values, not from what the Physical Catalog stores.
 - A Query Engine contains no source-specific type interpretation or authentication.
-- One connector performs both metadata retrieval and data read for a source, so registration-time
-  types and execution-time values come from one interpreting party. The responsibilities of
-  connectors, Query Engine adapters, and the type conversion library are defined in the [connector
-  architecture](https://github.com/scalar-labs/scalardb-analytics-connectors/blob/main/docs/architecture.md).
+- **[Planned]** One connector performs both metadata retrieval and data read for a source, so
+  registration-time types and execution-time values come from one interpreting party. The
+  responsibilities of connectors, Query Engine adapters, and the type conversion library are defined
+  in the [connector
+architecture](https://github.com/scalar-labs/scalardb-analytics-connectors/blob/main/docs/architecture.md).
 - Candidates, confirmed knowledge, physical schemas, and query results stay distinct across every
   boundary.
 - SQL produced by a user or a model never runs on a connection that can reach Semantic Catalog
@@ -104,22 +105,26 @@ Some rules hold across components:
 ## Representative flows
 
 **Registering a data source.** A user registers a source and its connection settings through the
-application. The Physical Catalog retrieves the table metadata of the registered tables (names,
+application. Registration is an explicit administrative operation. Starting the application or
+attaching a catalog never creates catalogs or data sources implicitly.
+
+**[Planned]** The Physical Catalog retrieves the table metadata of the registered tables (names,
 columns, source types, Analytics types, and constraints) and persists, with a version, the parts
 used for planning and execution. It does not persist declared constraints. The application passes
 the whole of the same table metadata to the Semantic Catalog, which records the source declarations
-as its input. Registration is an explicit administrative operation. Starting the application or
-attaching a catalog never creates catalogs or data sources implicitly.
+as its input.
 
-**Constructing knowledge.** Registration, an input change, missing knowledge found by a question, or
-usage feedback becomes input to Semantic Catalog build tasks. Generators produce candidates with
-validation results, and the user policy routes each to machine judgement or the deciding party's
-consent. Confirmed knowledge appears in Catalog Snapshots at later commits. The authority to produce
-candidates is separate from the authority to confirm them, and no new input changes a past Catalog
-Snapshot.
+**[Planned]** **Constructing knowledge.** Registration, an input change, missing knowledge found by
+a question, or usage feedback becomes input to Semantic Catalog build tasks. Generators produce
+candidates with validation results, and the user policy routes each to machine judgement or the
+deciding party's consent. Confirmed knowledge appears in Catalog Snapshots at later commits. The
+authority to produce candidates is separate from the authority to confirm them, and no new input
+changes a past Catalog Snapshot.
 
-**Querying with knowledge.** The Query Agent or a person reads the knowledge a question needs from
-one Catalog Snapshot and composes SQL. The non-interactive path is a stable machine-to-machine
+**Querying with knowledge.** **[Planned]** The Query Agent or a person reads the knowledge a
+question needs from one Catalog Snapshot and composes SQL.
+
+The non-interactive query path is a stable machine-to-machine
 boundary:
 
 1. A caller supplies SQL to the `query` CLI command.
@@ -131,10 +136,12 @@ boundary:
    corresponding exit code.
 5. Application shutdown closes the engine and then the catalog.
 
-Missing knowledge and feedback from the answer return to construction within what the organization
-permits. Use alone is never evidence that a Fact is correct.
+**[Planned]** Missing knowledge and feedback from the answer return to construction within what the
+organization permits. Use alone is never evidence that a Fact is correct.
 
 ## Tracing use
+
+**[Planned]** This section describes design that is not implemented yet.
 
 Application use is always traceable. The product records the correspondence between an answer and
 the versions of knowledge it used, what each review presented and how the judgement proceeded, and
@@ -161,13 +168,13 @@ addresses sources only by their registered names. Until connectors are available
 the interim scanner path; see [`query-engine.md`](query-engine.md#source-attachment-and-read-paths).
 See [`physical-catalog.md`](physical-catalog.md) for the boundary and its credential handling.
 
-The Semantic Catalog also runs inside the application process. It keeps its records in its own
-schema of the Physical Catalog's store database, accessed directly rather than through ScalarDB, and
-that storage is equally unreachable from SQL. The two catalogs never call each other. The
-application retrieves each table's metadata once and passes it to both, and it gives the Semantic
-Catalog SQL execution for data checks and name resolution for its references to Physical Catalog
-tables. See [`semantic-catalog.md`](semantic-catalog.md) for its model of recorded knowledge and how
-that knowledge is built and read.
+**[Planned]** The Semantic Catalog also runs inside the application process. It keeps its records in
+its own schema of the Physical Catalog's store database, accessed directly rather than through
+ScalarDB, and that storage is equally unreachable from SQL. The two catalogs never call each other.
+The application retrieves each table's metadata once and passes it to both, and it gives the
+Semantic Catalog SQL execution for data checks and name resolution for its references to Physical
+Catalog tables. See [`semantic-catalog.md`](semantic-catalog.md) for its model of recorded knowledge
+and how that knowledge is built and read.
 
 ## Repositories and build units
 
@@ -193,7 +200,7 @@ do not rebuild unrelated native parts.
 | --- | --- | --- |
 | `application` | Java, Gradle | CLI, Agent Skill, composition, distribution, and product release |
 | `physical-catalog` | Java, Gradle, with the upstream build included | Submodule updates and the product boundary around the catalog |
-| `semantic-catalog` | Java, Gradle | Domain model, construction, and model-assisted processes |
+| `semantic-catalog` | **[Planned]** Java, Gradle | Domain model, construction, and model-assisted processes |
 | `query-engine` and `duckdb` | Java and a C++ DuckDB extension | DuckDB version, extensions, and engine integration |
 
 DuckDB is the first embedded Query Engine. Spark remains in `scalardb-analytics` for the existing
@@ -209,9 +216,10 @@ those build units through explicit task dependencies, inputs, and outputs; they 
 CMake, DuckDB extension, or Cargo configuration.
 
 The resulting product is a single process and one user-facing executable entry point, started
-without an external JVM or a separate service. The distribution may also contain shared libraries
-and loadable extensions. This separation preserves DuckDB's extension model while allowing the
-application to own startup, shutdown, and artifact compatibility.
+without a separate service. **[Planned]** It also starts without an external JVM; the current
+distribution needs one. The distribution may also contain shared libraries and loadable extensions.
+This separation preserves DuckDB's extension model while allowing the application to own startup,
+shutdown, and artifact compatibility.
 
 The rationale for these boundaries is recorded in:
 

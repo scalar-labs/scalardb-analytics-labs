@@ -1,5 +1,7 @@
 # Catalog Snapshot
 
+**[Planned]** This document describes accepted design that is not implemented yet.
+
 A Catalog Snapshot is what consumers read: the whole catalog of one domain as derived from the log
 up to one commit. This document explains which Facts it presents, how it selects one Fact per Fact
 Address, what the Query Agent receives for each request, and what is materialized to make past

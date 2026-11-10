@@ -1,5 +1,7 @@
 # How are writes to one Semantic Catalog domain kept serializable?
 
+**[Planned]** This decision is accepted but not implemented yet.
+
 ## Current answer
 
 Each write that appends to a domain's log runs in one `REPEATABLE READ` transaction. It judges from

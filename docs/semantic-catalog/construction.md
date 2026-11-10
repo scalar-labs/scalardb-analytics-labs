@@ -1,5 +1,7 @@
 # Semantic Catalog construction
 
+**[Planned]** This document describes accepted design that is not implemented yet.
+
 Construction turns inputs into confirmed knowledge. An input arrives, Generators produce candidates,
 the Semantic Catalog accepts them, the user policy chooses a confirmation path, and the deciding
 party judges what the policy sends to a person. Each step only appends to the log. This document

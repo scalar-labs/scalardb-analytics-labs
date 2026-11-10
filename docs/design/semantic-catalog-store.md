@@ -1,5 +1,7 @@
 # Where does the Semantic Catalog store its records?
 
+**[Planned]** This decision is accepted but not implemented yet.
+
 ## Current answer
 
 In its own `semantic_catalog` schema inside the Physical Catalog's PostgreSQL database, accessed

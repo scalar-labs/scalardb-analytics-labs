@@ -1,5 +1,7 @@
 # Semantic Catalog public API
 
+**[Planned]** This document describes accepted design that is not implemented yet.
+
 The public API is the set of operations and reads the `semantic-catalog` module exposes to the
 application. The application reaches it from the CLI, the Agent Skill, and later interfaces. The
 Query Agent never calls it directly, but what it receives is shaped by these reads. This document

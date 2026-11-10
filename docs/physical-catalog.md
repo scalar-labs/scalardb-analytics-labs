@@ -88,6 +88,10 @@ the requested operation.
 
 ## Catalog model
 
+**[Planned]** This section describes the target model, which is not implemented yet. Today, the
+embedded catalog offers the operations under [Callers](#callers), and registration resolves source
+schemas through the upstream `schema-resolver`.
+
 The catalog provides catalog and data-source registration, listing, lookup, and unregistration;
 retrieval of the table metadata of registered tables; versioned persistence of the parts of that
 metadata used for planning; a resource identifier for each table; name resolution for Query Engines,
@@ -164,10 +168,10 @@ model](https://github.com/scalar-labs/scalardb-analytics-connectors/blob/main/do
 ## Ownership
 
 The catalog is authoritative for the physical schemas and Analytics types used for planning and
-execution and does not depend on the Semantic Catalog. A new version becomes new Semantic Catalog
-input, never a direct change to a confirmed Fact. Creating a catalog or data source is an explicit
-administrative operation; startup, extension loading, and `ATTACH` never create one. Administrative
-operations and query-time name resolution use the same catalog use cases.
+execution and does not depend on the Semantic Catalog. **[Planned]** A new version becomes new
+Semantic Catalog input, never a direct change to a confirmed Fact. Creating a catalog or data source
+is an explicit administrative operation; startup, extension loading, and `ATTACH` never create one.
+Administrative operations and query-time name resolution use the same catalog use cases.
 
 The catalog does not own:
 

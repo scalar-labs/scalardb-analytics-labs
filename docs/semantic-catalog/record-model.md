@@ -1,5 +1,7 @@
 # Semantic Catalog record model
 
+**[Planned]** This document describes accepted design that is not implemented yet.
+
 This document explains what the Semantic Catalog records: the structure of knowledge, the log,
 identity, Fact states, and validation results. Its terms are introduced in
 [`../semantic-catalog.md`](../semantic-catalog.md). How the Catalog Snapshot is derived from these
