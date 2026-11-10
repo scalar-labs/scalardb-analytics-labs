@@ -5,7 +5,8 @@ sources correctly, together with the material needed to judge whether that knowl
 It builds that knowledge as candidates, routes each candidate to machine judgement or to a person,
 and lets consumers read the confirmed result at a fixed point in time. This document gives the
 overall model; the documents under [`semantic-catalog/`](semantic-catalog/) explain each part in
-depth.
+depth. [`semantic-catalog/glossary.md`](semantic-catalog/glossary.md) defines the terms used only
+inside the Semantic Catalog.
 
 ## The problem it solves
 
