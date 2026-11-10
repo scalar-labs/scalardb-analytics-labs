@@ -131,12 +131,14 @@ written content cannot be erased.
 
 ## Identity and URNs
 
-Every record is referred to by a URN of the form `urn:sdba:<domain>:<record kind>:<identifier>`. The
-Semantic Catalog issues URNs when it creates records; question URNs come from the tracing module. A
-URN is unique, never changes, is never reused, and carries none of the record's content.
-Content-based names would break references on correction and merge distinct objects that share a
-name, and the business identity they would presuppose is what construction is meant to establish.
-The domain comes first so that cross-domain references can use the same form.
+Every record is referred to by a URN of the form
+`urn:scalardb:analytics:<domain>:<record kind>:<identifier>`. The namespace spells out the product
+name, because the product defines no abbreviation of it. The Semantic Catalog issues URNs when it
+creates records; question URNs come from the tracing module. A URN is unique, never changes, is
+never reused, and carries none of the record's content. Content-based names would break references
+on correction and merge distinct objects that share a name, and the business identity they would
+presuppose is what construction is meant to establish. The domain comes first after the namespace
+so that cross-domain references can use the same form.
 
 | Record | Identifier | A new one appears |
 | --- | --- | --- |

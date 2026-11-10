@@ -45,6 +45,7 @@ grpc-inprocess = { module = "io.grpc:grpc-inprocess" }
 grpc-protobuf = { module = "io.grpc:grpc-protobuf" }
 grpc-services = { module = "io.grpc:grpc-services" }
 grpc-stub = { module = "io.grpc:grpc-stub" }
+hikaricp = { module = "com.zaxxer:HikariCP" }
 mariadb-java-client = { module = "org.mariadb.jdbc:mariadb-java-client", version.ref = "mariadb" }
 postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
 proto-google-common-protos = { module = "com.google.api.grpc:proto-google-common-protos", version.ref = "proto-google-common-protos" }

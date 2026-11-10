@@ -37,3 +37,11 @@ entry and a document disagree, fix the disagreement.
 | duplicate check | — | The check, before acceptance, of whether a Generator's output makes the same claim as an existing Fact. A match becomes an additional acceptance of that Fact instead of a new Fact. | [`construction.md`](construction.md) |
 | preset | `full-auto`, `auto`, `manual` | The part of a user policy version that decides when machine judgement proceeds: always, when the `auto` conditions hold, or never. A new domain starts with `auto`. | [`construction.md`](construction.md) |
 | review orchestration | — | The responsibility for deciding what to present, when, to whom, and in which unit and context, for candidates and retirement proposals needing consent and for conflicts needing a selection. It is separate from Generators. | [`construction.md`](construction.md) |
+
+## Storage
+
+| Term | Code identifier | Definition | Explained in |
+| --- | --- | --- | --- |
+| store | `SemanticCatalogStore`, `StoreSettings` | The Physical Catalog's PostgreSQL database, in which the Semantic Catalog keeps its own `semantic_catalog` schema and which it opens with its own connection pool. | [`storage.md`](storage.md) |
+| schema change | `SchemaMigrator.Change` | One entry of the ordered list of changes to the `semantic_catalog` schema. Opening the store applies the changes not yet recorded in the schema version table, each exactly once. | [`storage.md`](storage.md) |
+| domain identifier | `Urns.DOMAIN` | The caller-supplied identifier of a domain: lowercase letters, digits, and hyphens. It is embedded unchanged in every URN the domain issues. | [`record-model.md`](record-model.md) |
