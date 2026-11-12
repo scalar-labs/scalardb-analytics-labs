@@ -119,8 +119,8 @@ a question, or usage feedback becomes input to Semantic Catalog build tasks. Gen
 candidates with validation results, and the user policy routes each to machine judgement or the
 deciding party's consent. Confirmed knowledge appears in Catalog Snapshots at later commits. The
 authority to produce candidates is separate from the authority to confirm them: an answer or
-selection is accepted only with a reference to an authority check made outside the Semantic Catalog.
-No new input changes a past Catalog Snapshot.
+conflict resolution is accepted only with a reference to an authority check made outside the
+Semantic Catalog. No new input changes a past Catalog Snapshot.
 
 **Querying with knowledge.** **[Planned]** The Query Agent or a person reads the knowledge a
 question needs from one Catalog Snapshot and composes SQL.

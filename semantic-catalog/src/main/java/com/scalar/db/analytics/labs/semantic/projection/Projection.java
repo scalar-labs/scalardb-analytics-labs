@@ -10,6 +10,7 @@ import com.scalar.db.analytics.labs.semantic.model.LogPosition;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord.FactEvent;
 import com.scalar.db.analytics.labs.semantic.model.LogRecordJson;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
+import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.AddressSelectionRow;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.DependencyRow;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.EdgeIdentity;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.ElementRow;
@@ -152,14 +153,33 @@ public final class Projection {
     }
   }
 
-  /** A Fact Address, the Facts at it, and the materialized rows derived for it. */
+  /**
+   * A Fact Address, the Facts at it, its conflict resolutions, and the materialized rows derived
+   * for it. Of its selection history only the open row is loaded; the {@link Projector} closes it
+   * and adds a new one when the selection changes.
+   */
   public static final class AddressSlice {
     private final FactAddressRow row;
     final Set<String> facts;
+    final List<SelectionRule.Resolution> resolutions;
+    final List<AddressSelectionRow> selections;
 
-    AddressSlice(FactAddressRow row, List<String> facts) {
+    AddressSlice(
+        FactAddressRow row,
+        List<String> facts,
+        List<SelectionRule.Resolution> resolutions,
+        List<AddressSelectionRow> selections) {
       this.row = row;
       this.facts = new LinkedHashSet<>(facts);
+      this.resolutions = new ArrayList<>(resolutions);
+      this.selections = new ArrayList<>(selections);
+    }
+
+    /** The selection holding at the end of the latest commit applied, if any. */
+    public Optional<AddressSelectionRow> currentSelection() {
+      return selections.isEmpty() || selections.getLast().toCommit() != null
+          ? Optional.empty()
+          : Optional.of(selections.getLast());
     }
 
     public FactAddressRow row() {
@@ -171,7 +191,7 @@ public final class Projection {
     }
 
     Stream<MaterializedRow> rows() {
-      return Stream.of(row);
+      return Stream.concat(Stream.of(row), selections.stream());
     }
   }
 
@@ -227,10 +247,48 @@ public final class Projection {
       return Optional.empty();
     }
     var record = found.get();
-    var slice = new AddressSlice(record.row(), record.facts());
+    var slice =
+        new AddressSlice(
+            record.row(),
+            record.facts(),
+            record.resolutions(),
+            record.currentSelection().stream().toList());
     remember(slice.rows());
     addresses.put(urn, slice);
     return Optional.of(slice);
+  }
+
+  /**
+   * What the selection rule needs about every Fact at a Fact Address. A Fact this projection holds
+   * answers from its Fact Record, which may have changed in the commit; any other comes from one
+   * read of the source for the whole Fact Address.
+   */
+  public List<SelectionRule.Fact> selectionFacts(AddressSlice address) {
+    var result = new ArrayList<SelectionRule.Fact>();
+    var notHeld = new LinkedHashSet<String>();
+    for (var fact : address.facts) {
+      var held = facts.get(fact);
+      if (held == null) {
+        notHeld.add(fact);
+        continue;
+      }
+      var record = held.record();
+      result.add(
+          new SelectionRule.Fact(
+              fact,
+              record.is(FactState.CONFIRMED)
+                  ? record.latestConfirmation().map(LogPosition::commit).orElse(null)
+                  : null,
+              record.confirmationFactDependencies()));
+    }
+    if (!notHeld.isEmpty()) {
+      for (var fact : source.selectionFacts(address.row().factAddress())) {
+        if (notHeld.contains(fact.fact())) {
+          result.add(fact);
+        }
+      }
+    }
+    return result;
   }
 
   /** An element by URN. */

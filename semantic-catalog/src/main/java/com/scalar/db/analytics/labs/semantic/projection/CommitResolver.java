@@ -338,6 +338,15 @@ public final class CommitResolver {
           new LogRecord.Reject(toRecord.apply(rejection.fact()), basis(rejection.basis()));
       case LogRecord.Retire retirement ->
           new LogRecord.Retire(toRecord.apply(retirement.fact()), basis(retirement.basis()));
+      case LogRecord.ResolveConflict resolution ->
+          new LogRecord.ResolveConflict(
+              toRecord.apply(resolution.factAddress()),
+              toRecord.apply(resolution.chosen()),
+              resolution.passedOver().stream().map(toRecord).toList(),
+              resolution.decidedBy(),
+              resolution.authorityCheck(),
+              resolution.wording(),
+              resolution.reviewPresentation());
     };
   }
 

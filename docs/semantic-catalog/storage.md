@@ -118,11 +118,13 @@ The log:
 | --- | --- | --- |
 | `domains` | Domain | Creation time |
 | `commits` | Domain, commit number | Time, kind of operation, author (the person or agent behind the call) |
-| `log_records` | Domain, commit number, order | Record kind, target Fact, target Input Resource, content |
+| `log_records` | Domain, commit number, order | Record kind, target Fact, target Input Resource, target Fact Address of a conflict resolution, content |
 
-`log_records` is append-only. Fact Events, Observation Events, Input Observations, and policy
-versions all go there. Its target Fact and target Input Resource columns are indexed, to find a
-Fact's events and to walk observations per Input Resource.
+`log_records` is append-only. Fact Events, conflict resolutions, Observation Events, Input
+Observations, and policy versions all go there. Its target Fact, target Input Resource, and target
+Fact Address columns are indexed, to find a Fact's events, to walk observations per Input
+Resource, and to find a Fact Address's conflict resolutions. `fact_records` is also indexed by
+Fact Address, for reads of the Facts at many Fact Addresses at once.
 
 Materialized records are updated in the same transaction as the log records they derive from. Where
 a table holds commit ranges, a row stores the commit from which it holds and the commit from which

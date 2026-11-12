@@ -56,7 +56,10 @@ import java.util.Set;
  * nothing.
  *
  * <p>The Fact's current Fact Record row follows its latest event. Points are commits, so
- * presentable periods are derived once per commit, from the Fact Records at its end.
+ * presentable periods and the selection at each Fact Address a confirmation, a retirement, or a
+ * conflict resolution touched are derived once per commit, from the Fact Records at its end. A
+ * validating projector accepts a conflict resolution only when it names exactly the eligible Facts
+ * of the previous commit, and checks that it leaves the chosen Fact as the one eligible Fact.
  *
  * <p>A dependency on a Fact at another Fact Address is a premise dependency; one on a Fact at the
  * same Fact Address is a replacement dependency. Only premise dependencies make confirmation wait,
@@ -71,6 +74,8 @@ public final class Projector {
   private final Map<String, ElementIdentity> newElements = new LinkedHashMap<>();
   private final Set<String> newFacts = new LinkedHashSet<>();
   private final Set<String> retiredFacts = new LinkedHashSet<>();
+  private final Set<String> selectionAffected = new LinkedHashSet<>();
+  private final Map<String, String> resolutions = new LinkedHashMap<>();
 
   private Projector(Projection projection, boolean validating) {
     this.projection = projection;
@@ -95,6 +100,8 @@ public final class Projector {
     newElements.clear();
     newFacts.clear();
     retiredFacts.clear();
+    selectionAffected.clear();
+    resolutions.clear();
   }
 
   /**
@@ -141,6 +148,7 @@ public final class Projector {
       case LogRecord.PolicyVersion ignored ->
           projection.addPolicyVersion(Urns.logRecord(domain, at));
       case FactEvent event -> applyFactEvent(at, event);
+      case LogRecord.ResolveConflict resolution -> applyResolution(resolution);
     }
   }
 
@@ -190,7 +198,7 @@ public final class Projector {
             scope.entities().stream().map(Ref::urnValue).toList(),
             address.predicateDefinition(),
             commit);
-    projection.addAddress(new AddressSlice(row, List.of()));
+    projection.addAddress(new AddressSlice(row, List.of(), List.of(), List.of()));
   }
 
   private void applyFact(LogPosition at, LogRecord.Fact fact) {
@@ -231,9 +239,43 @@ public final class Projector {
     slice.record().apply(at, event);
     slice.events.put(at, event);
     touchedFacts.add(fact);
+    if (event instanceof LogRecord.Confirm || event instanceof LogRecord.Retire) {
+      selectionAffected.add(slice.row().factAddress());
+    }
     if (event instanceof LogRecord.Retire) {
       retiredFacts.add(fact);
     }
+  }
+
+  private void applyResolution(LogRecord.ResolveConflict resolution) {
+    var address = requireAddress(resolution.factAddress());
+    var urn = address.row().factAddress();
+    var chosen = resolution.chosen().urnValue();
+    var passedOver = resolution.passedOver().stream().map(Ref::urnValue).toList();
+    if (validating) {
+      if (passedOver.isEmpty() || passedOver.contains(chosen)) {
+        throw reject("A conflict resolution chooses one Fact and passes over at least one other");
+      }
+      // Selections change only at the end of a commit, so the current one is the previous commit's.
+      var eligible =
+          address
+              .currentSelection()
+              .map(MaterializedRow.AddressSelectionRow::eligibleFacts)
+              .orElse(List.of());
+      var named = new HashSet<>(passedOver);
+      named.add(chosen);
+      if (eligible.size() < 2 || !named.equals(new HashSet<>(eligible))) {
+        throw reject(
+            "A conflict resolution names exactly the eligible Facts of a conflicting Fact Address,"
+                + " and "
+                + urn
+                + " has eligible Facts "
+                + eligible);
+      }
+      resolutions.put(urn, chosen);
+    }
+    address.resolutions.add(new SelectionRule.Resolution(chosen, passedOver, commit));
+    selectionAffected.add(urn);
   }
 
   // Validation of Fact Events
@@ -601,6 +643,56 @@ public final class Projector {
     }
     if (validating) {
       checkRetirementsCascaded();
+    }
+    for (var address : selectionAffected) {
+      updateSelection(requireAddress(Ref.urn(address)));
+    }
+    if (validating) {
+      checkResolutions();
+    }
+  }
+
+  /**
+   * Derives the selection at a Fact Address at the end of the commit, and closes the current row
+   * and adds a new one when it changed.
+   */
+  private void updateSelection(AddressSlice address) {
+    var facts = projection.selectionFacts(address);
+    var current = address.currentSelection();
+    var result =
+        SelectionRule.select(
+            facts,
+            address.resolutions,
+            current.map(MaterializedRow.AddressSelectionRow::selectedFact).orElse(null));
+    if (current.isPresent()
+        && Objects.equals(current.get().selectedFact(), result.selected())
+        && current.get().eligibleFacts().equals(result.eligible())) {
+      return;
+    }
+    var selections = address.selections;
+    current.ifPresent(open -> selections.set(selections.size() - 1, open.closedAt(commit)));
+    if (result.selected() != null || !result.eligible().isEmpty()) {
+      selections.add(
+          new MaterializedRow.AddressSelectionRow(
+              address.row().factAddress(), commit, null, result.selected(), result.eligible()));
+    }
+  }
+
+  /** A conflict resolution leaves the chosen Fact as the selected and only eligible Fact. */
+  private void checkResolutions() {
+    for (var entry : resolutions.entrySet()) {
+      var current = requireAddress(Ref.urn(entry.getKey())).currentSelection();
+      var chosen = entry.getValue();
+      if (current.isEmpty()
+          || !chosen.equals(current.get().selectedFact())
+          || !current.get().eligibleFacts().equals(List.of(chosen))) {
+        throw reject(
+            "The resolution choosing "
+                + chosen
+                + " at "
+                + entry.getKey()
+                + " does not leave it as the one eligible Fact");
+      }
     }
   }
 

@@ -23,8 +23,8 @@ import org.jspecify.annotations.Nullable;
  * position}. Records that create something ({@link Element}, {@link FactAddress}, {@link Fact},
  * {@link InputResource}, {@link InputObservation}) are identified by the URN issued from that
  * position. {@linkplain FactEvent Fact Events} change how one Fact is treated, and each produces a
- * Fact Revision. Log records are never updated or deleted; everything materialized for reading is
- * derived from them.
+ * Fact Revision, and a {@link ResolveConflict} records a deciding party's choice in a conflict. Log
+ * records are never updated or deleted; everything materialized for reading is derived from them.
  *
  * <p>A record built for a commit request may refer to records of the same request by temporary
  * numbers; a record stored in the log refers to other records only by URN.
@@ -44,7 +44,8 @@ import org.jspecify.annotations.Nullable;
   @JsonSubTypes.Type(value = LogRecord.Answer.class, name = "answer"),
   @JsonSubTypes.Type(value = LogRecord.Confirm.class, name = "confirm"),
   @JsonSubTypes.Type(value = LogRecord.Reject.class, name = "reject"),
-  @JsonSubTypes.Type(value = LogRecord.Retire.class, name = "retire")
+  @JsonSubTypes.Type(value = LogRecord.Retire.class, name = "retire"),
+  @JsonSubTypes.Type(value = LogRecord.ResolveConflict.class, name = "resolve-conflict")
 })
 public sealed interface LogRecord {
   /**
@@ -231,6 +232,37 @@ public sealed interface LogRecord {
   /** The retirement of a confirmed Fact. */
   record Retire(Ref fact, Basis basis) implements FactEvent {}
 
+  /**
+   * A deciding party's resolution of a conflict: which of the eligible Facts at one Fact Address is
+   * presented. It is the only part of the selection written to the log, because no rule can
+   * reproduce it; every other selection is derived. It targets a Fact Address, not one Fact, so it
+   * is not a Fact Event.
+   *
+   * <p>It is accepted only when the chosen and passed-over Facts are exactly the eligible Facts at
+   * the previous commit, two or more. The passed-over Facts stay displaced while the chosen Fact is
+   * presentable.
+   *
+   * @param chosen the Fact presented from now on
+   * @param passedOver the other eligible Facts
+   * @param decidedBy the deciding party
+   * @param authorityCheck the reference to the check of the deciding party's authority
+   * @param wording the wording presented and answered
+   * @param reviewPresentation the review presentation the resolution was made in, if any
+   */
+  record ResolveConflict(
+      Ref factAddress,
+      Ref chosen,
+      List<Ref> passedOver,
+      String decidedBy,
+      String authorityCheck,
+      String wording,
+      @Nullable String reviewPresentation)
+      implements LogRecord {
+    public ResolveConflict {
+      passedOver = List.copyOf(passedOver);
+    }
+  }
+
   /** What a rejection or a retirement rests on. */
   @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "basis")
   @JsonSubTypes({
@@ -272,6 +304,7 @@ public sealed interface LogRecord {
       case Confirm ignored -> "confirm";
       case Reject ignored -> "reject";
       case Retire ignored -> "retire";
+      case ResolveConflict ignored -> "resolve-conflict";
     };
   }
 }

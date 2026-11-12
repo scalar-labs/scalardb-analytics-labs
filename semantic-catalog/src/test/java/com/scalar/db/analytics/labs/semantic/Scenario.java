@@ -10,6 +10,8 @@ import com.scalar.db.analytics.labs.semantic.model.Dependency;
 import com.scalar.db.analytics.labs.semantic.model.ElementIdentity;
 import com.scalar.db.analytics.labs.semantic.model.FactRevision;
 import com.scalar.db.analytics.labs.semantic.model.IdentityKey;
+import com.scalar.db.analytics.labs.semantic.model.Knowledge;
+import com.scalar.db.analytics.labs.semantic.model.KnowledgeRequest;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord.Basis;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
@@ -75,6 +77,26 @@ final class Scenario {
 
   Optional<FactState> stateAt(long commit, String fact) {
     return at(commit, snapshot -> snapshot.factState(fact));
+  }
+
+  /** What one request for an element and a predicate receives at a commit. */
+  List<Knowledge.AtAddress> knowledge(long commit, String element, String predicate) {
+    return at(
+        commit,
+        snapshot ->
+            snapshot
+                .request(List.of(KnowledgeRequest.of(element, predicate)))
+                .getFirst()
+                .addresses());
+  }
+
+  /** What the only Fact Address of a predicate on an element offers at a commit. */
+  Knowledge only(long commit, String element, String predicate) {
+    var addresses = knowledge(commit, element, predicate);
+    if (addresses.size() != 1) {
+      throw new AssertionError("Expected one Fact Address, got " + addresses);
+    }
+    return addresses.getFirst().knowledge();
   }
 
   /** A Fact's latest Fact Revision. */
@@ -185,6 +207,13 @@ final class Scenario {
       proposeRetire(fact);
       var evaluation = evaluate(fact, Transition.RETIRE, PolicyResult.MACHINE_JUDGEMENT);
       return add(new LogRecord.Retire(fact, new Basis.Event(evaluation)));
+    }
+
+    /** A deciding party's resolution of a conflict at a Fact Address. */
+    Ref resolveConflict(Ref address, Ref chosen, Ref... passedOver) {
+      return add(
+          new LogRecord.ResolveConflict(
+              address, chosen, List.of(passedOver), "owner", "authority-check", "wording", null));
     }
   }
 }

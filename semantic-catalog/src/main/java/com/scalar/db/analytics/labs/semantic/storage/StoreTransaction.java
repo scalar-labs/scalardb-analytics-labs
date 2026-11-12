@@ -5,14 +5,17 @@
 package com.scalar.db.analytics.labs.semantic.storage;
 
 import com.scalar.db.analytics.labs.semantic.model.LogPosition;
+import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord.FactEvent;
 import com.scalar.db.analytics.labs.semantic.model.LogRecordJson;
+import com.scalar.db.analytics.labs.semantic.model.Ref;
 import com.scalar.db.analytics.labs.semantic.model.Urns;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
 import com.scalar.db.analytics.labs.semantic.projection.IdentityLookup;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow;
+import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.AddressSelectionRow;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.DependencyRow;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.EdgeIdentity;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.ElementRow;
@@ -24,12 +27,17 @@ import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.Presenta
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.Treatment;
 import com.scalar.db.analytics.labs.semantic.projection.PositionedRecord;
 import com.scalar.db.analytics.labs.semantic.projection.ProjectionSource;
+import com.scalar.db.analytics.labs.semantic.projection.SelectionRule;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
@@ -114,17 +122,20 @@ public final class StoreTransaction {
    * @param targetFact the Fact the record creates or concerns, indexed to fold a Fact's records
    * @param targetInputResource the Input Resource the record creates or observes, indexed to walk
    *     the observations of an Input Resource
+   * @param targetFactAddress the Fact Address a conflict resolution targets, indexed to find a Fact
+   *     Address's resolutions
    */
   public void insertLogRecord(
       String domain,
       PositionedRecord record,
       @Nullable String targetFact,
-      @Nullable String targetInputResource) {
+      @Nullable String targetInputResource,
+      @Nullable String targetFactAddress) {
     jdbc.sql(
             "INSERT INTO semantic_catalog.log_records"
                 + " (domain, commit_number, ordinal, kind, target_fact, target_input_resource,"
-                + " content)"
-                + " VALUES (:domain, :commit, :ordinal, :kind, :fact, :resource,"
+                + " target_fact_address, content)"
+                + " VALUES (:domain, :commit, :ordinal, :kind, :fact, :resource, :address,"
                 + " CAST(:content AS jsonb))")
         .param("domain", domain)
         .param("commit", record.position().commit())
@@ -132,6 +143,7 @@ public final class StoreTransaction {
         .param("kind", record.record().kind())
         .param("fact", targetFact, Types.VARCHAR)
         .param("resource", targetInputResource, Types.VARCHAR)
+        .param("address", targetFactAddress, Types.VARCHAR)
         .param("content", LogRecordJson.write(record.record()))
         .update();
   }
@@ -172,6 +184,22 @@ public final class StoreTransaction {
               .param("proposal", record.treatment().openRetirementProposal(), Types.VARCHAR)
               .param("unknown", record.treatment().unknownAnswerPending())
               .param("record", LogRecordJson.writeNode(record.record()))
+              .update();
+      case AddressSelectionRow selection ->
+          jdbc.sql(
+                  "INSERT INTO semantic_catalog.address_selections"
+                      + " (domain, fact_address, from_commit, to_commit, selected_fact,"
+                      + " eligible_facts)"
+                      + " VALUES (:domain, :address, :from, :to, :selected,"
+                      + " CAST(:eligible AS jsonb))"
+                      + " ON CONFLICT (domain, fact_address, from_commit) DO UPDATE SET"
+                      + " to_commit = EXCLUDED.to_commit")
+              .param("domain", domain)
+              .param("address", selection.factAddress())
+              .param("from", selection.fromCommit())
+              .param("to", selection.toCommit(), Types.BIGINT)
+              .param("selected", selection.selectedFact(), Types.VARCHAR)
+              .param("eligible", LogRecordJson.writeStrings(selection.eligibleFacts()))
               .update();
       case PresentablePeriodRow period ->
           jdbc.sql(
@@ -296,6 +324,8 @@ public final class StoreTransaction {
     rows.addAll(jdbc.sql(RECORDS + " WHERE domain = ?").param(domain).query(this::record).list());
     rows.addAll(jdbc.sql(PERIODS + " WHERE domain = ?").param(domain).query(this::period).list());
     rows.addAll(
+        jdbc.sql(SELECTIONS + " WHERE domain = ?").param(domain).query(this::selection).list());
+    rows.addAll(
         jdbc.sql(DEPENDENCIES + " WHERE domain = ?").param(domain).query(this::dependency).list());
     return rows;
   }
@@ -332,6 +362,247 @@ public final class StoreTransaction {
         .params(domain, fact, upToCommit)
         .query(this::positioned)
         .list();
+  }
+
+  // Reads of many records at a commit, for the Catalog Snapshot. Each runs one query for the whole
+  // set it is given.
+
+  /** The elements among some that exist at a commit. */
+  public List<ElementRow> elementsAt(String domain, Collection<String> elements, long commit) {
+    if (elements.isEmpty()) {
+      return List.of();
+    }
+    return jdbc.sql(
+            ELEMENTS
+                + " WHERE domain = :domain AND element = ANY(CAST(:elements AS text[])) AND created_commit <= :commit")
+        .param("domain", domain)
+        .param("elements", array(elements))
+        .param("commit", commit)
+        .query(this::element)
+        .list();
+  }
+
+  /**
+   * The edges of a kind between two elements, for several such questions at once.
+   *
+   * @param kind the edge kind of the question
+   * @param from the end the edge starts from; for an undirected edge, either end
+   * @param to the other end
+   */
+  public record EdgeQuestion(ElementKind kind, String from, String to) {}
+
+  /**
+   * The edges that exist at a commit for each question, whatever their identifying part: a directed
+   * edge from one end to the other, or an undirected edge between them. One query answers all.
+   *
+   * @return the edges per question, by the question's index
+   */
+  public Map<Integer, List<ElementRow>> edgesBetween(
+      String domain, List<EdgeQuestion> questions, long commit) {
+    var answers = new HashMap<Integer, List<ElementRow>>();
+    if (questions.isEmpty()) {
+      return answers;
+    }
+    var kinds = new String[questions.size()];
+    var froms = new String[questions.size()];
+    var tos = new String[questions.size()];
+    var lows = new String[questions.size()];
+    var highs = new String[questions.size()];
+    for (var i = 0; i < questions.size(); i++) {
+      var question = questions.get(i);
+      var sorted = question.from().compareTo(question.to()) <= 0;
+      kinds[i] = question.kind().name();
+      froms[i] = question.from();
+      tos[i] = question.to();
+      lows[i] = sorted ? question.from() : question.to();
+      highs[i] = sorted ? question.to() : question.from();
+    }
+    jdbc.sql(
+            "SELECT q.i - 1 AS question, e.element, e.kind, e.parent, e.created_commit,"
+                + " e.edge_end_a, e.edge_end_b, e.edge_directed, e.edge_identity_key,"
+                + " e.edge_identifying_part::text AS edge_identifying_part"
+                + " FROM unnest(CAST(:kinds AS text[]), CAST(:froms AS text[]),"
+                + " CAST(:tos AS text[]), CAST(:lows AS text[]), CAST(:highs AS text[]))"
+                + " WITH ORDINALITY AS q(kind, from_end, to_end, low_end, high_end, i)"
+                + " JOIN semantic_catalog.elements e"
+                + " ON e.domain = :domain AND e.kind = q.kind AND e.created_commit <= :commit"
+                + " AND ((e.edge_directed AND e.edge_end_a = q.from_end"
+                + " AND e.edge_end_b = q.to_end)"
+                + " OR (NOT e.edge_directed AND e.edge_end_a = q.low_end"
+                + " AND e.edge_end_b = q.high_end))"
+                + " ORDER BY q.i, e.element")
+        .param("domain", domain)
+        .param("commit", commit)
+        .param("kinds", kinds)
+        .param("froms", froms)
+        .param("tos", tos)
+        .param("lows", lows)
+        .param("highs", highs)
+        .query(
+            (rs, n) -> {
+              answers
+                  .computeIfAbsent(rs.getInt("question"), key -> new ArrayList<>())
+                  .add(element(rs, n));
+              return n;
+            })
+        .list();
+    return answers;
+  }
+
+  /**
+   * The elements whose existence Fact is selected at a commit, optionally only those of a kind or
+   * of a parent.
+   */
+  public List<ElementRow> presentedElements(
+      String domain, @Nullable ElementKind kind, @Nullable String parent, long commit) {
+    return jdbc.sql(
+            "SELECT e.element, e.kind, e.parent, e.created_commit, e.edge_end_a, e.edge_end_b,"
+                + " e.edge_directed, e.edge_identity_key,"
+                + " e.edge_identifying_part::text AS edge_identifying_part"
+                + " FROM semantic_catalog.elements e"
+                + " JOIN semantic_catalog.fact_addresses a"
+                + " ON a.domain = e.domain AND a.element = e.element AND a.predicate = :existence"
+                + " AND a.scope_description IS NULL AND a.predicate_definition IS NULL"
+                + " JOIN semantic_catalog.address_selections s"
+                + " ON s.domain = a.domain AND s.fact_address = a.fact_address"
+                + " AND s.from_commit <= :commit"
+                + " AND (s.to_commit IS NULL OR s.to_commit > :commit)"
+                + " AND s.selected_fact IS NOT NULL"
+                + " WHERE e.domain = :domain"
+                + " AND (CAST(:kind AS text) IS NULL OR e.kind = :kind)"
+                + " AND (CAST(:parent AS text) IS NULL OR e.parent = :parent)"
+                + " ORDER BY e.element")
+        .param("domain", domain)
+        .param("existence", Vocabulary.EXISTENCE)
+        .param("commit", commit)
+        .param("kind", kind == null ? null : kind.name(), Types.VARCHAR)
+        .param("parent", parent, Types.VARCHAR)
+        .query(this::element)
+        .list();
+  }
+
+  /**
+   * The Fact Addresses of some elements that exist at a commit, except those of free-description
+   * predicates, which cannot be requested by name.
+   */
+  public List<FactAddressRow> namedAddressesOf(
+      String domain, Collection<String> elements, long commit) {
+    if (elements.isEmpty()) {
+      return List.of();
+    }
+    return jdbc.sql(
+            ADDRESSES
+                + " WHERE domain = :domain AND element = ANY(CAST(:elements AS text[]))"
+                + " AND created_commit <= :commit AND predicate_definition IS NULL"
+                + " ORDER BY fact_address")
+        .param("domain", domain)
+        .param("elements", array(elements))
+        .param("commit", commit)
+        .query(this::address)
+        .list();
+  }
+
+  /** The selections that hold at a commit at some Fact Addresses. */
+  public List<AddressSelectionRow> selectionsAt(
+      String domain, Collection<String> factAddresses, long commit) {
+    if (factAddresses.isEmpty()) {
+      return List.of();
+    }
+    return jdbc.sql(
+            SELECTIONS
+                + " WHERE domain = :domain AND fact_address = ANY(CAST(:addresses AS text[]))"
+                + " AND from_commit <= :commit AND (to_commit IS NULL OR to_commit > :commit)")
+        .param("domain", domain)
+        .param("addresses", array(factAddresses))
+        .param("commit", commit)
+        .query(this::selection)
+        .list();
+  }
+
+  /** The current Fact Records of the Facts at some Fact Addresses. */
+  public List<FactRecordRow> factRecordsAt(String domain, Collection<String> factAddresses) {
+    if (factAddresses.isEmpty()) {
+      return List.of();
+    }
+    return jdbc.sql(
+            RECORDS
+                + " WHERE domain = :domain AND fact_address = ANY(CAST(:addresses AS text[])) ORDER BY fact")
+        .param("domain", domain)
+        .param("addresses", array(factAddresses))
+        .query(this::record)
+        .list();
+  }
+
+  /** The current Fact Records of some Facts. */
+  public List<FactRecordRow> factRecordsOf(String domain, Collection<String> facts) {
+    if (facts.isEmpty()) {
+      return List.of();
+    }
+    return jdbc.sql(RECORDS + " WHERE domain = :domain AND fact = ANY(CAST(:facts AS text[]))")
+        .param("domain", domain)
+        .param("facts", array(facts))
+        .query(this::record)
+        .list();
+  }
+
+  /** The latest Input Observation at or before a commit of each of some Input Resources. */
+  public Map<String, LogPosition> latestObservationsAt(
+      String domain, Collection<String> inputResources, long commit) {
+    var latest = new HashMap<String, LogPosition>();
+    if (inputResources.isEmpty()) {
+      return latest;
+    }
+    jdbc.sql(
+            "SELECT DISTINCT ON (target_input_resource) target_input_resource, commit_number,"
+                + " ordinal FROM semantic_catalog.log_records"
+                + " WHERE domain = :domain AND target_input_resource = ANY(CAST(:resources AS text[]))"
+                + " AND kind = 'input-observation' AND commit_number <= :commit"
+                + " ORDER BY target_input_resource, commit_number DESC, ordinal DESC")
+        .param("domain", domain)
+        .param("resources", array(inputResources))
+        .param("commit", commit)
+        .query(
+            (rs, n) ->
+                latest.put(
+                    rs.getString("target_input_resource"),
+                    new LogPosition(rs.getLong("commit_number"), rs.getInt("ordinal"))))
+        .list();
+    return latest;
+  }
+
+  /**
+   * The log records of some Facts up to a commit, each Fact's in log order: the record creating it,
+   * then its Fact Events. One query reads them all, for a read at a point before those Facts
+   * changed.
+   */
+  public Map<String, List<PositionedRecord>> factLogsOf(
+      String domain, Collection<String> facts, long upToCommit) {
+    var records = new HashMap<String, List<PositionedRecord>>();
+    if (facts.isEmpty()) {
+      return records;
+    }
+    jdbc.sql(
+            "SELECT target_fact, commit_number, ordinal, content::text AS content"
+                + " FROM semantic_catalog.log_records"
+                + " WHERE domain = :domain AND target_fact = ANY(CAST(:facts AS text[]))"
+                + " AND commit_number <= :commit"
+                + " ORDER BY target_fact, commit_number, ordinal")
+        .param("domain", domain)
+        .param("facts", array(facts))
+        .param("commit", upToCommit)
+        .query(
+            (rs, n) -> {
+              records
+                  .computeIfAbsent(rs.getString("target_fact"), key -> new ArrayList<>())
+                  .add(positioned(rs, n));
+              return n;
+            })
+        .list();
+    return records;
+  }
+
+  private static String[] array(Collection<String> values) {
+    return values.toArray(String[]::new);
   }
 
   // Projection loading and identity, within this transaction
@@ -396,7 +667,25 @@ public final class StoreTransaction {
                                   + " WHERE domain = ? AND fact_address = ? ORDER BY fact")
                           .params(domain, factAddress)
                           .query(StoreTransaction::firstString)
-                          .list()));
+                          .list(),
+                      jdbc
+                          .sql(
+                              LOG_RECORDS
+                                  + " WHERE domain = ? AND target_fact_address = ?"
+                                  + " AND kind = 'resolve-conflict'"
+                                  + " ORDER BY commit_number, ordinal")
+                          .params(domain, factAddress)
+                          .query(StoreTransaction.this::positioned)
+                          .list()
+                          .stream()
+                          .map(StoreTransaction::resolution)
+                          .toList(),
+                      jdbc.sql(
+                              SELECTIONS
+                                  + " WHERE domain = ? AND fact_address = ? AND to_commit IS NULL")
+                          .params(domain, factAddress)
+                          .query(StoreTransaction.this::selection)
+                          .optional()));
     }
 
     @Override
@@ -497,6 +786,39 @@ public final class StoreTransaction {
               .params(domain, fact, FactState.CONFIRMED.name())
               .query(StoreTransaction::firstString)
               .list());
+    }
+
+    @Override
+    public List<SelectionRule.Fact> selectionFacts(String factAddress) {
+      var presentableSince = new LinkedHashMap<String, @Nullable Long>();
+      var dependencies = new HashMap<String, Set<String>>();
+      jdbc.sql(
+              "SELECT r.fact, p.confirmed_commit, d.depended_fact"
+                  + " FROM semantic_catalog.fact_records r"
+                  + " LEFT JOIN semantic_catalog.presentable_periods p"
+                  + " ON p.domain = r.domain AND p.fact = r.fact AND p.retired_commit IS NULL"
+                  + " LEFT JOIN semantic_catalog.dependencies d"
+                  + " ON d.domain = r.domain AND d.dependent_fact = r.fact AND d.for_confirmation"
+                  + " AND d.depended_fact IS NOT NULL"
+                  + " WHERE r.domain = ? AND r.fact_address = ? ORDER BY r.fact")
+          .params(domain, factAddress)
+          .query(
+              (rs, n) -> {
+                var fact = rs.getString("fact");
+                presentableSince.put(fact, nullableLong(rs, "confirmed_commit"));
+                var depended = rs.getString("depended_fact");
+                if (depended != null) {
+                  dependencies.computeIfAbsent(fact, key -> new LinkedHashSet<>()).add(depended);
+                }
+                return fact;
+              })
+          .list();
+      var facts = new ArrayList<SelectionRule.Fact>();
+      presentableSince.forEach(
+          (fact, since) ->
+              facts.add(
+                  new SelectionRule.Fact(fact, since, dependencies.getOrDefault(fact, Set.of()))));
+      return facts;
     }
 
     @Override
@@ -629,6 +951,10 @@ public final class StoreTransaction {
           + " open_retirement_proposal, unknown_answer_pending, record::text AS record"
           + " FROM semantic_catalog.fact_records";
 
+  private static final String SELECTIONS =
+      "SELECT fact_address, from_commit, to_commit, selected_fact,"
+          + " eligible_facts::text AS eligible_facts FROM semantic_catalog.address_selections";
+
   private static final String PERIODS =
       "SELECT fact, confirmed_commit, retired_commit FROM semantic_catalog.presentable_periods";
 
@@ -709,6 +1035,25 @@ public final class StoreTransaction {
         new LogPosition(rs.getLong("latest_event_commit"), rs.getInt("latest_event_ordinal")),
         treatment(rs),
         LogRecordJson.readNode(rs.getString("record")));
+  }
+
+  private static SelectionRule.Resolution resolution(PositionedRecord positioned) {
+    if (!(positioned.record() instanceof LogRecord.ResolveConflict resolution)) {
+      throw new IllegalStateException("Not a conflict resolution: " + positioned.position());
+    }
+    return new SelectionRule.Resolution(
+        resolution.chosen().urnValue(),
+        resolution.passedOver().stream().map(Ref::urnValue).toList(),
+        positioned.position().commit());
+  }
+
+  private AddressSelectionRow selection(ResultSet rs, int row) throws SQLException {
+    return new AddressSelectionRow(
+        rs.getString("fact_address"),
+        rs.getLong("from_commit"),
+        nullableLong(rs, "to_commit"),
+        rs.getString("selected_fact"),
+        LogRecordJson.readStrings(rs.getString("eligible_facts")));
   }
 
   private PresentablePeriodRow period(ResultSet rs, int row) throws SQLException {

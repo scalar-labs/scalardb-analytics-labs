@@ -174,7 +174,7 @@ The following each write one commit, so a half-written state is never a readable
   cause no transition and the deciding party would be asked again. The order always exists because
   dependencies have no cycles. Grouping also means candidates consented to together never have their
   selection decided by record order.
-- One conflict selection.
+- One conflict resolution.
 - One user policy version. The re-evaluation it triggers runs later as a build task, whose
   evaluations and confirmations form one commit.
 
@@ -194,7 +194,7 @@ tasks.
 ## Review
 
 **Review orchestration** decides what to present, when, to whom, and in which unit and context, for
-candidates needing consent, retirement proposals needing consent, and conflicts needing a selection.
+candidates needing consent, retirement proposals needing consent, and conflicts needing a resolution.
 It is separate from Generators, so presentation can be improved to lower the deciding party's load
 without changing how candidates are produced. It selects the information needed for judgement rather
 than dumping the stored context: too little makes the deciding party investigate alone, too much
@@ -234,7 +234,7 @@ does not become confirmed knowledge unseen. When the answer to "customers to POS
 one-to-many" is "one-to-many is correct, except for corporate members", the original candidate is
 rejected and a new candidate scoped to exclude corporate members follows.
 
-Every answer and selection carries the deciding party and a reference to an authority check, an
+Every answer and conflict resolution carries the deciding party and a reference to an authority check, an
 opaque value issued by whoever checked, which the Semantic Catalog records without interpreting and
 only requires to be present. The Semantic Catalog therefore does not itself verify that the person
 answering is the deciding party. The separation between producing candidates and confirming them
@@ -252,12 +252,12 @@ No operation sets the selected Fact directly. Selection changes only as the rule
 | Register an observation | Input Observation and Observation Event | Content equals the previous observation, which records nothing; a physical schema whose source-declared part is unchanged records only a derived record | Generators that read that input kind; an impact judgement for a new physical schema or document observation |
 | Record a Generator's results (inside a build task) | Data observations, acceptances, retirement proposals, evaluations, machine-judgement transitions, cascades | A dependency cycle, a missing referenced record, or a check reference that is not a dependency; the task fails | Generators that read the newly confirmed predicates |
 | Submit answers | Answers, resulting transitions, cascades, and feedback for each correction | An answer lacks an authority-check reference | Generators of rejected, corrected, retired, and cascaded Facts; Generators that read the feedback; Generators that read newly confirmed predicates |
-| Select in a conflict | `select` | The chosen and passed-over Facts were not the eligible Facts at the previous commit, or no authority-check reference | Generators of Facts depending on Facts no longer selected |
+| Resolve a conflict | `resolve-conflict` | The chosen and passed-over Facts were not the eligible Facts at the previous commit, or no authority-check reference | Generators of Facts depending on Facts no longer selected |
 | Set a user policy version | Policy version | None | A policy re-evaluation |
 | Re-evaluate the policy (inside a build task) | Evaluations, machine-judgement confirmations, cascades | None | Generators that read newly confirmed predicates |
 | Resume a build task | Nothing in the log | The task is not `failed` | None; the task reruns on the latest state |
 
-Whenever replacement, a conflict selection, or a retirement changes the selected Fact, build tasks
+Whenever replacement, a conflict resolution, or a retirement changes the selected Fact, build tasks
 are created for the Generators of Facts that depended on the Fact no longer selected, so knowledge
 built on it is remade on the new premise.
 
@@ -300,7 +300,7 @@ When the Query Agent meets missing knowledge or a conflict:
    registers only the parts used for construction as an observation whose Input Resource is
    identified by the question URN. Conflicts are derivable from the log and are not received.
 2. Generators produce candidates on the spot, and the policy confirms what machine judgement can.
-3. If the user who asked is the deciding party, they consent or select on the spot through a review
+3. If the user who asked is the deciding party, they consent or resolve a conflict on the spot through a review
    presentation that references the question. Any other user's answers stay in the trace record, and
    those carrying a correction are registered as usage feedback. Their consent cannot confirm,
    because confirmation would then fall outside the user policy and the record of the deciding

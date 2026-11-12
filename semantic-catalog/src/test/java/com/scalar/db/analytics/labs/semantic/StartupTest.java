@@ -20,7 +20,7 @@ import org.junit.jupiter.api.Test;
 
 class StartupTest {
   /** Every schema change, in order, that a started store must have applied exactly once. */
-  private static final List<Integer> SCHEMA_VERSIONS = List.of(1, 2, 3);
+  private static final List<Integer> SCHEMA_VERSIONS = List.of(1, 2, 3, 4);
 
   private static ExecutorService executor;
 

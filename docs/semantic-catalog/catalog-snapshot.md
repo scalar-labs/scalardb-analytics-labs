@@ -43,8 +43,9 @@ the using party may access the knowledge; that is Governance's decision.
 
 The **eligible Facts** of a Fact Address at commit c are the presentable Facts that are not
 displaced. A Fact is **displaced** when another presentable Fact at the same Fact Address has its
-Fact Revision among its confirmation-time dependency references, or when a conflict selection
-recorded it as not selected and the Fact selected then is still presentable.
+Fact Revision among its confirmation-time dependency references, or when a conflict resolution
+passed it over and the Fact chosen then has stayed presentable since. A chosen Fact retired and
+confirmed again no longer carries the resolution.
 
 | Eligible Facts | Selected Fact | Conflict |
 | --- | --- | --- |
@@ -71,9 +72,9 @@ These rules give the following behavior:
   has yet replaced it, so knowledge in use does not stop because someone independently proposed
   another value. Two incompatible Facts confirmed in the same commit at a Fact Address with no
   selection are a conflict with nothing selected.
-- **Human selection.** The deciding party's `select` displaces the Facts not chosen and leaves one
-  eligible Fact. This is the only selection recorded in the log, because it cannot be reproduced
-  from rules. Every other selection is derived and never stored.
+- **Conflict resolution.** The deciding party's `resolve-conflict` displaces the passed-over Facts
+  and leaves one eligible Fact. It is the only part of the selection recorded in the log, because
+  it cannot be reproduced from rules. Every other selection is derived and never stored.
 - **Retirement.** A retired Fact stops being presentable, so the Fact it replaced and the Facts
   passed over in its favor become eligible again. Retirement thus returns treatment to what it was
   before the retired Fact was adopted.
@@ -103,7 +104,7 @@ judged in this order:
 
 | Status | Condition | Judgement material |
 | --- | --- | --- |
-| Conflict | Two or more eligible Facts | Each eligible Fact, with the selected one marked if any |
+| Conflict | Two or more eligible Facts | Each eligible Fact, and the selected Fact if any, which two replacements confirmed at once can leave outside the eligible Facts |
 | Awaiting judgement | No eligible Fact, but `candidate` Facts exist, including those waiting for their dependencies | Each candidate, and whether it awaits consent or awaits its dependencies |
 | Missing knowledge | Neither an eligible nor a `candidate` Fact, including when only rejected or retired Facts exist | The rejected and retired Facts, if any |
 

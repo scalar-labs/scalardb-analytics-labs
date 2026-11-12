@@ -20,8 +20,9 @@ import org.jspecify.annotations.Nullable;
  * and the replay check compares rows as values.
  *
  * <p>Most rows never change once written. A current Fact Record is rewritten when a commit changes
- * it, a presentable period is closed by the retirement that ends it, and a dependency row changes
- * its flags or is deleted when an acceptance or a confirmation changes the dependency sets.
+ * it, a presentable period or an address selection is closed by the commit that ends it, and a
+ * dependency row changes its flags or is deleted when an acceptance or a confirmation changes the
+ * dependency sets.
  */
 public sealed interface MaterializedRow {
   RowKey key();
@@ -231,6 +232,43 @@ public sealed interface MaterializedRow {
     @Override
     public RowKey key() {
       return RowKey.of("dependencies", dependentFact, dependedRecord);
+    }
+  }
+
+  /**
+   * The selection at one Fact Address over a commit range: the selected Fact and the eligible
+   * Facts, derived by {@link SelectionRule}. A row is added when the selection changes, and the row
+   * it follows is closed at that commit.
+   *
+   * @param fromCommit the first commit at which the row holds
+   * @param toCommit the first commit at which it no longer holds; absent while it still does
+   * @param selectedFact the selected Fact; absent when none is selected, as in a conflict with no
+   *     previous selection
+   * @param eligibleFacts the eligible Facts, sorted by URN; two or more mean a conflict
+   */
+  record AddressSelectionRow(
+      String factAddress,
+      long fromCommit,
+      @Nullable Long toCommit,
+      @Nullable String selectedFact,
+      List<String> eligibleFacts)
+      implements MaterializedRow {
+    public AddressSelectionRow {
+      eligibleFacts = List.copyOf(eligibleFacts);
+    }
+
+    @Override
+    public RowKey key() {
+      return RowKey.of("address_selections", factAddress, fromCommit);
+    }
+
+    /** Whether two or more Facts are eligible: a conflict. */
+    public boolean conflict() {
+      return eligibleFacts.size() > 1;
+    }
+
+    AddressSelectionRow closedAt(long commit) {
+      return new AddressSelectionRow(factAddress, fromCommit, commit, selectedFact, eligibleFacts);
     }
   }
 }

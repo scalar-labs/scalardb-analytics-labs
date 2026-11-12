@@ -130,7 +130,8 @@ public final class SemanticCatalogStore implements AutoCloseable {
           domain,
           record,
           targetFact(domain, record),
-          targetInputResource(domain, record, projection));
+          targetInputResource(domain, record, projection),
+          targetFactAddress(record));
     }
     for (var row : projection.changedRows()) {
       transaction.writeRow(domain, row);
@@ -147,6 +148,12 @@ public final class SemanticCatalogStore implements AutoCloseable {
       case LogRecord.FactEvent event -> event.fact().urnValue();
       default -> null;
     };
+  }
+
+  private static @Nullable String targetFactAddress(PositionedRecord positioned) {
+    return positioned.record() instanceof LogRecord.ResolveConflict resolution
+        ? resolution.factAddress().urnValue()
+        : null;
   }
 
   private static @Nullable String targetInputResource(

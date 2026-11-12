@@ -14,8 +14,8 @@ explained in [`construction.md`](construction.md#operations-that-add-records).
 Operations change the log, a build task, or a review presentation record. Reads change nothing.
 Every call targets one domain.
 
-The application calls these operations: registering an observation, submitting answers, selecting in
-a conflict, setting a user policy version, running a build task, resuming a build task, and
+The application calls these operations: registering an observation, submitting answers, resolving a
+conflict, setting a user policy version, running a build task, resuming a build task, and
 registering a review presentation. Recording a Generator's results and policy re-evaluation run only
 inside a build task and are not exposed. The Semantic Catalog owns Generator output and the versions
 that produced it, and policy evaluation is its own judgement with nothing for the application to
@@ -43,13 +43,13 @@ knowledge it just confirmed is visible.
 
 **Using party.** The application attaches the identifier of the person or Query Agent behind each
 call, and the question URN when the call belongs to a question. Operations record the using party as
-the deciding party of answers and selections and as the setter of policy versions. Reads and
-operation outputs mask dependencies and check references that Governance denies the using party:
+the deciding party of answers and conflict resolutions and as the setter of policy versions. Reads
+and operation outputs mask dependencies and check references that Governance denies the using party:
 neither their URN nor their content is returned, only the fact that a hidden reference exists.
 Withholding URNs keeps the existence and names of hidden objects from leaking, without making the
 rest of the knowledge unusable.
 
-**Authority check.** Submitting answers and selecting in a conflict take a reference to the result
+**Authority check.** Submitting answers and resolving a conflict take a reference to the result
 of checking the deciding party's authority. The value is opaque, recorded without interpretation,
 and required to be present.
 
@@ -86,7 +86,7 @@ the identifier of their target, and a reason:
 | Invalid input | A required input is missing or malformed, the predicate is not valid for the element's kind, or a call identifier is reused with a different input |
 | Target not found | An input identifier points to no record |
 | Point out of range | A Catalog Snapshot URN names a commit not yet written |
-| No authority check result | An answer or selection lacks the reference |
+| No authority check result | An answer or conflict resolution lacks the reference |
 | Not accepted in this state | A state condition of the operation is not met |
 | Acquisition conditions not met | An observation at question time fails the conditions for acquisition and disclosure |
 | Storage failure | Storage could not be read or written |
@@ -127,13 +127,13 @@ correction and the Facts moved by cascade. If any answer fails, the whole submis
 identifies it, so part of a submission is never recorded. At question time a review presentation is
 registered first, so answers can reference it and, through it, the question.
 
-### Selecting in a conflict
+### Resolving a conflict
 
-Selecting in a conflict names the conflicting Fact Address, the Fact selected, the Facts not
-selected, the authority-check reference, the wording, and the review presentation. It returns the
-`select` event and the resulting selected Fact. If the eligible Facts changed through replacement or
-retirement since the presentation, it is not accepted, and the deciding party reads the new point
-before choosing.
+Resolving a conflict names the conflicting Fact Address, the chosen Fact, the passed-over Facts,
+the authority-check reference, the wording, and the review presentation. It returns the
+`resolve-conflict` record and the resulting selected Fact. If the eligible Facts changed through
+replacement or retirement since the presentation, it is not accepted, and the deciding party reads
+the new point before choosing.
 
 ### Setting a user policy version
 
@@ -154,9 +154,9 @@ task on the latest state.
 Registering a review presentation records that a judgement was requested: the presentation kind, the
 target Facts with their Fact Addresses (several Fact Addresses may be presented together), the
 person asked, which need not be the using party, the time, and a reference to the screen or dialogue
-shown. It returns an identifier that answers and selections reference. The Semantic Catalog fills in
-the resulting events when they are recorded. Review orchestration decides what to present; this
-operation records what was presented.
+shown. It returns an identifier that answers and conflict resolutions reference. The Semantic
+Catalog fills in the resulting events when they are recorded. Review orchestration decides what to
+present; this operation records what was presented.
 
 ## Reads
 

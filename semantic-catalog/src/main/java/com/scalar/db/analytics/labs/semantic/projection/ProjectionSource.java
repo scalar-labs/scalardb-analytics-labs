@@ -6,6 +6,7 @@ package com.scalar.db.analytics.labs.semantic.projection;
 
 import com.scalar.db.analytics.labs.semantic.model.LogPosition;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord.FactEvent;
+import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.AddressSelectionRow;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.DependencyRow;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.ElementRow;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.FactAddressRow;
@@ -81,6 +82,11 @@ public interface ProjectionSource {
         public Set<String> confirmedDependents(String fact) {
           return Set.of();
         }
+
+        @Override
+        public List<SelectionRule.Fact> selectionFacts(String factAddress) {
+          return List.of();
+        }
       };
 
   /**
@@ -101,8 +107,14 @@ public interface ProjectionSource {
    * A Fact Address with what a projection needs about it.
    *
    * @param facts the URNs of the Facts at the Fact Address
+   * @param resolutions its conflict resolutions, in log order
+   * @param currentSelection the open row of its selection history, if any
    */
-  record LoadedAddress(FactAddressRow row, List<String> facts) {}
+  record LoadedAddress(
+      FactAddressRow row,
+      List<String> facts,
+      List<SelectionRule.Resolution> resolutions,
+      Optional<AddressSelectionRow> currentSelection) {}
 
   Optional<LoadedFact> fact(String fact);
 
@@ -134,4 +146,11 @@ public interface ProjectionSource {
    * The Facts that are {@code confirmed} and were confirmed with a dependency reference to a Fact.
    */
   Set<String> confirmedDependents(String fact);
+
+  /**
+   * What the selection rule needs about every Fact at a Fact Address, read without loading the
+   * Facts' records: since when each is presentable, and the Facts its latest confirmation depended
+   * on.
+   */
+  List<SelectionRule.Fact> selectionFacts(String factAddress);
 }

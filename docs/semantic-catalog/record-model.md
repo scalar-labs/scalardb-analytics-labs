@@ -121,6 +121,8 @@ The log holds:
   Dataset or Field also comes with the acceptance of its technical-reference Fact, because that Fact
   is what later finds it.
 - Fact Addresses, Facts, and Fact Events.
+- Conflict resolutions, each a deciding party's choice among the eligible Facts at one Fact
+  Address.
 - **Input Resources**, sources of input whose changes are tracked, such as one table's physical
   schema or one registered document. Also **Input Observations**, the content of an Input Resource
   as observed at one commit, with a reference to the previous observation, and the **Observation
@@ -197,21 +199,24 @@ other.
 | `confirm` | One Fact | Path (machine judgement or human consent) and the policy evaluation or answer it rests on |
 | `reject` | One Fact | The answer it rests on, or the rejection or retirement of a Fact it depends on |
 | `retire` | One Fact | The policy evaluation or answer it rests on, or the retirement of a Fact it depends on |
-| `select` | The Facts at one conflicting Fact Address | Selected Fact, Facts not selected, deciding party, authority-check reference, wording |
 
 For machine judgement, the evaluating party is recorded as the deciding party. An answer and the
-transition it causes are separate events. An **additional acceptance** is a later `accept` of an
-existing Fact. A `propose-retire` changes no dependency reference; the checks of its validation
-result may reference any Input Observation or Fact Revision. A refutation is a refuting check
-inside an `accept` or `propose-retire`. An update proposal is the acceptance of another Fact that
-depends on the selected one.
+transition it causes are separate events. A conflict resolution, `resolve-conflict`, is not a Fact
+Event: it targets one conflicting Fact Address and holds the chosen Fact, the passed-over Facts,
+the deciding party, the authority-check reference, the wording, and the review presentation. It
+is accepted only when its chosen and passed-over Facts are exactly the eligible Facts, two or
+more, and it is the only part of the selection written to the log. An **additional
+acceptance** is a later `accept` of an existing Fact. A `propose-retire` changes no dependency
+reference; the checks of its validation result may reference any Input Observation or Fact
+Revision. A refutation is a refuting check inside an `accept` or `propose-retire`. An update
+proposal is the acceptance of another Fact that depends on the selected one.
 
 The state of a Fact Record is defined by which Fact Events it accepts next:
 
 | State | Meaning | Accepts |
 | --- | --- | --- |
 | `candidate` | Accepted but not confirmed | `accept`, `propose-retire`, `evaluate-policy`, `answer`, `confirm`, `reject` |
-| `confirmed` | Confirmed knowledge | `accept`, `propose-retire`, `evaluate-policy`, `answer`, `retire`, `select` |
+| `confirmed` | Confirmed knowledge | `accept`, `propose-retire`, `evaluate-policy`, `answer`, `retire` |
 | `rejected` | Judged not to be confirmed | `accept` with a new dependency reference (back to `candidate`), `answer` (no change) |
 | `retired` | Confirmed knowledge judged no longer usable | Same as `rejected` |
 
