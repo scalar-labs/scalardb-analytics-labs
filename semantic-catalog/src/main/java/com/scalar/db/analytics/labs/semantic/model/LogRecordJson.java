@@ -37,6 +37,28 @@ public final class LogRecordJson {
     }
   }
 
+  /**
+   * The stored JSON form of a value kept in a {@code jsonb} column, such as a Fact Revision or a
+   * Fact Record. It is produced by writing the value as text and reading it back, so a value
+   * computed in memory equals one read from the store node for node.
+   */
+  public static JsonNode toStored(Object value) {
+    try {
+      return MAPPER.readTree(MAPPER.writeValueAsString(value));
+    } catch (JsonProcessingException e) {
+      throw new IllegalStateException("Cannot write " + value.getClass().getSimpleName(), e);
+    }
+  }
+
+  /** Reads a value back from its {@linkplain #toStored stored JSON form}. */
+  public static <T> T fromStored(JsonNode stored, Class<T> type) {
+    try {
+      return MAPPER.treeToValue(stored, type);
+    } catch (JsonProcessingException e) {
+      throw new SemanticCatalogException("Cannot read a stored " + type.getSimpleName(), e);
+    }
+  }
+
   public static String writeStrings(List<String> values) {
     try {
       return MAPPER.writeValueAsString(values);

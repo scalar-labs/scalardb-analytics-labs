@@ -4,11 +4,15 @@
  */
 package com.scalar.db.analytics.labs.semantic.projection;
 
+import com.scalar.db.analytics.labs.semantic.model.Check;
 import com.scalar.db.analytics.labs.semantic.model.CommitRejectedException;
+import com.scalar.db.analytics.labs.semantic.model.Dependency;
 import com.scalar.db.analytics.labs.semantic.model.ElementIdentity;
 import com.scalar.db.analytics.labs.semantic.model.IdentityKey;
 import com.scalar.db.analytics.labs.semantic.model.LogPosition;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
+import com.scalar.db.analytics.labs.semantic.model.LogRecord.Basis;
+import com.scalar.db.analytics.labs.semantic.model.LogRecord.FactEvent;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
 import com.scalar.db.analytics.labs.semantic.model.Urns;
 import java.util.ArrayList;
@@ -21,7 +25,15 @@ import java.util.function.UnaryOperator;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Turns a commit request into the log records to write.
+ * Turns a commit request into the log records to write: the first step of writing a commit, run by
+ * {@code SemanticCatalogStore.commit} inside the writing transaction, before the {@link Projector}
+ * validates and applies the records.
+ *
+ * <p>Both what it decides need that transaction. URNs come from log positions, which exist only
+ * once the commit is numbered, and whether a proposal is the same as an existing record is judged
+ * in the transaction's snapshot. A caller therefore refers to the records it creates in the same
+ * request, such as a new Fact and its acceptance, by temporary numbers, and only to written records
+ * by URN.
  *
  * <p>Records are resolved in request order. Each record that would create something is first
  * matched against existing records by the identity rules (edges, empty-scope Fact Addresses,
@@ -29,6 +41,10 @@ import org.jspecify.annotations.Nullable;
  * records earlier in the same request. A matched record is not written, and references to it lead
  * to the existing record. Every other record gets the next position in the commit, and temporary
  * numbers are replaced by the URNs issued from those positions.
+ *
+ * <p>What a temporary number stands for depends on where it is used. It names the record created or
+ * matched where a record is expected, the log record where a basis or a policy version is expected,
+ * and the Fact Revision a Fact Event produced where a dependency's revision is expected.
  */
 public final class CommitResolver {
   private final String domain;
@@ -56,10 +72,13 @@ public final class CommitResolver {
   /**
    * What a temporary number stands for.
    *
-   * @param record the URN of the created or matched record
-   * @param logRecord the log record written for it, absent when it matched an existing record
+   * @param record the URN of the created or matched record; absent for a record that creates
+   *     nothing
+   * @param logRecord the log record written for it; absent when it matched an existing record
+   * @param revision the Fact Revision a Fact Event produced; absent for other records
    */
-  private record Target(@Nullable String record, @Nullable String logRecord) {}
+  private record Target(
+      @Nullable String record, @Nullable String logRecord, @Nullable String revision) {}
 
   private CommitResolver(String domain, long commit, Projection projection, IdentityLookup lookup) {
     this.domain = domain;
@@ -102,14 +121,16 @@ public final class CommitResolver {
     var existing = existing(record);
     var index = targets.size();
     if (existing.isPresent()) {
-      targets.add(new Target(existing.get(), null));
+      targets.add(new Target(existing.get(), null, null));
       urns.put(index, existing.get());
       return;
     }
     var at = new LogPosition(commit, written.size() + 1);
     var logRecord = Urns.logRecord(domain, at);
     var created = createdUrn(record, at);
-    targets.add(new Target(created, logRecord));
+    var revision =
+        record instanceof FactEvent event ? Urns.factRevision(event.fact().urnValue(), at) : null;
+    targets.add(new Target(created, logRecord, revision));
     urns.put(index, created != null ? created : logRecord);
     identityKey(record).ifPresent(key -> localIdentities.put(key, requireKey(created)));
     if (record instanceof LogRecord.InputObservation observation && created != null) {
@@ -277,13 +298,96 @@ public final class CommitResolver {
       case LogRecord.ObservationEvent event ->
           new LogRecord.ObservationEvent(toRecord.apply(event.observation()), event.content());
       case LogRecord.PolicyVersion version -> version;
+      case LogRecord.Accept accept ->
+          new LogRecord.Accept(
+              toRecord.apply(accept.fact()),
+              dependencies(accept.dependencies()),
+              checks(accept.checks()),
+              accept.inputsRead(),
+              accept.provenance());
+      case LogRecord.ProposeRetire proposal ->
+          new LogRecord.ProposeRetire(
+              toRecord.apply(proposal.fact()),
+              proposal.reason(),
+              checks(proposal.checks()),
+              proposal.inputsRead(),
+              proposal.provenance());
+      case LogRecord.EvaluatePolicy evaluation ->
+          new LogRecord.EvaluatePolicy(
+              toRecord.apply(evaluation.fact()),
+              resolve(evaluation.policyVersion(), Kind.LOG_RECORD),
+              evaluation.transition(),
+              evaluation.result(),
+              evaluation.decidedBy(),
+              evaluation.reason());
+      case LogRecord.Answer answer ->
+          new LogRecord.Answer(
+              toRecord.apply(answer.fact()),
+              answer.transition(),
+              answer.answerType(),
+              answer.decidedBy(),
+              answer.authorityCheck(),
+              answer.wording(),
+              answer.reviewPresentation());
+      case LogRecord.Confirm confirm ->
+          new LogRecord.Confirm(
+              toRecord.apply(confirm.fact()),
+              confirm.path(),
+              resolve(confirm.basis(), Kind.LOG_RECORD));
+      case LogRecord.Reject rejection ->
+          new LogRecord.Reject(toRecord.apply(rejection.fact()), basis(rejection.basis()));
+      case LogRecord.Retire retirement ->
+          new LogRecord.Retire(toRecord.apply(retirement.fact()), basis(retirement.basis()));
+    };
+  }
+
+  private List<Dependency> dependencies(List<Dependency> dependencies) {
+    return dependencies.stream()
+        .<Dependency>map(
+            dependency ->
+                switch (dependency) {
+                  case Dependency.OnFact onFact ->
+                      new Dependency.OnFact(
+                          resolve(onFact.fact(), Kind.RECORD),
+                          resolve(onFact.revision(), Kind.REVISION));
+                  case Dependency.OnInput onInput ->
+                      new Dependency.OnInput(
+                          resolve(onInput.inputResource(), Kind.RECORD),
+                          resolve(onInput.observation(), Kind.RECORD));
+                })
+        .toList();
+  }
+
+  private List<Check> checks(List<Check> checks) {
+    return checks.stream()
+        .map(
+            check ->
+                new Check(
+                    check.method(),
+                    check.items(),
+                    check.result(),
+                    check.reference() == null ? null : resolve(check.reference(), Kind.CHECKED),
+                    check.details()))
+        .toList();
+  }
+
+  private Basis basis(Basis basis) {
+    return switch (basis) {
+      case Basis.Event event -> new Basis.Event(resolve(event.logRecord(), Kind.LOG_RECORD));
+      case Basis.Cascade cascade -> new Basis.Cascade(resolve(cascade.fact(), Kind.RECORD));
     };
   }
 
   /** What a reference must lead to. */
   private enum Kind {
     /** The created or matched record. */
-    RECORD
+    RECORD,
+    /** The log record written. */
+    LOG_RECORD,
+    /** The Fact Revision a Fact Event produced. */
+    REVISION,
+    /** What a check is made against: an Input Observation, or a Fact Revision. */
+    CHECKED
   }
 
   private Ref resolve(Ref ref, Kind kind) {
@@ -303,6 +407,9 @@ public final class CommitResolver {
         var urn =
             switch (kind) {
               case RECORD -> target.record();
+              case LOG_RECORD -> target.logRecord();
+              case REVISION -> target.revision();
+              case CHECKED -> target.record() != null ? target.record() : target.revision();
             };
         if (urn == null) {
           throw new IllegalArgumentException(

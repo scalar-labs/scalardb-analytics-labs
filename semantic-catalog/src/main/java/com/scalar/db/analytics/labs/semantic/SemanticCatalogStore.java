@@ -124,6 +124,7 @@ public final class SemanticCatalogStore implements AutoCloseable {
     var projector = Projector.validating(projection);
     projector.begin(commit);
     resolution.records().forEach(projector::apply);
+    projector.end();
     for (var record : resolution.records()) {
       transaction.insertLogRecord(
           domain,
@@ -134,12 +135,16 @@ public final class SemanticCatalogStore implements AutoCloseable {
     for (var row : projection.changedRows()) {
       transaction.writeRow(domain, row);
     }
+    for (var row : projection.removedRows()) {
+      transaction.deleteRow(domain, row);
+    }
     return new CommitResult(OptionalLong.of(commit), resolution.urns());
   }
 
   private static @Nullable String targetFact(String domain, PositionedRecord positioned) {
     return switch (positioned.record()) {
       case LogRecord.Fact ignored -> Urns.of(domain, Urns.FACT, positioned.position());
+      case LogRecord.FactEvent event -> event.fact().urnValue();
       default -> null;
     };
   }
@@ -200,10 +205,16 @@ public final class SemanticCatalogStore implements AutoCloseable {
           var commit = 0L;
           for (var record : transaction.logRecords(domain)) {
             if (record.position().commit() != commit) {
+              if (commit != 0) {
+                projector.end();
+              }
               commit = record.position().commit();
               projector.begin(commit);
             }
             projector.apply(record);
+          }
+          if (commit != 0) {
+            projector.end();
           }
           var replayed = new HashSet<MaterializedRow>(projection.rows().toList());
           var stored = new HashSet<MaterializedRow>(transaction.rows(domain));

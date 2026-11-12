@@ -4,13 +4,22 @@
  */
 package com.scalar.db.analytics.labs.semantic.projection;
 
+import com.scalar.db.analytics.labs.semantic.model.Dependency;
 import com.scalar.db.analytics.labs.semantic.model.ElementIdentity;
+import com.scalar.db.analytics.labs.semantic.model.LogPosition;
+import com.scalar.db.analytics.labs.semantic.model.LogRecord.FactEvent;
+import com.scalar.db.analytics.labs.semantic.model.LogRecordJson;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
+import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.DependencyRow;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.EdgeIdentity;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.ElementRow;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.FactAddressRow;
+import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.FactRecordRow;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.FactRow;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.InputResourceRow;
+import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.PresentablePeriodRow;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.RowKey;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -19,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
@@ -52,20 +62,93 @@ public final class Projection {
     return domain;
   }
 
-  /** A Fact and the materialized rows derived for it. */
+  /**
+   * A Fact, its Fact Record, and the materialized rows derived for it. The presentable periods are
+   * kept oldest first; the {@link Projector} extends them at the end of each commit.
+   */
   public static final class FactSlice {
     private final FactRow row;
+    private final FactRecord record;
+    final List<PresentablePeriodRow> periods;
 
-    FactSlice(FactRow row) {
+    /**
+     * The events this projection applied to the Fact. Earlier events are found in the source when a
+     * basis or a dependency names one.
+     */
+    final Map<LogPosition, FactEvent> events = new HashMap<>();
+
+    FactSlice(FactRow row, FactRecord record, List<PresentablePeriodRow> periods) {
       this.row = row;
+      this.record = record;
+      this.periods = new ArrayList<>(periods);
     }
 
     public FactRow row() {
       return row;
     }
 
+    public FactRecord record() {
+      return record;
+    }
+
+    /**
+     * One row per dependency reference in effect or in effect at the latest confirmation, derived
+     * from the Fact Record.
+     */
+    List<DependencyRow> dependencyRows() {
+      var inEffect = new LinkedHashSet<>(record.dependencies());
+      var confirmation = record.confirmationDependencies();
+      var all = new LinkedHashSet<>(inEffect);
+      all.addAll(confirmation);
+      var rows = new ArrayList<DependencyRow>();
+      for (var dependency : all) {
+        var depended = dependency.version().urnValue();
+        var current = inEffect.contains(dependency);
+        var forConfirmation = confirmation.contains(dependency);
+        rows.add(
+            switch (dependency) {
+              case Dependency.OnFact onFact ->
+                  new DependencyRow(
+                      row.fact(),
+                      depended,
+                      onFact.fact().urnValue(),
+                      null,
+                      current,
+                      forConfirmation);
+              case Dependency.OnInput onInput ->
+                  new DependencyRow(
+                      row.fact(),
+                      depended,
+                      null,
+                      onInput.inputResource().urnValue(),
+                      current,
+                      forConfirmation);
+            });
+      }
+      return rows;
+    }
+
+    /** The current Fact Record's row, or empty before the first acceptance. */
+    Optional<FactRecordRow> recordRow() {
+      return record
+          .stored()
+          .map(
+              stored ->
+                  new FactRecordRow(
+                      row.fact(),
+                      row.factAddress(),
+                      stored.latestEvent(),
+                      record.treatment(),
+                      LogRecordJson.toStored(stored)));
+    }
+
     Stream<MaterializedRow> rows() {
-      return Stream.of(row);
+      return Stream.of(
+              Stream.<MaterializedRow>of(row),
+              recordRow().stream(),
+              periods.stream(),
+              dependencyRows().stream())
+          .flatMap(rows -> rows);
     }
   }
 
@@ -105,10 +188,32 @@ public final class Projection {
     if (found.isEmpty()) {
       return Optional.empty();
     }
-    var slice = new FactSlice(found.get());
-    remember(slice.rows());
+    var loaded = found.get();
+    var record =
+        FactRecord.restore(
+            LogRecordJson.fromStored(loaded.record().record(), FactRecord.Stored.class));
+    var slice = new FactSlice(loaded.row(), record, loaded.periods());
+    remember(Stream.of(loaded.row(), loaded.record()));
+    remember(loaded.periods().stream());
+    remember(loaded.dependencies().stream());
     facts.put(urn, slice);
     return Optional.of(slice);
+  }
+
+  /**
+   * A Fact's event at a log position: one this projection applied, or one already in the log.
+   *
+   * @return empty when the Fact has no event there
+   */
+  public Optional<FactEvent> event(String fact, LogPosition at) {
+    var held = facts.get(fact);
+    if (held != null) {
+      var applied = held.events.get(at);
+      if (applied != null) {
+        return Optional.of(applied);
+      }
+    }
+    return source.event(fact, at);
   }
 
   /** A Fact Address by URN. */
@@ -177,6 +282,42 @@ public final class Projection {
     return policyVersions.contains(logRecord) || source.isPolicyVersion(logRecord);
   }
 
+  /**
+   * The Facts that have a dependency reference to a Fact, in the store or among the Facts this
+   * projection holds.
+   */
+  public Set<String> dependents(String fact) {
+    var dependents = new LinkedHashSet<>(source.dependents(fact));
+    for (var slice : facts.values()) {
+      if (slice.record().factDependencies().contains(fact)) {
+        dependents.add(slice.row().fact());
+      }
+    }
+    return dependents;
+  }
+
+  /**
+   * The Facts that may be confirmed with a dependency reference to a Fact: those the store holds as
+   * such, and those this projection holds that are. A Fact the store returns may have changed in
+   * this projection, so a caller judges each against its loaded Fact Record.
+   */
+  public Set<String> confirmedDependents(String fact) {
+    var dependents = new LinkedHashSet<>(source.confirmedDependents(fact));
+    for (var slice : facts.values()) {
+      if (slice.record().is(FactState.CONFIRMED)
+          && slice.record().confirmationFactDependencies().contains(fact)) {
+        dependents.add(slice.row().fact());
+      }
+    }
+    return dependents;
+  }
+
+  /** The Fact Address of a Fact, read without loading the Fact's records when it is not held. */
+  public Optional<String> factAddress(String fact) {
+    var held = facts.get(fact);
+    return held != null ? Optional.of(held.row().factAddress()) : source.factAddress(fact);
+  }
+
   // Changes made by the projector
 
   void addFact(FactSlice slice) {
@@ -226,6 +367,15 @@ public final class Projection {
    */
   public List<MaterializedRow> changedRows() {
     return rows().filter(row -> !row.equals(loaded.get(row.key()))).toList();
+  }
+
+  /**
+   * The rows to delete: those loaded that the applied records no longer derive. Only a dependency
+   * reference that an acceptance dropped and no confirmation keeps disappears this way.
+   */
+  public List<MaterializedRow> removedRows() {
+    var current = rows().map(MaterializedRow::key).collect(Collectors.toSet());
+    return loaded.values().stream().filter(row -> !current.contains(row.key())).toList();
   }
 
   /**

@@ -46,7 +46,11 @@ final class SchemaMigrator {
           new Change(
               2,
               "Log and records",
-              "com/scalar/db/analytics/labs/semantic/storage/V2__log_and_records.sql"));
+              "com/scalar/db/analytics/labs/semantic/storage/V2__log_and_records.sql"),
+          new Change(
+              3,
+              "Fact lifecycle",
+              "com/scalar/db/analytics/labs/semantic/storage/V3__fact_lifecycle.sql"));
 
   private static final int SETUP_ATTEMPTS = 5;
 

@@ -121,8 +121,8 @@ The log:
 | `log_records` | Domain, commit number, order | Record kind, target Fact, target Input Resource, content |
 
 `log_records` is append-only. Fact Events, Observation Events, Input Observations, and policy
-versions all go there. Its target Fact and target Input Resource columns are indexed, to compute
-Fact Revisions per Fact and to walk observations per Input Resource.
+versions all go there. Its target Fact and target Input Resource columns are indexed, to find a
+Fact's events and to walk observations per Input Resource.
 
 Materialized records are updated in the same transaction as the log records they derive from. Where
 a table holds commit ranges, a row stores the commit from which it holds and the commit from which
@@ -130,10 +130,10 @@ it no longer does.
 
 | Table | Holds | Used for |
 | --- | --- | --- |
-| `fact_states` | Fact, Fact Address, state per commit range, awaiting consent, open retirement proposal, unknown answer without new dependency since | Acceptance checks, status at a point, the review list |
+| `fact_records` | Fact, Fact Address, the position of its latest event, state, awaiting consent, open retirement proposal, unknown answer without new dependency since, the whole Fact Record; always equal to folding the Fact's events | Acceptance checks, current lists and searches, the review list, and reads at a point the Fact has not changed since; a read at an earlier point folds the Fact's events |
 | `presentable_periods` | Fact, commit confirmed, commit retired | Determining eligible Facts |
 | `address_selections` | Fact Address, selected and eligible Facts per commit range | Reads at a point |
-| `dependencies` | Dependent Fact, the Fact or Input Resource depended on, whether used for confirmation | Cascades, impact judgement targets, newer-observation checks |
+| `dependencies` | Dependent Fact, the Fact or Input Resource depended on, whether in effect, whether used for confirmation; a row neither in effect nor used for confirmation is deleted | Cascades, impact judgement targets, newer-observation checks |
 | `elements` | Element, kind, parent, and for edges the kind, ends, direction, and identifying part | Edge identity, filtering by parent |
 | `fact_addresses` | Fact Address, element, predicate, scope description, scope URNs, predicate definition of a free-description predicate | Finding empty-scope Fact Addresses |
 | `facts` | Fact, Fact Address, identity key | Matching closed-range Facts, finding elements by technical reference |

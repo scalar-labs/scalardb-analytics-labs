@@ -13,6 +13,11 @@
  * rows that changed are then written back. The replay check applies the whole log to an empty
  * projection with the same projector and compares every row with the store. Both paths therefore
  * derive the materialized records by the same rules.
+ *
+ * <p>A {@link com.scalar.db.analytics.labs.semantic.projection.FactRecord} folds one Fact's events
+ * into its state and Fact Revisions. The projector judges each Fact Event against it before
+ * applying the event, and derives the state rows and presentable periods from it at the end of each
+ * commit.
  */
 @NullMarked
 package com.scalar.db.analytics.labs.semantic.projection;

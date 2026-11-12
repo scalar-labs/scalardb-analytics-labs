@@ -5,7 +5,9 @@
 package com.scalar.db.analytics.labs.semantic.projection;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.scalar.db.analytics.labs.semantic.model.LogPosition;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 
@@ -16,6 +18,10 @@ import org.jspecify.annotations.Nullable;
  * <p>Each row type corresponds to one materialized table. Every row has a {@link RowKey}, unique
  * within its table and domain, by which a projection tells which rows a commit inserted or changed,
  * and the replay check compares rows as values.
+ *
+ * <p>Most rows never change once written. A current Fact Record is rewritten when a commit changes
+ * it, a presentable period is closed by the retirement that ends it, and a dependency row changes
+ * its flags or is deleted when an acceptance or a confirmation changes the dependency sets.
  */
 public sealed interface MaterializedRow {
   RowKey key();
@@ -134,6 +140,97 @@ public sealed interface MaterializedRow {
     @Override
     public RowKey key() {
       return RowKey.of("input_resources", inputResource);
+    }
+  }
+
+  /**
+   * How a Fact is treated after its latest event: what review lists and status reads filter on,
+   * kept as columns of the current Fact Record.
+   *
+   * @param awaitingConsent whether the latest policy evaluation requested consent that no answer
+   *     has given yet
+   * @param openRetirementProposal the log record of the open retirement proposal against a
+   *     confirmed Fact
+   * @param unknownAnswerPending whether an unknown answer was given and no new dependency reference
+   *     arrived since
+   */
+  record Treatment(
+      FactState state,
+      boolean awaitingConsent,
+      @Nullable String openRetirementProposal,
+      boolean unknownAnswerPending) {}
+
+  /**
+   * The current Fact Record of one Fact, written after every commit that changes it. It always
+   * equals the result of folding the Fact's events, which the replay check verifies, so a write
+   * validates against it without folding.
+   *
+   * @param latestEvent the log position of the latest event, which also names the current Fact
+   *     Revision
+   * @param record the {@link FactRecord.Stored} form of the record, as stored JSON
+   */
+  record FactRecordRow(
+      String fact,
+      String factAddress,
+      LogPosition latestEvent,
+      Treatment treatment,
+      JsonNode record)
+      implements MaterializedRow {
+    @Override
+    public RowKey key() {
+      return RowKey.of("fact_records", fact);
+    }
+  }
+
+  /**
+   * A presentable period of a confirmed Fact: from the commit at which it became {@code confirmed}
+   * until the commit at which it became {@code retired}. A Fact retired and confirmed again has
+   * several.
+   *
+   * @param retiredCommit the commit of the retirement that ended the period; absent while the Fact
+   *     is still presentable
+   */
+  record PresentablePeriodRow(String fact, long confirmedCommit, @Nullable Long retiredCommit)
+      implements MaterializedRow {
+    @Override
+    public RowKey key() {
+      return RowKey.of("presentable_periods", fact, confirmedCommit);
+    }
+  }
+
+  /**
+   * One dependency reference of a Fact, used to find the Facts a cascade or a new observation
+   * affects. A Fact has a row for each reference that is in effect or was in effect at its latest
+   * confirmation; a row that is neither is deleted.
+   *
+   * @param dependedRecord the Fact Revision or Input Observation depended on
+   * @param dependedFact the Fact of a Fact Revision depended on
+   * @param dependedInputResource the Input Resource of an Input Observation depended on
+   * @param inEffect whether the reference is among those the latest acceptance stated
+   * @param forConfirmation whether the reference is among those at the latest confirmation, the
+   *     ones that count for selection and cascading
+   */
+  record DependencyRow(
+      String dependentFact,
+      String dependedRecord,
+      @Nullable String dependedFact,
+      @Nullable String dependedInputResource,
+      boolean inEffect,
+      boolean forConfirmation)
+      implements MaterializedRow {
+    public DependencyRow {
+      if ((dependedFact == null) == (dependedInputResource == null)) {
+        throw new IllegalArgumentException("A dependency is on either a Fact or an input");
+      }
+      if (!inEffect && !forConfirmation) {
+        throw new IllegalArgumentException(
+            "A dependency row is in effect, or was at the latest confirmation");
+      }
+    }
+
+    @Override
+    public RowKey key() {
+      return RowKey.of("dependencies", dependentFact, dependedRecord);
     }
   }
 }

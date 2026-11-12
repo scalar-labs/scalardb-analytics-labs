@@ -4,12 +4,18 @@
  */
 package com.scalar.db.analytics.labs.semantic.projection;
 
+import com.scalar.db.analytics.labs.semantic.model.LogPosition;
+import com.scalar.db.analytics.labs.semantic.model.LogRecord.FactEvent;
+import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.DependencyRow;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.ElementRow;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.FactAddressRow;
+import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.FactRecordRow;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.FactRow;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.InputResourceRow;
+import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.PresentablePeriodRow;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Where a {@link Projection} loads the materialized records it does not hold yet: the store, read
@@ -22,7 +28,7 @@ public interface ProjectionSource {
   ProjectionSource EMPTY =
       new ProjectionSource() {
         @Override
-        public Optional<FactRow> fact(String fact) {
+        public Optional<LoadedFact> fact(String fact) {
           return Optional.empty();
         }
 
@@ -55,7 +61,41 @@ public interface ProjectionSource {
         public boolean isPolicyVersion(String logRecord) {
           return false;
         }
+
+        @Override
+        public Optional<String> factAddress(String fact) {
+          return Optional.empty();
+        }
+
+        @Override
+        public Optional<FactEvent> event(String fact, LogPosition at) {
+          return Optional.empty();
+        }
+
+        @Override
+        public Set<String> dependents(String fact) {
+          return Set.of();
+        }
+
+        @Override
+        public Set<String> confirmedDependents(String fact) {
+          return Set.of();
+        }
       };
+
+  /**
+   * A Fact with what a projection needs about it.
+   *
+   * @param record its current Fact Record; every written Fact has one, because a Fact is accepted
+   *     in the commit that creates it
+   * @param periods its presentable periods, oldest first
+   * @param dependencies its dependency rows
+   */
+  record LoadedFact(
+      FactRow row,
+      FactRecordRow record,
+      List<PresentablePeriodRow> periods,
+      List<DependencyRow> dependencies) {}
 
   /**
    * A Fact Address with what a projection needs about it.
@@ -64,7 +104,7 @@ public interface ProjectionSource {
    */
   record LoadedAddress(FactAddressRow row, List<String> facts) {}
 
-  Optional<FactRow> fact(String fact);
+  Optional<LoadedFact> fact(String fact);
 
   Optional<LoadedAddress> address(String factAddress);
 
@@ -80,4 +120,18 @@ public interface ProjectionSource {
 
   /** Whether a log record is a user policy version. */
   boolean isPolicyVersion(String logRecord);
+
+  /** The Fact Address of a Fact, without loading its records. */
+  Optional<String> factAddress(String fact);
+
+  /** A Fact's event at a log position in the log. */
+  Optional<FactEvent> event(String fact, LogPosition at);
+
+  /** The Facts that have a dependency reference to a Fact. */
+  Set<String> dependents(String fact);
+
+  /**
+   * The Facts that are {@code confirmed} and were confirmed with a dependency reference to a Fact.
+   */
+  Set<String> confirmedDependents(String fact);
 }

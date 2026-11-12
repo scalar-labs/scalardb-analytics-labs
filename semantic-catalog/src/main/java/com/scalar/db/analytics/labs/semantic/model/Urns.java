@@ -17,7 +17,9 @@ import java.util.regex.Pattern;
  * <p>A record created by a log record is identified by that log record's {@linkplain LogPosition
  * position}, such as {@code urn:scalardb:analytics:sales:fact:c3.1}. Log positions are never
  * reused, so the same URNs are issued again when the log is replayed from empty. The identifier
- * carries none of the record's content.
+ * carries none of the record's content. A Fact Revision is identified by its Fact and the position
+ * of the Fact Event that produced it, such as {@code
+ * urn:scalardb:analytics:sales:fact-revision:c3.1@c5.2}.
  */
 public final class Urns {
   /** The namespace of every URN; the product defines no abbreviation of its name. */
@@ -33,6 +35,7 @@ public final class Urns {
   public static final String ELEMENT = "element";
   public static final String FACT_ADDRESS = "fact-address";
   public static final String FACT = "fact";
+  public static final String FACT_REVISION = "fact-revision";
   public static final String INPUT_RESOURCE = "input-resource";
   public static final String INPUT_OBSERVATION = "input-observation";
   public static final String LOG_RECORD = "log-record";
@@ -64,10 +67,52 @@ public final class Urns {
     return PREFIX + domain + ":" + CATALOG_SNAPSHOT + ":" + commit;
   }
 
+  /** The URN of the Fact Revision that the Fact Event at a position produced. */
+  public static String factRevision(String fact, LogPosition event) {
+    var parsed = parse(fact);
+    requireKind(parsed, fact, FACT);
+    return PREFIX + parsed.domain() + ":" + FACT_REVISION + ":" + parsed.identifier() + "@" + event;
+  }
+
+  /** The Fact a Fact Revision belongs to. */
+  public static String revisionFact(String revision) {
+    var parsed = parse(revision);
+    requireKind(parsed, revision, FACT_REVISION);
+    var identifier = parsed.identifier();
+    return PREFIX
+        + parsed.domain()
+        + ":"
+        + FACT
+        + ":"
+        + identifier.substring(0, revisionSeparator(identifier, revision));
+  }
+
+  /** The log position of the Fact Event that produced a Fact Revision. */
+  public static LogPosition revisionEvent(String revision) {
+    var parsed = parse(revision);
+    requireKind(parsed, revision, FACT_REVISION);
+    var identifier = parsed.identifier();
+    return LogPosition.parse(identifier.substring(revisionSeparator(identifier, revision) + 1));
+  }
+
+  private static int revisionSeparator(String identifier, String revision) {
+    var at = identifier.indexOf('@');
+    if (at < 0) {
+      throw new IllegalArgumentException("Not a Fact Revision URN: " + revision);
+    }
+    return at;
+  }
+
+  private static void requireKind(Parsed parsed, String urn, String kind) {
+    if (!parsed.kind().equals(kind)) {
+      throw new IllegalArgumentException("Not a " + kind + " URN: " + urn);
+    }
+  }
+
   /** The log position that issued a position-based URN, such as a Fact or a log record. */
   public static LogPosition position(String urn) {
     var parsed = parse(urn);
-    if (parsed.kind().equals(CATALOG_SNAPSHOT)) {
+    if (parsed.kind().equals(CATALOG_SNAPSHOT) || parsed.kind().equals(FACT_REVISION)) {
       throw new IllegalArgumentException("Not identified by one log position: " + urn);
     }
     return LogPosition.parse(parsed.identifier());

@@ -139,10 +139,10 @@ materialized and updated in the same commit as the Fact Events that change them:
 
 | Derived from the log | Materialized | Why |
 | --- | --- | --- |
-| Current state of each Fact Record | Yes | Every write checks whether the next Fact Event is accepted |
+| Current state of each Fact Record | Yes, the whole record, equal to folding the Fact's events | Every write checks whether the next Fact Event is accepted, and current lists and review read it |
 | Presentable periods of each Fact | Yes, as pairs of confirmation and retirement commits | Used whenever eligible Facts are determined |
 | Selected and eligible Facts per Fact Address | Yes, each with the commit range in which it holds | Lets a Query Agent keep reading a past point without replay |
-| Content of a Fact Revision | No; computed by applying the Fact's events up to that version | A Fact has few events |
+| Content of a Fact Revision | The current one, as part of the Fact Record; an earlier one is computed by applying the Fact's events up to it | Catalog screens list and search current content; a past point needs earlier content only for Facts changed since, and keeping every version whole would copy the content at every event |
 | Whether a depended-on input has a newer observation | No; compared against the latest observation of the same Input Resource | Observations per Input Resource are ordered by commit |
 
 The invariant that materialized records equal the result of replaying the log from empty is

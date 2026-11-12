@@ -117,7 +117,9 @@ The log holds:
 
 - Elements, each written as its own record that states how the element is identified: by pointing,
   by technical reference, or for an edge by kind, ends, direction, and identifying part. A new
-  element is written in the same commit as the acceptance of a Fact stating its existence.
+  element is written in the same commit as the acceptance of a Fact stating its existence. A new
+  Dataset or Field also comes with the acceptance of its technical-reference Fact, because that Fact
+  is what later finds it.
 - Fact Addresses, Facts, and Fact Events.
 - **Input Resources**, sources of input whose changes are tracked, such as one table's physical
   schema or one registered document. Also **Input Observations**, the content of an Input Resource
@@ -199,8 +201,10 @@ other.
 
 For machine judgement, the evaluating party is recorded as the deciding party. An answer and the
 transition it causes are separate events. An **additional acceptance** is a later `accept` of an
-existing Fact. A refutation is a refuting check inside an `accept` or `propose-retire`. An update
-proposal is the acceptance of another Fact that depends on the selected one.
+existing Fact. A `propose-retire` changes no dependency reference; the checks of its validation
+result may reference any Input Observation or Fact Revision. A refutation is a refuting check
+inside an `accept` or `propose-retire`. An update proposal is the acceptance of another Fact that
+depends on the selected one.
 
 The state of a Fact Record is defined by which Fact Events it accepts next:
 
@@ -224,11 +228,20 @@ unknown answer does not end it, but the proposal is not presented again until a 
 reference arrives. An answer to a candidate whose premise dependencies are not all confirmed is
 recorded without a transition; the candidate is judged again, from policy evaluation, once they are.
 
+A candidate's **current judgement** starts with the acceptance that made it a candidate, the first
+one or one that returned it from `rejected` or `retired`. Policy evaluations and answers made
+earlier belong to an earlier judgement, and none of them can be the basis of a transition. A
+candidate is evaluated for confirmation only when every premise dependency is `confirmed`. A
+confirmation, and a rejection resting on an answer, rest only on an evaluation or answer of the
+current judgement made after every premise dependency was last confirmed. A rejection resting on
+a retirement proposal needs a proposal made within the current judgement.
+
 Retirement covers both an element that no longer exists and a confirmation that was wrong; the
 reason and validation result say which. "No longer exists" is a change in treatment, not a value.
 
 Some conditions are derived instead of being states, because they do not change which events a Fact
-accepts. Waiting for consent is the result of the latest policy evaluation. Being a new candidate
+accepts. Waiting for consent is the result of the latest policy evaluation of the current judgement,
+or of the open retirement proposal. Being a new candidate
 for the selected Fact, and being in conflict, are derived from the Catalog Snapshot.
 
 The dependency references that count for selection and cascading are those of the Fact Revision at
@@ -273,8 +286,11 @@ A candidate answers three separate questions:
 A dependency on an input names the Input Resource, used to find what a new observation affects, and
 the Input Observation actually used, used to reproduce past content. A dependency on a Fact names
 the Fact and the Fact Revision used. A locator such as a URL or table name never stands alone as the
-record of an input. Fact Events add and remove dependencies; a Fact Revision shows the set in
-effect.
+record of an input. Each `accept` states the complete set of dependency references in effect after
+it, replacing the set of earlier acceptances, so an additional acceptance restates every dependency
+it keeps. A Fact Revision shows the set in effect, with the validation result and provenance of the
+same acceptance. Cascades follow the set at the latest confirmation, so a dependency dropped after
+confirmation still cascades until the Fact is confirmed again.
 
 A dependency on another Fact is one of two kinds. A **premise dependency** points to a Fact at
 another Fact Address, such as the existence of the element or of a join: the candidate holds only if

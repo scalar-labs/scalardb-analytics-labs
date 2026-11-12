@@ -30,13 +30,14 @@ class LogAndCommitTest extends StoreScenarioTest {
     c.add(new LogRecord.ObservationEvent(first, Scenario.NOTHING));
     var written = s.write(c);
 
-    // The policy version is commit 1, so this is commit 2, and each record has its position.
+    // The policy version is commit 1, so this is commit 2, and each record has its position:
+    // the Dataset's two Facts each come with their acceptance.
     var prefix = "urn:scalardb:analytics:" + s.domain + ":";
     assertThat(written.commit()).hasValue(2);
     assertThat(written.urn(orders)).isEqualTo(prefix + "element:c2.1");
-    assertThat(written.urn(rowKind)).isEqualTo(prefix + "fact-address:c2.6");
-    assertThat(written.urn(resource)).isEqualTo(prefix + "input-resource:c2.7");
-    assertThat(written.urn(first)).isEqualTo(prefix + "input-observation:c2.8");
+    assertThat(written.urn(rowKind)).isEqualTo(prefix + "fact-address:c2.8");
+    assertThat(written.urn(resource)).isEqualTo(prefix + "input-resource:c2.9");
+    assertThat(written.urn(first)).isEqualTo(prefix + "input-observation:c2.10");
 
     // A later observation of the same Input Resource refers to the earlier one.
     c = s.begin();
@@ -66,7 +67,7 @@ class LogAndCommitTest extends StoreScenarioTest {
     // A Dataset is found by its technical reference; its empty-scope Fact Addresses and
     // closed-range Facts are found too, so nothing new is written.
     c = s.begin();
-    var again = c.dataset("shop.orders");
+    var again = c.datasetProposal("shop.orders");
     var existence = c.address(again, Vocabulary.EXISTENCE);
     var reproposed = s.write(c);
     assertThat(reproposed.urn(again)).isEqualTo(ordersUrn);
@@ -77,7 +78,7 @@ class LogAndCommitTest extends StoreScenarioTest {
     c = s.begin();
     var join = join(c, Ref.urn(ordersUrn), Ref.urn(customersUrn));
     var correspondence = correspondence(c, Ref.urn(ordersUrn), Ref.urn(customersUrn));
-    var multiplicity = c.closedRangeFact(c.address(join, "multiplicity"), "many-to-one");
+    var multiplicity = c.closedRangeCandidate(c.address(join, "multiplicity"), "many-to-one");
     var edges = s.write(c);
 
     // The same join, and the undirected correspondence with its ends reversed.
@@ -85,7 +86,7 @@ class LogAndCommitTest extends StoreScenarioTest {
     var joinAgain = join(c, Ref.urn(ordersUrn), Ref.urn(customersUrn));
     var reversed = correspondence(c, Ref.urn(customersUrn), Ref.urn(ordersUrn));
     var sameValue = c.closedRangeFact(c.address(joinAgain, "multiplicity"), "many-to-one");
-    var otherValue = c.closedRangeFact(c.address(joinAgain, "multiplicity"), "one-to-one");
+    var otherValue = c.closedRangeCandidate(c.address(joinAgain, "multiplicity"), "one-to-one");
     var proposed = s.write(c);
     assertThat(proposed.urn(joinAgain)).isEqualTo(edges.urn(join));
     assertThat(proposed.urn(reversed)).isEqualTo(edges.urn(correspondence));
@@ -164,33 +165,44 @@ class LogAndCommitTest extends StoreScenarioTest {
     }
   }
 
+  /** A join with an accepted existence Fact. */
   private static Ref join(Scenario.Commit c, Ref from, Ref to) {
-    return c.add(
-        new LogRecord.Element(
-            new ElementIdentity.Edge(
-                ElementKind.JOIN,
-                from,
-                to,
-                true,
-                IdentityKey.choice("orders.customer_id = customers.id"),
-                JsonNodeFactory.instance
-                    .arrayNode()
-                    .add(
-                        JsonNodeFactory.instance
-                            .objectNode()
-                            .put("from", "customer_id")
-                            .put("to", "id")))));
+    return withExistence(
+        c,
+        c.add(
+            new LogRecord.Element(
+                new ElementIdentity.Edge(
+                    ElementKind.JOIN,
+                    from,
+                    to,
+                    true,
+                    IdentityKey.choice("orders.customer_id = customers.id"),
+                    JsonNodeFactory.instance
+                        .arrayNode()
+                        .add(
+                            JsonNodeFactory.instance
+                                .objectNode()
+                                .put("from", "customer_id")
+                                .put("to", "id"))))));
   }
 
+  /** An undirected identifier correspondence with an accepted existence Fact. */
   private static Ref correspondence(Scenario.Commit c, Ref one, Ref other) {
-    return c.add(
-        new LogRecord.Element(
-            new ElementIdentity.Edge(
-                ElementKind.IDENTIFIER_CORRESPONDENCE,
-                one,
-                other,
-                false,
-                IdentityKey.choice("direct"),
-                JsonNodeFactory.instance.objectNode().put("match", "direct"))));
+    return withExistence(
+        c,
+        c.add(
+            new LogRecord.Element(
+                new ElementIdentity.Edge(
+                    ElementKind.IDENTIFIER_CORRESPONDENCE,
+                    one,
+                    other,
+                    false,
+                    IdentityKey.choice("direct"),
+                    JsonNodeFactory.instance.objectNode().put("match", "direct")))));
+  }
+
+  private static Ref withExistence(Scenario.Commit c, Ref element) {
+    c.closedRangeCandidate(c.address(element, Vocabulary.EXISTENCE), "exists");
+    return element;
   }
 }

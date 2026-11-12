@@ -7,6 +7,12 @@ package com.scalar.db.analytics.labs.semantic.model;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.AnswerType;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ConfirmationPath;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.PolicyResult;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.RetirementReason;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Transition;
+import java.util.List;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -16,7 +22,8 @@ import org.jspecify.annotations.Nullable;
  * <p>A commit holds one or more log records in order, each at its own {@linkplain LogPosition log
  * position}. Records that create something ({@link Element}, {@link FactAddress}, {@link Fact},
  * {@link InputResource}, {@link InputObservation}) are identified by the URN issued from that
- * position. Log records are never updated or deleted; everything materialized for reading is
+ * position. {@linkplain FactEvent Fact Events} change how one Fact is treated, and each produces a
+ * Fact Revision. Log records are never updated or deleted; everything materialized for reading is
  * derived from them.
  *
  * <p>A record built for a commit request may refer to records of the same request by temporary
@@ -30,7 +37,14 @@ import org.jspecify.annotations.Nullable;
   @JsonSubTypes.Type(value = LogRecord.InputResource.class, name = "input-resource"),
   @JsonSubTypes.Type(value = LogRecord.InputObservation.class, name = "input-observation"),
   @JsonSubTypes.Type(value = LogRecord.ObservationEvent.class, name = "observation-event"),
-  @JsonSubTypes.Type(value = LogRecord.PolicyVersion.class, name = "policy-version")
+  @JsonSubTypes.Type(value = LogRecord.PolicyVersion.class, name = "policy-version"),
+  @JsonSubTypes.Type(value = LogRecord.Accept.class, name = "accept"),
+  @JsonSubTypes.Type(value = LogRecord.ProposeRetire.class, name = "propose-retire"),
+  @JsonSubTypes.Type(value = LogRecord.EvaluatePolicy.class, name = "evaluate-policy"),
+  @JsonSubTypes.Type(value = LogRecord.Answer.class, name = "answer"),
+  @JsonSubTypes.Type(value = LogRecord.Confirm.class, name = "confirm"),
+  @JsonSubTypes.Type(value = LogRecord.Reject.class, name = "reject"),
+  @JsonSubTypes.Type(value = LogRecord.Retire.class, name = "retire")
 })
 public sealed interface LogRecord {
   /**
@@ -106,6 +120,141 @@ public sealed interface LogRecord {
    */
   record PolicyVersion(JsonNode content) implements LogRecord {}
 
+  /**
+   * A Fact Event: an event, with its reason, that changes how one Fact is treated (see {@code
+   * docs/semantic-catalog/record-model.md}, "Fact Events and states"). Applying a Fact's events in
+   * log order gives its Fact Record, and each event produces a Fact Revision.
+   */
+  sealed interface FactEvent extends LogRecord {
+    /** The Fact the event targets. */
+    Ref fact();
+  }
+
+  /**
+   * An acceptance of a Fact as a candidate. The first one makes the Fact a Fact Record; a later one
+   * is an additional acceptance. One that brings a new dependency reference returns a {@code
+   * rejected} or {@code retired} Fact to {@code candidate}.
+   *
+   * <p>An acceptance states the Fact's dependency references, validation result, and provenance as
+   * they are from then on, replacing those of earlier acceptances. An additional acceptance
+   * therefore restates every dependency it keeps.
+   *
+   * @param dependencies the complete set of dependency references in effect after the acceptance
+   * @param checks the validation result: the checks made and what they covered. An Input
+   *     Observation a check references is also among the dependencies.
+   * @param inputsRead what the Generator read
+   * @param provenance the Generator, its version, and the build task
+   */
+  record Accept(
+      Ref fact,
+      List<Dependency> dependencies,
+      List<Check> checks,
+      JsonNode inputsRead,
+      JsonNode provenance)
+      implements FactEvent {
+    public Accept {
+      dependencies = List.copyOf(dependencies);
+      checks = List.copyOf(checks);
+    }
+  }
+
+  /**
+   * A proposal to retire a Fact. Against a {@code confirmed} Fact it opens a retirement proposal;
+   * against a {@code candidate} it can only lead to a rejection.
+   *
+   * <p>A proposal leaves the Fact's dependency references, validation result, and provenance as
+   * they are: those change only with an acceptance.
+   *
+   * @param checks the validation result of the proposal, including any refuting check; a check
+   *     references an Input Observation or a Fact Revision that exists, which need not be a
+   *     dependency of the Fact
+   */
+  record ProposeRetire(
+      Ref fact,
+      RetirementReason reason,
+      List<Check> checks,
+      JsonNode inputsRead,
+      JsonNode provenance)
+      implements FactEvent {
+    public ProposeRetire {
+      checks = List.copyOf(checks);
+    }
+  }
+
+  /**
+   * A policy evaluation: whether a transition proceeds by machine judgement or needs consent.
+   *
+   * @param policyVersion the log record of the user policy version evaluated
+   * @param transition what is evaluated: confirming a candidate, or retiring a Fact with an open
+   *     retirement proposal
+   * @param decidedBy the evaluating party
+   */
+  record EvaluatePolicy(
+      Ref fact,
+      Ref policyVersion,
+      Transition transition,
+      PolicyResult result,
+      String decidedBy,
+      String reason)
+      implements FactEvent {}
+
+  /**
+   * A human answer. The answer and the transition it causes are separate events.
+   *
+   * @param transition what is answered: the confirmation of a candidate, or a retirement proposal
+   * @param decidedBy the deciding party
+   * @param authorityCheck the reference to the check of the deciding party's authority
+   * @param wording the wording presented and answered
+   * @param reviewPresentation the review presentation the answer was given in, if any
+   */
+  record Answer(
+      Ref fact,
+      Transition transition,
+      AnswerType answerType,
+      String decidedBy,
+      String authorityCheck,
+      String wording,
+      @Nullable String reviewPresentation)
+      implements FactEvent {}
+
+  /**
+   * The confirmation of a candidate.
+   *
+   * @param basis the log record of the policy evaluation choosing machine judgement, or of the
+   *     consent answer, that the confirmation rests on
+   */
+  record Confirm(Ref fact, ConfirmationPath path, Ref basis) implements FactEvent {}
+
+  /** The rejection of a candidate. */
+  record Reject(Ref fact, Basis basis) implements FactEvent {}
+
+  /** The retirement of a confirmed Fact. */
+  record Retire(Ref fact, Basis basis) implements FactEvent {}
+
+  /** What a rejection or a retirement rests on. */
+  @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "basis")
+  @JsonSubTypes({
+    @JsonSubTypes.Type(value = Basis.Event.class, name = "event"),
+    @JsonSubTypes.Type(value = Basis.Cascade.class, name = "cascade")
+  })
+  sealed interface Basis {
+    /**
+     * A Fact Event of the same Fact.
+     *
+     * @param logRecord the log record of the event: for a rejection, a rejection or correction
+     *     answer or a retirement proposal; for a retirement, a policy evaluation choosing machine
+     *     judgement or a consent answer to the open retirement proposal
+     */
+    record Event(Ref logRecord) implements Basis {}
+
+    /**
+     * The rejection or retirement of a premise dependency of the target.
+     *
+     * @param fact the Fact rejected or retired
+     */
+    record Cascade(Ref fact) implements Basis {}
+  }
+
   /** The record kind stored with the record. */
   default String kind() {
     return switch (this) {
@@ -116,6 +265,13 @@ public sealed interface LogRecord {
       case InputObservation ignored -> "input-observation";
       case ObservationEvent ignored -> "observation-event";
       case PolicyVersion ignored -> "policy-version";
+      case Accept ignored -> "accept";
+      case ProposeRetire ignored -> "propose-retire";
+      case EvaluatePolicy ignored -> "evaluate-policy";
+      case Answer ignored -> "answer";
+      case Confirm ignored -> "confirm";
+      case Reject ignored -> "reject";
+      case Retire ignored -> "retire";
     };
   }
 }

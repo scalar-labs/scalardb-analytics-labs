@@ -51,4 +51,73 @@ public final class Vocabulary {
       return this == DATASET || this == FIELD;
     }
   }
+
+  /**
+   * The state of a Fact Record, defined by which Fact Events it accepts next (see {@code
+   * docs/semantic-catalog/record-model.md}, "Fact Events and states").
+   */
+  public enum FactState {
+    /** Accepted but not confirmed. */
+    CANDIDATE,
+    /** Confirmed knowledge. */
+    CONFIRMED,
+    /** Judged not to be confirmed. */
+    REJECTED,
+    /** Confirmed knowledge judged no longer usable. */
+    RETIRED
+  }
+
+  /** What a policy evaluation or an answer is about: confirming a candidate or retiring a Fact. */
+  public enum Transition {
+    CONFIRM,
+    RETIRE
+  }
+
+  /**
+   * What a policy evaluation decided: that machine judgement proceeds, or that consent is needed.
+   */
+  public enum PolicyResult {
+    MACHINE_JUDGEMENT,
+    REQUEST_CONSENT
+  }
+
+  /** The type of a human answer. */
+  public enum AnswerType {
+    CONSENT,
+    REJECTION,
+    CORRECTION,
+    UNKNOWN
+  }
+
+  /** How a candidate was confirmed. */
+  public enum ConfirmationPath {
+    MACHINE_JUDGEMENT,
+    HUMAN_CONSENT
+  }
+
+  /** Why a retirement is proposed. */
+  public enum RetirementReason {
+    ELEMENT_NO_LONGER_EXISTS,
+    SOURCE_DECLARATION_NO_LONGER_EXISTS,
+    CONFIRMATION_WAS_WRONG
+  }
+
+  /**
+   * How a check examined its validation items (see {@code docs/semantic-catalog/record-model.md},
+   * "Validation results and dependencies").
+   */
+  public enum ValidationMethod {
+    DECLARED_ENFORCED,
+    DECLARED_UNENFORCED,
+    DATA_CHECK,
+    DOCUMENT,
+    INFERENCE
+  }
+
+  /** What a check found for the validation items it covered. */
+  public enum CheckResult {
+    SUPPORTED,
+    REFUTED,
+    UNDECIDABLE
+  }
 }
