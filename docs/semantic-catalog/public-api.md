@@ -12,7 +12,8 @@ explained in [`construction.md`](construction.md#operations-that-add-records).
 ## What is exposed
 
 Operations change the log, a build task, or a review presentation record. Reads change nothing.
-Every call targets one domain.
+Every call targets one domain, named by an identifier the application supplies and the Semantic
+Catalog treats as opaque.
 
 The application calls these operations: registering an observation, submitting answers, resolving a
 conflict, setting a user policy version, running a build task, resuming a build task, and
@@ -33,7 +34,7 @@ commits.
 ## Common contract
 
 **URNs** pass as opaque strings. Callers never parse them. A caller passes only URNs obtained from
-the API or issued elsewhere, such as question URNs from the tracing module.
+the API.
 
 **Points.** A read takes either a Catalog Snapshot URN, meaning that commit, or "latest", meaning
 the last commit when the read is received. Every read returns the Catalog Snapshot URN it read, and
@@ -41,8 +42,8 @@ the same URN always returns the same knowledge. Every operation returns the Cata
 the commit it wrote, or says it wrote nothing, so a Query Agent can move to the point where
 knowledge it just confirmed is visible.
 
-**Using party.** The application attaches the identifier of the person or Query Agent behind each
-call, and the question URN when the call belongs to a question. Operations record the using party as
+**Using party.** The application attaches the authenticated principal behind each call: a person,
+or a Query Agent registered by an administrator. Operations record the using party as
 the deciding party of answers and conflict resolutions and as the setter of policy versions. Reads
 and operation outputs mask dependencies and check references that Governance denies the using party:
 neither their URN nor their content is returned, only the fact that a hidden reference exists.
@@ -51,7 +52,8 @@ rest of the knowledge unusable.
 
 **Authority check.** Submitting answers and resolving a conflict take a reference to the result
 of checking the deciding party's authority. The value is opaque, recorded without interpretation,
-and required to be present.
+and required to be present. The application issues it (see
+[`../application.md`](../application.md#callers-and-authority)).
 
 **Call identifiers.** The application attaches a call identifier to every operation. A resend with
 the same identifier and input writes nothing and returns the first output, so an operation whose
@@ -88,7 +90,6 @@ the identifier of their target, and a reason:
 | Point out of range | A Catalog Snapshot URN names a commit not yet written |
 | No authority check result | An answer or conflict resolution lacks the reference |
 | Not accepted in this state | A state condition of the operation is not met |
-| Acquisition conditions not met | An observation at question time fails the conditions for acquisition and disclosure |
 | Storage failure | Storage could not be read or written |
 
 Registering an observation that records nothing because the content is unchanged is a success whose
@@ -108,12 +109,11 @@ Registering an observation has two forms.
   derived record. Both are successes, and the output says what was recorded. The application passes
   unchanged tables at every retrieval, so a failure between the Physical Catalog's update and this
   call is repaired by the next retrieval.
-- *Other observations*: documents, missing knowledge at question time, and usage feedback. The input
-  is the observation kind, the Input Resource (an existing document's URN or none for a new one, the
-  question URN for missing knowledge, none for feedback), and the content. Feedback can also carry
-  related Fact URNs, free context, and a question URN. The output returns the Input Resource and
-  Input Observation URNs and whether anything was recorded. Observations that fail the acquisition
-  conditions are refused.
+- *Other observations*: documents and usage feedback. The input is the observation kind, the Input
+  Resource (an existing document's URN or none for a new one; always none for feedback), and the
+  content. Feedback also carries its session purpose and a summary of the session's context, and can
+  carry related Fact URNs. The output returns the Input Resource and Input Observation URNs and
+  whether anything was recorded.
 
 ### Submitting answers
 
@@ -124,8 +124,8 @@ The output gives, per answer, its event and resulting transition or the reason f
 is an unknown answer, a rejection or correction of a retirement proposal, unconfirmed dependencies,
 or a judgement already made by another path. The output also lists the feedback registered for each
 correction and the Facts moved by cascade. If any answer fails, the whole submission fails and
-identifies it, so part of a submission is never recorded. At question time a review presentation is
-registered first, so answers can reference it and, through it, the question.
+identifies it, so part of a submission is never recorded. A review presentation is registered first,
+so answers can reference it.
 
 ### Resolving a conflict
 
@@ -192,14 +192,14 @@ name, because they have no identity of their own.
 
 Retrieving a Fact Revision takes a Fact Revision URN, or a Fact URN and a point, and returns its
 content, whether or not the Fact is currently selected. The citation for an answer to a question is
-the Fact Revision URNs used and the Catalog Snapshot URN read. The Query Agent reports these to the
-trace record, and everything else, such as validation results and confirmation path, is retrievable
+the Fact Revision URNs used and the Catalog Snapshot URN read. The Query Agent returns these with
+its answer, and everything else, such as validation results and confirmation path, is retrievable
 from them.
 
 ### Retrieving the review list
 
 Retrieving the review list returns, at a point and optionally filtered by presentation kind, element
-or Fact Address, or question, the items awaiting a person:
+or Fact Address, the items awaiting a person:
 
 - Candidates with confirmed dependencies whose latest evaluation requested consent.
 - Open retirement proposals whose latest evaluation requested consent.
@@ -229,17 +229,18 @@ outcome.
    returned Catalog Snapshot URN for the whole question.
 2. **Request knowledge.** At that point it requests the Measure's aggregation rule and reference
    time, and the set relationship and business definition of the customer-to-member correspondence,
-   given by edge kind and its two Fields.
+   given by edge kind and its two Field sets.
 3. **Receive.** The Measure's predicates come back as selected Facts. The business definition cannot
    be checked against data, so under `auto` it comes back as awaiting judgement with the candidate
    awaiting consent.
-4. **Judge.** If the user is the deciding party, the application registers a review presentation and
-   submits the user's consent; the Query Agent rereads at the returned point. Otherwise confirmation
-   waits for the semantics owner, and the Query Agent proceeds with unconfirmed knowledge only if
-   the user explicitly asks.
-5. **Cite.** The Query Agent reports the Fact Revision URNs it used and the Catalog Snapshot URN it
-   read to the trace record.
+4. **Judge.** If the user is a deciding party, the Query Agent registers a review presentation and
+   the user consents through a call made as themselves, since the agent's own principal cannot
+   confirm; the Query Agent then rereads at the returned point. Otherwise confirmation waits for the
+   semantics owner, and the Query Agent proceeds with unconfirmed knowledge only if the user
+   explicitly asks.
+5. **Cite.** The Query Agent returns the Fact Revision URNs it used and the Catalog Snapshot URN it
+   read with its answer.
 
-When requested knowledge is missing, the application registers the part of the trace record used for
-construction as an observation under the question URN and runs the build tasks returned, so
-Generators produce candidates on the spot.
+When requested knowledge is missing, the Query Agent registers usage feedback whose purpose is
+composing a query, with a summary of what the question needed, and the application runs the build
+tasks returned, so Generators produce candidates on the spot.

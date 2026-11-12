@@ -14,7 +14,8 @@ counts that are expected to be tuned from use of the product.
 ## One rule per Generator
 
 Each interpretation or check rule is its own Generator. The rule that derives a key from a primary
-key and the rule that derives a join from a foreign key are separate Generators.
+key and the rule that derives an identifier correspondence from a foreign key are separate
+Generators.
 [`../design/semantic-catalog-generator-granularity.md`](../design/semantic-catalog-generator-granularity.md)
 records why.
 
@@ -26,28 +27,25 @@ candidate depends on the validation methods of its checks, never on its route.
 | --- | --- | --- | --- |
 | Schema interpretation | Physical schema observations | Deterministic | `declared-enforced`, `declared-unenforced` |
 | Data checks | Aggregate queries through the application's SQL execution | Deterministic | `data-check` |
-| Meaning inference | Physical schema, confirmed Facts, documents, missing knowledge, feedback, and data statistics passed to a model | Non-deterministic | `document`, `inference` |
+| Meaning inference | Physical schema, confirmed Facts, documents, usage feedback, and data statistics passed to a model | Non-deterministic | `document`, `inference` |
 
 | Route | Generator | Produces |
 | --- | --- | --- |
 | Schema interpretation | Table and column ingestion | Existence and technical references of Datasets and Fields; retirement proposals for elements that disappeared |
 | Schema interpretation | Key from primary key | A Dataset's key |
 | Schema interpretation | Uniqueness declaration ingestion | Uniqueness of a Field set |
-| Schema interpretation | Join from foreign key | Existence of a join |
-| Schema interpretation | Participation from foreign key | Participation of the referencing side |
+| Schema interpretation | Correspondence from foreign key | Existence of an identifier correspondence and its business definition; support for the containment of the referencing side in its set relationship |
 | Schema interpretation | Value kind from source type | Time-or-date and boolean value kinds |
 | Schema interpretation | Column rename inference | Moving a technical reference to a new column; after rejection, retirement of the old Field and a Field for the new column |
 | Data checks | Uniqueness check | Uniqueness of a Field set |
 | Data checks | Candidate key discovery | Uniqueness, and a key for a Dataset without a primary key |
-| Data checks | Inclusion discovery | Existence of an undeclared join |
-| Data checks | Participation check | Participation of each side of a join |
-| Data checks | Multiplicity check | A join's multiplicity |
+| Data checks | Inclusion discovery | Existence of an undeclared identifier correspondence |
 | Data checks | Set relationship check | An identifier correspondence's set relationship |
 | Meaning inference | Row meaning inference | The four row-meaning predicates |
 | Meaning inference | Field meaning inference | Meaning, value kind, unit, meaning of null, represented concept, time meaning and time zone |
 | Meaning inference | Concept inference | Concepts, their meaning, and concept relationships with multiplicity |
 | Meaning inference | Analytical semantics inference | Measures, Dimensions, business terms, and their predicates |
-| Meaning inference | Join and identifier correspondence inference | Undeclared joins; identifier correspondences and their business definitions |
+| Meaning inference | Identifier correspondence inference | Undeclared identifier correspondences, including normalization, and their business definitions |
 | Meaning inference | Correction interpretation | A revised value or applicability scope for a related Fact |
 
 Further Generators can be added under the same contract. Each addition needs its own input kind or
@@ -65,7 +63,6 @@ declarations:
 | --- | --- |
 | Physical schema | Registering an observation records a new physical schema observation |
 | Document | Registering an observation records a new document observation |
-| Missing knowledge at question time | Registering an observation records it under the question URN |
 | Usage feedback | Registering an observation records it under a new Input Resource |
 | Confirmed Fact, per predicate | A Fact of that predicate is confirmed |
 | Data observation | Never; data observations are written with the results that read them |
@@ -103,14 +100,14 @@ depends on it, so its candidate replaces the selection once confirmed.
 **Data observations.** A Generator that reads data values, through data checks or as statistics
 passed to a model, does so through the application's SQL execution. It records what it read as a
 **data observation** in the same commit as its results, because a `data-check` needs an observation
-to reference. Data observations have one Input Resource per kind and target of check (a Field set, a
-join, or a correspondence), because one check can read several tables and different queries in one
-Input Resource could not be compared with their predecessors. An observation holds the query, its
-result, the physical schema observations of the tables read, and the read provenance the application
-returns. The interim scanner path returns no read provenance, so an observation read through it
-records that there is none, together with the path's implementation and the names and versions of
-its DuckDB extensions. A result equal to the previous observation of the same Input Resource is not
-recorded again.
+to reference. Data observations have one Input Resource per kind and target of check (a Field set or
+a correspondence), because one check can read several tables and different queries in one Input
+Resource could not be compared with their predecessors. An observation holds the query, its result,
+the range it read (a sample or the whole table, how many rows, and when), the physical schema
+observations of the tables read, and the read provenance the application returns. The interim
+scanner path returns no read provenance, so an observation read through it records that there is
+none, together with the path's implementation and the names and versions of its DuckDB extensions. A
+result equal to the previous observation of the same Input Resource is not recorded again.
 
 ## Schema interpretation
 
@@ -127,8 +124,7 @@ metadata marks as missing are not treated as disappeared.
 | Table and column ingestion | Tables or views and columns, and elements now marked "does not exist" | `declared-enforced` |
 | Key from primary key | Primary key | `declared-enforced` if the source enforces it, else `declared-unenforced` |
 | Uniqueness declaration ingestion | Primary keys; unique constraints and unique indexes on non-null columns | Same; a unique index is `declared-enforced` |
-| Join from foreign key | Foreign key | Same, except as noted for string columns |
-| Participation from foreign key | An enforced foreign key on non-null columns | `declared-enforced` |
+| Correspondence from foreign key | Foreign key | Same, except as noted for string columns |
 | Value kind from source type | Date, time, and boolean types | `declared-enforced` |
 | Column rename inference | A column disappeared and one of the same source type was added to the table | `inference` for the move; `declared-enforced` for the retirement and new Field |
 
@@ -139,17 +135,27 @@ nullable columns yields no uniqueness candidate, because rows containing null ma
 and string types cannot tell identifiers from amounts, so their value kinds come from Field meaning
 inference.
 
-A foreign key on string columns leaves the join condition's validation item undecidable unless
-equality under the column's collation is known to match byte comparison, because a key can reference
-a row that an equality join does not match. Such joins need consent under `auto`.
+A foreign key states that the referencing values denote the referenced rows' objects, so it is
+support for an identifier correspondence rather than an element of its own. When the source enforces
+the key, the correspondence holds within one database by construction, and the Generator also
+proposes its business definition with `declared-enforced`. An unenforced key gives both
+`declared-unenforced`. A foreign key on string columns leaves the matching condition's validation
+item undecidable unless equality under the column's collation is known to match byte comparison,
+because a key can reference a row that an equality comparison does not match. Such correspondences
+need consent under `auto`.
 
-Schema interpretation never produces multiplicity. A foreign key shows at most one referenced row
-per referencing row, not whether the referencing side repeats; the multiplicity check decides it.
+A foreign key on non-null columns also declares that every referencing value appears on the
+referenced side, which is one validation item of the set relationship, so the Generator supports
+that item with the key's validation method. The set relationship check decides the other direction,
+whether every referenced row is referenced, and schema interpretation never decides whether the
+referencing side repeats; the uniqueness check observes that. With both, an enforced key whose
+referenced side has unreferenced rows yields `subset` by machine judgement under `auto`.
 
-Under the default policy, existence, technical references, value kinds, and enforced constraints are
-confirmed by machine judgement. Uniqueness from an unenforced declaration is confirmed once the
-uniqueness check supports the same Fact. Keys and joins from unenforced declarations need consent,
-because the absence of duplicates does not show that a set is a business identifier.
+Under the default policy, existence, technical references, value kinds, enforced constraints, and
+correspondences from enforced foreign keys are confirmed by machine judgement. Uniqueness from an
+unenforced declaration is confirmed once the uniqueness check supports the same Fact. Keys and
+correspondences from unenforced declarations need consent, because the absence of duplicates does
+not show that a set is a business identifier.
 
 ## Data checks
 
@@ -157,30 +163,50 @@ Data checks run aggregate queries, counts and set comparisons only, and never re
 
 | Generator | Triggered by | Query | Method |
 | --- | --- | --- | --- |
-| Uniqueness check | Confirmed Field existence (declared sets containing it), confirmed key | Row count, distinct count of the set, rows with null | `data-check` |
+| Uniqueness check | Confirmed Field existence (declared sets containing it), confirmed key, confirmed correspondence existence (the Field set at each end) | Row count, distinct count of the set, rows with null | `data-check` |
 | Candidate key discovery | Confirmed Field existence in a Dataset without a primary key | Minimal unique column combinations | `data-check` for uniqueness, `inference` for the key |
 | Inclusion discovery | Confirmed Field existence, confirmed uniqueness | Whether one side's values are contained in a unique Field set | `inference`; the inclusion observation is an input read, not a check reference |
-| Participation check | Confirmed join existence | Anti-join row counts on the condition, both sides | `data-check` |
-| Multiplicity check | Confirmed join existence | Uniqueness of the join Fields on both sides | `data-check` |
-| Set relationship check | Confirmed identifier correspondence existence | Anti-join row counts on the matching condition, both directions | `data-check` |
+| Set relationship check | Confirmed identifier correspondence existence | Anti-join row counts on the matching condition, after its normalization, both directions | `data-check` |
+
+How many rows match across a correspondence comes from the uniqueness check on each end: a member ID
+that repeats among purchase rows makes customers to purchases one-to-many. Whether every row takes
+part comes from the set relationship check.
+
+**Sampling.** Every read of data values, by a data check or for statistics passed to a model, is
+bounded by a sample size the domain's settings fix, because scanning whole large tables is not
+practical. A table within the bound is read whole. The observation records which happened, how many
+rows were read, and when. A comparison between two sides samples only the side whose values are
+checked. Each sampled value is looked up in the whole of the other side, because a value missing
+from a sample of the other side would look like a counterexample that is not one. A query that
+exceeds the application's limits on rows, bytes, or time leaves its items undecidable.
+
+**What data establishes.** Data can refute a rule but not establish one, and a sample can do even
+less than a whole table:
+
+| Result | Example | Rests on | Under `auto` |
+| --- | --- | --- | --- |
+| Loosens what the data may hold | A Field set repeats; some values on one side have no match | A counterexample, which a sample shows as surely as a whole table as long as the other side is looked up whole | Confirmed by machine judgement |
+| Restricts what the data may hold | A Field set does not repeat; every value on one side has a match | No counterexample found | Confirmed by machine judgement only when a declaration also supports it; otherwise needs consent, with the range read shown |
+
+[`construction.md`](construction.md#choosing-the-confirmation-path) gives the rule and its reason.
 
 Each also runs on a new physical schema observation of its table and re-examines the confirmed Facts
 it supported. Data that changes while the schema stays the same is not re-examined. A uniqueness
-that has since broken stays selected, and a join on the duplicated key can double-count. The Query
-Agent can see from dependencies when the data was observed.
+that has since broken stays selected, and a query relying on it can double-count. The Query Agent
+can see from dependencies when the data was observed and how much of it was read.
 
 When uniqueness declaration ingestion and the uniqueness check reach the same value, or inclusion
-discovery and join inference propose the same join, the second becomes an additional acceptance. A
-result that disagrees with a candidate is a refuting check, and a new observation that refutes a
-confirmed Fact produces a retirement proposal with the reason that the confirmation was wrong.
+discovery and correspondence inference propose the same correspondence, the second becomes an
+additional acceptance. A result that disagrees with a candidate is a refuting check, and a new
+observation that refutes a confirmed Fact produces a retirement proposal with the reason that the
+confirmation was wrong.
 
-A query that exceeds the application's limits on rows, bytes, or time leaves its items undecidable,
-so a partial read never supports a whole table. The column-set sizes that candidate key discovery
-and inclusion discovery explore are initial behavior.
+The column-set sizes that candidate key discovery and inclusion discovery explore, and the sample
+size, are initial behavior.
 
-Inclusion never supports a join's existence with `data-check`, because columns whose values happen
-to overlap need not correspond; otherwise `auto` could confirm a coincidental join. For the same
-reason, keys from candidate key discovery are `inference`.
+Inclusion never supports a correspondence's existence with `data-check`, because columns whose
+values happen to overlap need not denote the same objects; otherwise `auto` could confirm a
+coincidental correspondence. For the same reason, keys from candidate key discovery are `inference`.
 
 ## Meaning inference
 
@@ -193,28 +219,33 @@ consent under `auto`.
 
 | Generator | Triggered by |
 | --- | --- |
-| Row meaning inference | Confirmed Dataset existence, documents, missing knowledge, feedback without related Facts |
-| Field meaning inference | Confirmed Field existence, documents, missing knowledge, feedback without related Facts |
-| Concept inference | Confirmed represented concepts of rows and Fields, documents, missing knowledge, feedback without related Facts |
-| Analytical semantics inference | Documents, missing knowledge, feedback without related Facts, confirmed Field meaning |
-| Join and identifier correspondence inference | Confirmed Field meaning and represented concept, documents, missing knowledge, feedback without related Facts |
+| Row meaning inference | Confirmed Dataset existence, documents, feedback without related Facts |
+| Field meaning inference | Confirmed Field existence, documents, feedback without related Facts |
+| Concept inference | Confirmed represented concepts of rows and Fields, documents, feedback without related Facts |
+| Analytical semantics inference | Documents, feedback without related Facts, confirmed Field meaning |
+| Identifier correspondence inference | Confirmed Field meaning and represented concept, documents, feedback without related Facts |
 | Correction interpretation | Feedback with related Facts, including corrections from review |
 
 All of them also run when a Fact they depend on stops being selected. They create a free-description
 predicate only when the input states something the closed core cannot express.
 
-Apart from correction interpretation, meaning inference does not propose uniqueness, multiplicity,
-participation, or set relationships, which data checks decide. It also does not propose a Fact
+Concept inference stays separate from row meaning inference although both name concepts. Row meaning
+reads one Dataset, while the relationships between concepts, including the multiplicity the business
+allows, need the confirmed row meanings of several. Fewer model calls come from passing several
+targets in one call, not from merging rules.
+
+Apart from correction interpretation, meaning inference does not propose uniqueness or set
+relationships, which data checks decide. It also does not propose a Fact
 Address that schema interpretation is filling from a current declaration, or the key of a Dataset
 without a primary key, which candidate key discovery proposes. An inferred candidate beside a
 checked one would add judgement and, if both were confirmed, a conflict. Correction interpretation
 can reach any predicate, because a correction may revise any value.
 
-Undeclared joins and identifier correspondences are central to combining sources. Join and
-identifier correspondence inference proposes, for example, that e-commerce customers and POS members
-correspond through the email address given at registration. Once its existence is confirmed, the set
-relationship check examines it. Its business definition cannot be checked against data and needs
-consent as a separate candidate.
+Undeclared identifier correspondences are central to combining sources. Identifier correspondence
+inference proposes, for example, that e-commerce customers and POS members correspond through the
+e-mail address given at registration, compared after lower-casing because the two systems store it
+in different case. Once its existence is confirmed, the set relationship check examines it. Its
+business definition cannot be checked against data and needs consent as a separate candidate.
 
 Currency, code meanings, tax treatment, and the posting date of sales rarely have support in data or
 declarations. Without documents, meaning inference can offer only `inference`, and the deciding
@@ -224,9 +255,10 @@ Correction interpretation gives the model the feedback's content and context and
 content, and asks for a revised value or applicability scope for the same element and predicate. Its
 candidate always depends on the feedback observation. If the related Fact was a rejected candidate,
 the new candidate does not depend on it, since a rejected candidate is nothing to replace, but it
-carries over the dependencies it still needs, such as the join's existence. If the related Fact is
-the selected confirmed Fact, the new candidate depends on it and replaces it once confirmed. When
-the wording yields no value or scope, the build task records that and the unreadable correction.
+carries over the dependencies it still needs, such as the correspondence's existence. If the related
+Fact is the selected confirmed Fact, the new candidate depends on it and replaces it once confirmed.
+When the wording yields no value or scope, the build task records that and the unreadable
+correction.
 
 ## Generation strategy
 
@@ -235,16 +267,17 @@ input the confirmation of what an earlier one produces. When the e-commerce data
 
 1. The physical schema observation triggers table and column ingestion, whose existence and
    technical-reference candidates are confirmed by machine judgement.
-2. Confirmed existence triggers key from primary key, uniqueness declaration ingestion, join from
-   foreign key, the uniqueness check, inclusion discovery, and row and Field meaning inference.
+2. Confirmed existence triggers key from primary key, uniqueness declaration ingestion,
+   correspondence from foreign key, the uniqueness check, inclusion discovery, and row and Field
+   meaning inference.
 3. If the table metadata does not say whether the primary key is enforced, the uniqueness check
    supports the declared uniqueness with `data-check` and it is confirmed, while the key waits for
    consent.
 4. Row and Field meaning candidates wait for consent.
 
-Registering the POS database repeats this, after which join and identifier correspondence inference
-proposes the customer-to-member correspondence. Declaring confirmed existence as input avoids
-producing candidates that could not reach the deciding party anyway.
+Registering the POS database repeats this, after which identifier correspondence inference proposes
+the customer-to-member correspondence. Declaring confirmed existence as input avoids producing
+candidates that could not reach the deciding party anyway.
 
 **Targets of a run.** A run aims at the Fact Addresses its triggers point to:
 
@@ -273,8 +306,8 @@ Meaning inference runs only when it has a target and only with input that meets 
 conditions below. Input that does not is left out and recorded as missing.
 
 Meaning inference creates new elements only from specific inputs. Concepts come from confirmed
-represented concepts, documents, missing knowledge, and feedback. Measures, Dimensions, and business
-terms come from documents, missing knowledge, and feedback. Datasets and Fields come only from table
+represented concepts, documents, and feedback. Measures, Dimensions, and business terms come from
+documents and feedback. Datasets and Fields come only from table
 and column ingestion and column rename inference. Creating Measures from confirmed Facts alone would
 let each confirmation trigger another inference and grow elements without bound.
 
@@ -306,23 +339,56 @@ While the move waits, the old Field stays selected and the Query Agent sees that
 newer observation. No predicate represents a rename; it is a replacement of the technical reference,
 the same form a Dataset uses for a renamed table.
 
+## Reaching a language model
+
+Meaning inference, impact judgement, and the duplicate check call a language model through an
+**adapter**, the only part of the Semantic Catalog that knows how a model is reached. A Generator
+passes a prompt and receives the model's answer; it never depends on a particular provider, so the
+provider can change without changing a Generator.
+
+The first adapters run a locally installed, already signed-in coding-agent CLI (`claude -p` or
+`codex exec`) as a subprocess with no tools, in an empty temporary directory, so the CLI picks up no
+repository context. A third adapter pipes the prompt to a configured command, to connect another
+harness. The product therefore holds no provider credential. Which adapter and model a domain uses
+is set in the workspace configuration, and the application passes it to the Semantic Catalog.
+
+A Generator's version includes the model, so an adapter is configured with a concrete model and
+reports it. A model alias that the provider may point elsewhere later, such as `sonnet`, is refused,
+because provenance could then not say which model produced a Fact.
+
+After the first release, a later phase moves from coding-agent CLIs to a harness the product owns,
+such as one built on Pi or on a DeepSeek harness. The adapter boundary is what keeps that change
+away from the Generators.
+
+An unavailable model fails the build task, which can be resumed.
+
 ## Input passed to external models
 
-Meaning inference, impact judgement, and the duplicate check may send input to an external model.
-Using question text, trace records, feedback, or data values as input requires the conditions for
-acquisition, purpose, retention, disclosure, and audit to hold.
+Meaning inference, impact judgement, and the duplicate check may send input to an external model
+through the adapter. Usage feedback and data values reach a model only as far as the domain's
+settings allow:
 
-| Input | Content | Initial behavior |
+| Input | Content | Default |
 | --- | --- | --- |
 | Physical schema | Table and column names, source types, constraints | Passed |
 | Confirmed Facts | Values and scopes of selected Fact Revisions | Passed |
 | Documents | Relevant parts | Passed |
-| Data count statistics | Row count, null ratio, distinct count | Passed when the conditions hold |
-| Value distributions and samples | Length and shape distributions, some distinct values | Not passed unless the user organization permits it and the conditions hold |
-| Missing knowledge, usage feedback | The parts recorded as observations; feedback content, related Facts, and context | Passed when the conditions hold; the organization can stop it |
+| Data count statistics | Row count, null ratio, distinct count, from a bounded sample | Passed; can be stopped |
+| Value distributions and samples | Length and shape distributions, some distinct values | Not passed unless the domain opts in |
+| Usage feedback | Content, session purpose, context summary, related Facts | Passed; can be stopped |
 
 Value distributions and samples are withheld by default because values that must not leave the
 organization could reach an external model before the organization decides, and even shape
 distributions can reveal values with fixed formats. The cost of withholding them is weaker meaning
-candidates for coded columns. Everything passed to a model is recorded as inputs read, so provenance
-shows what an external model saw.
+candidates for coded columns.
+
+Data checks also read data values but send nothing to a model. They are on by default, within the
+sample size and the application's limits on time and concurrency, and a domain can turn them off.
+Uniqueness that no declaration states, and set relationships beyond what foreign keys declare, then
+stay unknown, and the Query Agent receives them as missing knowledge.
+
+These settings belong to the domain and are kept in the workspace configuration. Input is still
+registered and kept in the log; the Semantic Catalog applies the settings where it hands input to a
+Generator, and input withheld is recorded as missing.
+Everything passed to a model is recorded as inputs read, so provenance shows what an external model
+saw; that record is the audit. No retention or disclosure control beyond it exists yet.

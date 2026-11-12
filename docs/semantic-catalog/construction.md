@@ -22,8 +22,8 @@ Construction starts from new or changed input, not from questions:
   is judged by comparing its source-declared part with the previous observation, so a change only in
   the connector's mapping adds a derived record and no observation.
 - Documents the semantics owner registers or changes.
-- Missing knowledge found at question time.
-- Usage feedback and corrections.
+- Usage feedback: missing knowledge and statements from a user's LLM session, and corrections given
+  in review.
 
 Generators also aim at predicates that have no Fact yet. Questions are one input among others,
 neither the only trigger nor a gate. Registering the e-commerce order database starts candidates for
@@ -44,7 +44,7 @@ policy change, with its trigger, inputs, and result.
 | `succeeded` | Result recorded, including the result that there was no candidate | None |
 | `failed` | Failed, with its reason | `running`, by resuming |
 
-A build task records its kind, its triggers (a log record or a question URN), the Generator and
+A build task records its kind, its triggers (log records), the Generator and
 version and the versions of inputs read, the policy version for a re-evaluation, and the observation
 judged with the Facts selected for re-examination for an impact judgement. Its result holds the
 commits it wrote, the missing inputs when there was no candidate, and any duplicate-check matches
@@ -132,22 +132,32 @@ records why.
 | Preset | Proceeds by machine judgement |
 | --- | --- |
 | `full-auto` | Always |
-| `auto` | When all three conditions below hold |
+| `auto` | When all four conditions below hold |
 | `manual` | Never |
 
 Under `auto`:
 
 1. For a confirmation, every validation item is supported by a deterministic check. For a
    retirement, the reason is supported by one.
-2. No check refutes it.
-3. For a confirmation, no other Fact is selected at the same Fact Address in the Catalog Snapshot
+2. For a confirmation, no item rests only on data checks that found no counterexample. An item that
+   restricts what the data may hold, such as a Field set that does not repeat or every value on one
+   side of a correspondence appearing on the other, is also supported by a declaration, enforced or
+   not.
+3. No check refutes it.
+4. For a confirmation, no other Fact is selected at the same Fact Address in the Catalog Snapshot
    just before the evaluating commit.
 
 So under `auto`, anything that data cannot verify, such as a Field's meaning or the business
-definition of an identifier correspondence, needs consent. A column that disappeared from the
-physical schema is supported by `declared-enforced`, so retiring its Field proceeds by machine
-judgement. Under `full-auto`, a confirmed candidate made from the selected Fact replaces it, and one
-made without it becomes a conflict for a person to resolve.
+definition of an identifier correspondence, needs consent. Condition 2 holds because data can refute
+a rule but not establish one. A sample, or even a whole table, in which each member has bought once
+shows purchase rows whose member IDs do not repeat. Confirming that would let a Query Agent omit
+fan-out handling and double-count once a member buys again. The opposite value rests on a
+counterexample: a member ID that repeats settles that the Field set repeats, and erring there only
+makes a query more cautious. A declaration supplies the intent that data cannot, so an unenforced
+unique constraint with no duplicates found is still confirmed by machine judgement. A column that
+disappeared from the physical schema is supported by `declared-enforced`, so retiring its Field
+proceeds by machine judgement. Under `full-auto`, a confirmed candidate made from the selected Fact
+replaces it, and one made without it becomes a conflict for a person to resolve.
 
 The policy is evaluated, and an `evaluate-policy` event recorded, when a candidate's dependencies
 all become confirmed (or at acceptance if they already are), when an evaluable candidate gets an
@@ -212,9 +222,9 @@ by submitting answers (see [`public-api.md`](public-api.md)).
 
 What was presented, to whom, and when is kept as a **review presentation record**, outside the log,
 because presenting changes no Fact's state. It holds the presentation kind, the target Facts and
-Fact Address, the recipient and time, a reference to the context shown, the triggering question URN
-if any, and the resulting events. Candidates still waiting for their dependencies are not presented.
-Neither is anything answered unknown that has gained no new dependency reference since.
+Fact Address, the recipient and time, a reference to the context shown, and the resulting events.
+Candidates still waiting for their dependencies are not presented. Neither is anything answered
+unknown that has gained no new dependency reference since.
 
 An answer records the deciding party's own wording as context, without converting conditions,
 exceptions, or certainty into fixed fields such as confidence scores.
@@ -230,17 +240,21 @@ A corrected candidate is rejected because it will never be confirmed with its or
 scope. Keeping it would make the deciding party judge one point twice. The same commit registers the
 correction's wording as usage feedback related to that candidate. Correction interpretation then
 produces the corrected candidate, which also needs consent under `auto`, so a misread correction
-does not become confirmed knowledge unseen. When the answer to "customers to POS purchases is
-one-to-many" is "one-to-many is correct, except for corporate members", the original candidate is
-rejected and a new candidate scoped to exclude corporate members follows.
+does not become confirmed knowledge unseen. When the answer to "every e-commerce customer is a POS
+member" is "correct, except for corporate members", the original candidate is rejected and a new
+candidate scoped to exclude corporate members follows.
 
-Every answer and conflict resolution carries the deciding party and a reference to an authority check, an
-opaque value issued by whoever checked, which the Semantic Catalog records without interpreting and
-only requires to be present. The Semantic Catalog therefore does not itself verify that the person
-answering is the deciding party. The separation between producing candidates and confirming them
-holds only as far as the party that issues the reference checks authority, and a Query Agent uses
-the same CLI as the semantics owner, so that party must tell them apart. An answer to a Fact already
-confirmed or rejected by another path after presentation is recorded without a transition.
+Every answer and conflict resolution carries the deciding party and a reference to an authority
+check, an opaque value issued by whoever checked, which the Semantic Catalog records without
+interpreting and only requires to be present. The Semantic Catalog therefore does not itself verify
+that the person answering is the deciding party; the separation between producing candidates and
+confirming them holds as far as the issuing party checks authority. The application issues the
+reference after checking that the authenticated caller is a semantics owner of the domain (delegates
+are not designed yet), and a
+Query Agent calls as its own registered principal, which is never a semantics owner, so an agent
+cannot confirm what it relays (see [`../application.md`](../application.md#callers-and-authority)).
+An answer to a Fact already confirmed or rejected by another path after presentation is recorded
+without a transition.
 
 ## Operations that add records
 
@@ -287,42 +301,53 @@ Detecting a change and judging identity across it are separate. If `amount` disa
 `gross_amount` appears, names cannot tell a rename from a drop and an add. The existing Field stays
 selected, a candidate moves its technical reference to the new column, and only if that candidate is
 rejected does retirement of the old Field and a new Field follow (see
-[`generators.md`](generators.md#column-changes)). Retiring at once would cascade into the joins and
-Measures built on the Field and make the deciding party consent to them again. A table rename
-appears as "does not exist" for the old name. Once the new table is registered, a candidate
-technical reference to it switches the Dataset by replacement.
+[`generators.md`](generators.md#column-changes)). Retiring at once would cascade into the
+correspondences and Measures built on the Field and make the deciding party consent to them again. A
+table rename appears as "does not exist" for the old name. Once the new table is registered, a
+candidate technical reference to it switches the Dataset by replacement.
 
-## Question time and feedback
+## Usage feedback
 
-When the Query Agent meets missing knowledge or a conflict:
+Almost everything a user tells the catalog outside review arrives through an LLM session: the Query
+Agent meets missing knowledge while composing a query, the user explains what a column means, or a
+semantics owner says something while reviewing. When the Query Agent meets missing knowledge or a
+conflict:
 
-1. The tracing module keeps the missing knowledge and conflicts with the question. The application
-   registers only the parts used for construction as an observation whose Input Resource is
-   identified by the question URN. Conflicts are derivable from the log and are not received.
+1. The application registers what the session found worth keeping as usage feedback. Conflicts are
+   derivable from the log and are not registered.
 2. Generators produce candidates on the spot, and the policy confirms what machine judgement can.
-3. If the user who asked is the deciding party, they consent or resolve a conflict on the spot through a review
-   presentation that references the question. Any other user's answers stay in the trace record, and
-   those carrying a correction are registered as usage feedback. Their consent cannot confirm,
-   because confirmation would then fall outside the user policy and the record of the deciding
-   party.
+3. If the user is a deciding party, they consent or resolve a conflict on the spot through a review
+   presentation. Corrections from any other user are registered as usage feedback; their consent
+   cannot confirm, because confirmation would then fall outside the user policy and the record of
+   the deciding party.
 4. Confirmed knowledge appears at a later commit, and the Query Agent reads again at that commit.
 
-**Usage feedback** is anything a user says outside review that should become knowledge, whether tied
-to a question or not. It holds its content, optional related Facts, optional free context such as
-the question text, and the question URN when it arose in a question. Each registration gets a new
-Input Resource, because feedback is never revised. Related Facts are clues, not commands: feedback
-never replaces a selected Fact directly, and the candidates produced from it go through the same
-acceptance and confirmation.
+**Usage feedback** holds:
 
-Of the trace record, the Semantic Catalog does not receive the Facts used, conflicts, or consent and
-unknown answers from users who are not deciding parties. No Generator reads them, and conflicts can
-be derived. The trace record still maps each answer to the Fact Revisions it used, and the Semantic
-Catalog keeps every past Fact Revision retrievable by URN, so the knowledge behind an answer can be
-traced afterwards. Trace records are never evidence that knowledge is correct.
+- its content;
+- the purpose of the session it came from, composing a query or constructing the catalog, because
+  the same statement means a premise of an answer in one and a judgement on a candidate in the
+  other;
+- a summary of the session's context, written by the party that registers it, so that a statement
+  such as "that one is tax-exclusive" can be interpreted;
+- optionally, related Facts.
 
-A user organization can stop acquiring trace records and passing them to Generators.
-Question-triggered candidates and feedback from corrections then stop, but the Query Agent still
-receives missing knowledge and conflicts, and the log, confirmation paths, and review presentation
-records remain. Whether question text, trace records, feedback, and data values may be used as
-Generator input depends on conditions for acquisition, purpose, retention, disclosure, and audit.
-They are enforced where the Semantic Catalog receives input and where it hands input to a Generator.
+The registering principal is recorded on the commit. Each registration gets a new Input Resource,
+because feedback is never revised. Context is a summary rather than the conversation itself, because
+the log cannot erase what it holds and a raw conversation would keep everything said in it. Related
+Facts are clues, not commands: feedback never replaces a selected Fact directly, and the candidates
+produced from it go through the same acceptance and confirmation. A correction answer registers its
+wording as usage feedback whose purpose is constructing the catalog, whose context summarizes what
+was presented, and whose related Fact is the corrected candidate.
+
+The Semantic Catalog does not depend on the product's tracing of use (see
+[`../architecture.md`](../architecture.md#tracing-use)) and receives no trace records. The knowledge
+behind an answer can still be traced afterwards, because the Query Agent cites the Catalog Snapshot
+and Fact Revisions it used and every past Fact Revision stays retrievable by URN. Use is never
+evidence that knowledge is correct.
+
+A user organization can stop passing usage feedback to Generators. Feedback-triggered candidates
+then stop, but the Query Agent still receives missing knowledge and conflicts, and the log,
+confirmation paths, and review presentation records remain. Which inputs reach Generators and models
+is set per domain and checked where the Semantic Catalog hands input to a Generator (see
+[`generators.md`](generators.md#input-passed-to-external-models)).

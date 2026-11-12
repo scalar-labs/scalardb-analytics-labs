@@ -32,7 +32,7 @@ entry and a document disagree, fix the disagreement.
 | conflict resolution | `LogRecord.ResolveConflict` | A deciding party's choice of one of the eligible Facts in a conflict, recorded as `resolve-conflict` with the chosen and passed-over Facts. It is the only part of the selection written to the log. | [`record-model.md`](record-model.md) |
 | presentable period | `PresentablePeriodRow` | The commits from a Fact's confirmation until its retirement, during which it is presentable. A Fact confirmed again after retirement has several. | [`catalog-snapshot.md`](catalog-snapshot.md) |
 | inputs read | — | What a Generator read to produce a candidate, recorded in the `accept` and `propose-retire` Fact Events and in provenance. Input Observations and the Fact Revisions of selected confirmed Facts are also dependency references; rejected or retired Facts, unselected related Facts of feedback, and answers are inputs read only. | [`generators.md`](generators.md) |
-| review presentation record | — | The record of what was presented in review, to whom, and when, with the target Facts and Fact Address, a reference to the context shown, any triggering question, and the resulting events. It is kept outside the log because presenting changes no Fact's state. | [`construction.md`](construction.md) |
+| review presentation record | — | The record of what was presented in review, to whom, and when, with the target Facts and Fact Address, a reference to the context shown, and the resulting events. It is kept outside the log because presenting changes no Fact's state. | [`construction.md`](construction.md) |
 
 ## Construction and review
 

@@ -114,13 +114,15 @@ used for planning and execution. It does not persist declared constraints. The a
 the whole of the same table metadata to the Semantic Catalog, which records the source declarations
 as its input.
 
-**[Planned]** **Constructing knowledge.** Registration, an input change, missing knowledge found by
-a question, or usage feedback becomes input to Semantic Catalog build tasks. Generators produce
-candidates with validation results, and the user policy routes each to machine judgement or the
-deciding party's consent. Confirmed knowledge appears in Catalog Snapshots at later commits. The
-authority to produce candidates is separate from the authority to confirm them: an answer or
-conflict resolution is accepted only with a reference to an authority check made outside the
-Semantic Catalog. No new input changes a past Catalog Snapshot.
+**[Planned]** **Constructing knowledge.** Registration, an input change, or usage feedback from a
+user's LLM session, such as missing knowledge met while composing a query, becomes input to Semantic
+Catalog build tasks. Generators produce candidates with validation results, and the user policy
+routes each to machine judgement or the deciding party's consent. Confirmed knowledge appears in
+Catalog Snapshots at later commits. The authority to produce candidates is separate from the
+authority to confirm them: an answer or conflict resolution is accepted only with a reference to an
+authority check made outside the Semantic Catalog. The application authenticates every caller, and a
+Query Agent calls as a principal an administrator registered for it, which can never confirm. No new
+input changes a past Catalog Snapshot.
 
 **Querying with knowledge.** **[Planned]** The Query Agent or a person reads the knowledge a
 question needs from one Catalog Snapshot and composes SQL.
@@ -137,8 +139,8 @@ boundary:
    corresponding exit code.
 5. Application shutdown closes the engine and then the catalog.
 
-**[Planned]** Missing knowledge and feedback from the answer return to construction within what the
-organization permits. Use alone is never evidence that a Fact is correct.
+**[Planned]** Missing knowledge and feedback from the answer return to construction as usage
+feedback, within what the organization permits. Use alone is never evidence that a Fact is correct.
 
 ## Tracing use
 
@@ -149,14 +151,14 @@ what is acquired. The product records the correspondence between an answer and t
 knowledge it used, what each review presented and how the judgement proceeded, and the sequence of
 use for one question: its text, the knowledge searched for and used, any missing knowledge or
 conflict met, the query and its execution, and the user's acceptance or correction. These records
-let quality be evaluated after the fact and turn what use reveals into input for the next
-construction.
+let quality be evaluated after the fact.
 
-For a Query Agent the user brings, only what that agent reports is recorded. An organization that
-cannot retain question text can stop acquiring trace records and stop passing them to Generators;
-question-triggered construction, feedback from corrections, and after-the-fact evaluation from
-traces then stop with them. [`semantic-catalog.md`](semantic-catalog.md) explains which records the
-Semantic Catalog holds.
+For a Query Agent, only what that agent reports is recorded. Tracing is not how use reaches
+construction: what a session finds worth keeping is registered with the Semantic Catalog as usage
+feedback, and the Semantic Catalog neither depends on trace records nor receives them. An
+organization can therefore stop acquiring trace records, losing after-the-fact evaluation, and
+separately stop passing usage feedback to Generators, losing construction from use.
+[`semantic-catalog.md`](semantic-catalog.md) explains which records the Semantic Catalog holds.
 
 ## Catalog access
 

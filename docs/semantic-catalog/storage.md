@@ -97,7 +97,7 @@ URNs of logged records come from the position of the log record that created the
 | Record | Identifier |
 | --- | --- |
 | Element, Fact Address, Fact, Input Observation | Commit number and order within the commit of the creating record |
-| Input Resource | Position of the record that first observed it; the question URN for missing knowledge at question time |
+| Input Resource | Position of the record that first observed it |
 | Fact Revision | Fact URN plus the commit number and order of the producing Fact Event |
 | Catalog Snapshot | Commit number |
 | Build task, review presentation record | A number increasing within the domain |
@@ -139,7 +139,7 @@ it no longer does.
 | `elements` | Element, kind, parent, and for edges the kind, ends, direction, and identifying part | Edge identity, filtering by parent |
 | `fact_addresses` | Fact Address, element, predicate, scope description, scope URNs, predicate definition of a free-description predicate | Finding empty-scope Fact Addresses |
 | `facts` | Fact, Fact Address, identity key | Matching closed-range Facts, finding elements by technical reference |
-| `input_resources` | Input Resource, kind, Physical Catalog table identifier, latest table metadata version received, question URN | Lookup by table identifier and by question, ignoring versions already received, and serializing registrations for one table |
+| `input_resources` | Input Resource, kind, Physical Catalog table identifier, latest table metadata version received | Lookup by table identifier, ignoring versions already received, and serializing registrations for one table |
 
 Unique constraints enforce the identity rules that can be expressed as uniqueness:
 
@@ -150,7 +150,7 @@ Unique constraints enforce the identity rules that can be expressed as uniquenes
   unique.
 - `facts`: Fact Address and identity key, for rows that have one. The identity key consists of the
   closed choices and references in the value, with sets such as Field sets sorted by URN.
-- `input_resources`: table identifier, and question URN, each where present.
+- `input_resources`: table identifier, where present.
 
 Dataset and Field identity depends on the state of technical-reference Facts, so it is kept by the
 search in the recording transaction together with the `commits` collision.

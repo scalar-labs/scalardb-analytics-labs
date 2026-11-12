@@ -4,9 +4,9 @@
 
 ## Current answer
 
-One interpretation or check rule is one Generator. Deriving a key from a primary key, deriving a
-join from a foreign key, and checking uniqueness against data are three Generators, not parts of a
-schema Generator or a data Generator.
+One interpretation or check rule is one Generator. Deriving a key from a primary key, deriving an
+identifier correspondence from a foreign key, and checking uniqueness against data are three
+Generators, not parts of a schema Generator or a data Generator.
 
 ## Rationale
 

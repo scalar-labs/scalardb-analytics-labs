@@ -129,7 +129,7 @@ nothing uses it:
 Query Engines do not use constraints, so their absence from the Physical Catalog changes neither
 planning nor execution. Users and Query Agents who need keys and constraints get them from the
 Semantic Catalog. Collation, character set, and comments are needed by the Semantic Catalog to judge
-joins and propose meanings, but they are not yet items of table metadata.
+correspondences and propose meanings, but they are not yet items of table metadata.
 
 A **resource identifier** points to one registered table. The catalog issues one per combination of
 data-source registration, namespace, and table name, and keeps it until an administrator removes

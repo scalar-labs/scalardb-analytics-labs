@@ -14,6 +14,8 @@ The application provides:
 
 - the entry point that starts the product from the distributed executable;
 - loading of the workspace configuration, credential references, and storage locations;
+- **[Planned]** authentication of every caller, registration of the Query Agents an administrator
+  permits, and the authority checks that let a semantics owner confirm knowledge;
 - component initialization, dependency wiring, startup order, and shutdown;
 - the user-facing interfaces for data-source registration, catalog access, Semantic Catalog
   construction and decisions, and query execution;
@@ -43,6 +45,25 @@ A **workspace** is one logical unit of product state selected at launch. It bind
 credential references, the Physical Catalog's store and registrations, the Semantic Catalog's
 records, construction-work state, and local usage information. It is not necessarily one directory;
 the application opens each component's persisted content under the same workspace identity.
+
+**[Planned]** `workspace init` also creates the workspace's one Semantic Catalog domain, named after
+the workspace's catalog, and records its initial user policy version, `auto`, with the initializing
+person as setter. Every call to the Semantic Catalog names that domain, and the interfaces fill it
+in from the workspace. How workspace, catalog, and domain relate beyond this one-to-one
+correspondence is not settled.
+
+**[Planned]** The workspace configuration holds what the Semantic Catalog needs from the
+application, per domain:
+
+- the semantics owners, and the Query Agents an administrator permits (see
+  [Callers and authority](#callers-and-authority));
+- the language-model adapter and the concrete model it uses (see
+  [`semantic-catalog/generators.md`](semantic-catalog/generators.md#reaching-a-language-model));
+- which inputs reach Generators and models: count statistics (on by default), value samples and
+  distributions (off by default), and usage feedback (on by default) (see
+  [`semantic-catalog/generators.md`](semantic-catalog/generators.md#input-passed-to-external-models));
+- whether data checks run (on by default); and
+- the sample size and the time and concurrency limits of construction-run SQL.
 
 Changing interfaces opens the same workspace and uses the same Query Engine without migrating
 sources or catalogs. Several application processes may open one workspace at the same time, and
@@ -100,6 +121,34 @@ their status, candidate review, decisions, corrections, and feedback as automata
 machine-readable operations. The Web UI lets a person compare candidates, validation results,
 conflicts, applicability, and impact before deciding. It owns no state transitions or decision rules
 of its own.
+
+## Callers and authority
+
+**[Planned]** This section describes design that is not implemented yet.
+
+The application authenticates every caller and passes the authenticated principal to the components;
+no component accepts a caller's word for who it is. A principal is a person or a Query Agent. Query
+Agents are not assumed to be arbitrary programs: an administrator configures and permits each one
+and gives it a principal of its own.
+
+Only a semantics owner can confirm Semantic Catalog knowledge; how an owner hands judgements to a
+delegate is not designed yet. When a person submits answers or resolves a conflict, the application
+checks that the authenticated principal is a semantics owner of the domain and issues the
+authority-check reference the Semantic Catalog requires (see
+[`semantic-catalog/construction.md`](semantic-catalog/construction.md#review)). A Query Agent's
+principal is never a semantics owner. An agent can present candidates, gather evidence, register
+feedback, and prepare answers, but the confirmation itself is a call the person makes as themselves.
+Without that, a Query Agent using the same CLI could name the owner and consent on its own, and the
+separation between producing and confirming knowledge would be nominal.
+
+The authentication mechanism, including identity sources, login, agent credentials, and how a
+person approves an answer an agent prepared, is not designed yet. Until it is, the person running
+the CLI is taken to be the authenticated person, and an agent calls with the name an administrator
+gave it in the workspace configuration. The recorded principal has the same form either way, so
+records made before real authentication stay valid after it. Until then, though, an agent is known
+as an agent only because it says so: one that calls without its name is taken for the person, so
+the separation between producing and confirming knowledge rests on the agents an administrator
+permits and is not enforced.
 
 ## Query Agents
 
@@ -162,11 +211,11 @@ Case 1 starts without waiting for a user, because queries on that table would fa
 touches only the registered tables that triggered it and only brings their versions in line with the
 source. What follows in the Semantic Catalog still goes through its user policy. Under the default
 policy, for example, a column found to have disappeared without a same-type replacement is retired
-by machine judgement, together with the confirmed joins and Measures that have it as a premise. It
-finds only mismatches in the columns a query reads, so added columns and changed constraints arrive
-through cases 2 and 3. The application never reruns failed queries: if Analytics types changed, the
-same SQL can mean something else, and the user or Query Agent recomposes it. Re-retrieval never
-registers new tables.
+by machine judgement, together with the confirmed correspondences and Measures that have it as a
+premise. It finds only mismatches in the columns a query reads, so added columns and changed
+constraints arrive through cases 2 and 3. The application never reruns failed queries: if Analytics
+types changed, the same SQL can mean something else, and the user or Query Agent recomposes it.
+Re-retrieval never registers new tables.
 
 ## Startup, configuration, and isolation
 
@@ -191,9 +240,12 @@ One process does not mean one set of privileges or connections:
 - **[Planned]** Semantic Catalog build tasks receive only the inputs given to them. A build task
   that checks data values does not call connectors directly. It uses the application's SQL
   execution, which identifies the build task as the caller, limits what it may read to the inputs
-  the task declared, and caps rows, bytes, and time. The result carries the connector's read
-  provenance, or, on the scanner path, the path's implementation and the names and versions of its
-  DuckDB extensions instead.
+  the task declared, reads each table through a sample bounded by the domain's sample size, and caps
+  rows, bytes, time, and the number of such queries running at once. The result says whether the
+  sample covered the whole table, and carries the connector's read provenance, or, on the scanner
+  path, the path's implementation and the names and versions of its DuckDB extensions instead. The
+  Query Engine for these reads is started with every data source of the catalog attached, on the
+  first such read of a construction run, the same way as for a user's query.
 - External files, URLs, automatic extension downloads, and arbitrary `ATTACH` are denied by default.
 
 The first distribution target is Linux x86_64 with glibc 2.28 or newer and the baseline x86-64

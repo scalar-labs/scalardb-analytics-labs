@@ -21,7 +21,7 @@ The documents use one running example: from a sales domain's e-commerce order da
 in-store POS database, find the total e-commerce sales of the customers who bought through both
 channels in a given month. Answering it needs to know under which conditions an e-commerce customer
 ID and a POS member ID denote the same customer, whether sales include tax and how returns count,
-which date decides the month, and that the join from a customer to POS purchase rows is one-to-many.
+which date decides the month, and that a customer can have many POS purchase rows.
 If the last point is missed, each e-commerce order line of a customer with three POS purchases is
 counted three times.
 
@@ -46,7 +46,7 @@ and every use.
 
 | Layer | Question it answers | Examples |
 | --- | --- | --- |
-| Data semantics | What does the data represent, and under which conditions can it be combined correctly? | Row meaning, keys and uniqueness, identifier correspondences, join multiplicity and participation, field meaning and units, the business concepts rows refer to |
+| Data semantics | What does the data represent, and under which conditions can it be combined correctly? | Row meaning, keys and uniqueness, identifier correspondences and their set relationships, field meaning and units, the business concepts rows refer to and the multiplicity the business allows between them |
 | Analytical semantics | How is a business quantity computed from data? | Measure definitions and aggregation rules, filter conditions, reference time and time granularity, derived classifications and calendars, business terms |
 
 Query composition needs both. With data semantics alone, a Query Agent rebuilds aggregation logic
@@ -80,9 +80,11 @@ consent. See [`semantic-catalog/construction.md`](semantic-catalog/construction.
 ## Responsibilities and boundaries
 
 The Semantic Catalog owns semantic state and its construction: the log, the Catalog Snapshot rules,
-Generators and their provider adapters and prompts, the duplicate check, user policy evaluation, and
-the state of every build task, including its inputs, outputs, Generator versions, and the conditions
-for resuming it. Calls to an external model may leave the process, but the work state stays here.
+Generators and their language-model adapters and prompts (see
+[`semantic-catalog/generators.md`](semantic-catalog/generators.md#reaching-a-language-model)), the
+duplicate check, user policy evaluation, and the state of every build task, including its inputs,
+outputs, Generator versions, and the conditions for resuming it. Calls to an external model may
+leave the process, but the work state stays here.
 
 The surrounding components keep the following responsibilities:
 
@@ -94,12 +96,16 @@ The surrounding components keep the following responsibilities:
   through a table name. See [`physical-catalog.md`](physical-catalog.md).
 - **Application.** It decides when build tasks run and how many run at once, because it owns
   startup, shutdown, and resource release as one lifecycle. It provides the Semantic Catalog with
-  SQL execution for data checks, name resolution from a Physical Catalog table to its current name,
-  and re-retrieval of table metadata. See [`application.md`](application.md). It calls the Semantic
-  Catalog only through the public API in
-  [`semantic-catalog/public-api.md`](semantic-catalog/public-api.md).
+  SQL execution for data checks, bounded by sampling and limits, name resolution from a Physical
+  Catalog table to its current name, and re-retrieval of table metadata. It authenticates callers,
+  issues the authority-check reference after checking that a person is a semantics owner, creates
+  the domain at `workspace init`, and keeps the domain's settings in the workspace configuration.
+  See [`application.md`](application.md). It calls the Semantic Catalog only through the public API
+  in [`semantic-catalog/public-api.md`](semantic-catalog/public-api.md).
 - **Query Agent.** Its model, knowledge discovery, SQL generation, and result interpretation are
-  outside this component. It reads knowledge and reports what it used through the application.
+  outside this component. It calls through the application as a principal an administrator
+  registered, reads knowledge, registers usage feedback, and cites what it used with its answer. It
+  cannot confirm knowledge.
 - **Governance.** It evaluates whether a using party may access knowledge. The Semantic Catalog
   decides only whether knowledge is semantically presentable, and masks what Governance denies.
 - **Query Engine.** The Semantic Catalog never executes SQL or returns data rows itself. Its storage
@@ -107,10 +113,10 @@ The surrounding components keep the following responsibilities:
   SQL can neither read nor change the log. See
   [`semantic-catalog/storage.md`](semantic-catalog/storage.md).
 
-The sequence of use for one question (its receipt, the Catalog Snapshot read, the knowledge used,
-the query, and the user's acceptance or correction) is held as a trace record by an application-wide
-tracing module, not by the Semantic Catalog. The Semantic Catalog receives only the parts used as
-construction input, and never stores query result rows.
+What a user's LLM session finds worth keeping, whether missing knowledge met while composing a
+query or something the user said, reaches the Semantic Catalog as usage feedback, an input like any
+other with its own URNs. The Semantic Catalog does not depend on the product's tracing of use and
+never stores query result rows.
 
 The current design covers one domain. References between domains are limited to read-only access,
 governed by the domain owner's policy, that never lets one domain change another's meaning.
@@ -153,9 +159,9 @@ register observation ---> build tasks ---> Generators (outside the writer)
 5. The Query Agent fixes a Catalog Snapshot, finds elements, and requests knowledge. For each
    request it receives the selected Fact with its validation results, provenance, and confirmation
    path, or a status of missing knowledge, awaiting judgement, or conflict.
-6. Missing knowledge, usage feedback, and corrections are registered as observations and start the
-   next round. A user who is the deciding party can confirm on the spot; other users wait, or
-   explicitly accept a result marked as based on unconfirmed knowledge.
+6. Missing knowledge, other statements from use, and corrections are registered as usage feedback
+   and start the next round. A user who is the deciding party can confirm on the spot; other users
+   wait, or explicitly accept a result marked as based on unconfirmed knowledge.
 
 ## Design decisions
 

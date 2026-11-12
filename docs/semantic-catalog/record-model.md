@@ -18,9 +18,9 @@ kind needs, which untyped subject-predicate-object triples would not. The graph 
 - The **open extension** adds domain-specific meaning without changing how the closed core is
   interpreted, because a central body cannot enumerate every domain's meaning in advance.
 
-Relationships between data use established data-modeling vocabulary: multiplicity, participation
-(whether every object on a side takes part), inclusion dependencies, and set relationships. Only
-what that vocabulary cannot express goes into the open extension.
+Relationships between data use established data-modeling vocabulary: uniqueness, set relationships
+between identifiers, and multiplicity between concepts. Only what that vocabulary cannot express
+goes into the open extension.
 
 The **business domain model**, the concepts such as customer and order and the relationships between
 them, is data semantics and lives in the Semantic Catalog. Each domain holds only as much of it as
@@ -48,17 +48,29 @@ the field is aggregated.
 
 | Edge element | Ends and direction | Identifying part | Predicates |
 | --- | --- | --- | --- |
-| Join | Dataset to Dataset | Condition (pairs of corresponding Fields) | Multiplicity, participation of each side |
-| Identifier correspondence | Between identifier Fields | Matching condition, direct or through another Field or Dataset | Set relationship, business definition that both denote the same object |
+| Identifier correspondence | Field set to Field set | Matching condition: pairs of corresponding Fields, each side optionally normalized, direct or through another Field or Dataset | Set relationship, business definition that both denote the same object |
 | Concept relationship | Concept to concept; undirected when both denote the same object | Relationship kind | Multiplicity |
 
 Every element also has an **existence** predicate, which states that the element is a target of the
 catalog. Every other Fact about an element depends on its existence Fact. A Field holds a reference
 to its Dataset.
 
-A join's or correspondence's condition is part of its identity rather than a predicate, because a
-different condition is a different join, not another value of the same join. Whether the condition
-holds is judged on the edge's existence Fact.
+There is no separate join element. Joining two Datasets correctly rests on knowing that values on
+both sides denote the same object, which is what an identifier correspondence states, from an order
+line's customer ID to the customer table as much as from e-commerce customers to POS members. What a
+join would add is already elsewhere: how many rows on one side match a row on the other follows from
+the uniqueness of each side's Field set, and whether every row takes part is the set relationship.
+A foreign key is not an element either. It is a declaration in a physical schema observation and
+supports a correspondence with `declared-enforced` or `declared-unenforced`.
+
+A correspondence's matching condition is part of its identity rather than a predicate, because a
+different condition is a different correspondence, not another value of the same one. Whether the
+condition holds is judged on the edge's existence Fact. A side of a pair may be normalized before
+comparison, for example when e-mail addresses match only when case is ignored. Normalization steps
+are chosen from a closed list the product defines, such as lower-casing, trimming, Unicode
+normalization, conversion to text, and removing non-digits, never written as free expressions: two
+free expressions of the same normalization would make one correspondence two edges, and a Query
+Agent can turn a listed step into SQL without interpreting it.
 
 Some values deserve note:
 
@@ -82,6 +94,11 @@ Some values deserve note:
 - An identifier correspondence's **set relationship** is equal, subset, partial overlap, or
   disjoint. Without it, nobody can tell whether an inner join drops members who appear on one side
   only.
+- A concept relationship's **multiplicity** is what the business allows, such as a member making any
+  number of purchases. Data can only show what holds now: if every member has bought once so far,
+  the purchase rows' member IDs do not repeat, yet a query that relies on that double-counts as soon
+  as a member buys again. The uniqueness of Field sets records what the data shows; concept
+  multiplicity records the rule.
 
 Dimensions become elements only for derived classifications (age bands, regional groupings) and
 calendars (fiscal year, fiscal month). An axis that is a Field's own value is that Field's meaning,
@@ -102,8 +119,8 @@ statement points to the existing Fact Address or is caught by the duplicate chec
 Predicates whose values are closed choices or references to records have a **closed value range**:
 existence; a Dataset's technical reference, represented concept, row kind, key, and uniqueness; a
 Field's technical reference, value kind, and represented concept; a Measure's base Dataset and
-reference time Field; Dimension kind; a business term's referenced element; join multiplicity and
-participation; set relationship; and concept-relationship multiplicity. A Generator-declared
+reference time Field; Dimension kind; a business term's referenced element; set relationship; and
+concept-relationship multiplicity. A Generator-declared
 predicate with a closed range counts too. Two such values are the same exactly when they are equal.
 
 ## The log
@@ -141,7 +158,7 @@ written content cannot be erased.
 Every record is referred to by a URN of the form
 `urn:scalardb:analytics:<domain>:<record kind>:<identifier>`. The namespace spells out the product
 name, because the product defines no abbreviation of it. The Semantic Catalog issues URNs when it
-creates records; question URNs come from the tracing module. A URN is unique, never changes, is
+creates records. A URN is unique, never changes, is
 never reused, and carries none of the record's content. Content-based names would break references
 on correction and merge distinct objects that share a name, and the business identity they would
 presuppose is what construction is meant to establish. The domain comes first after the namespace
@@ -168,7 +185,8 @@ are limited to cases that are easy to identify:
   points to the existing one. Two concepts later found to denote the same object are linked by a
   concept-relationship edge, which a deciding party or a document must support.
 - **Edges** are the same when kind, ends, direction, and identifying part match; undirected edges
-  ignore the order of their ends. Two Generators proposing the same join therefore produce one edge.
+  ignore the order of their ends. Two Generators proposing the same correspondence therefore produce
+  one edge.
   A proposal that changes the ends or the identifying part becomes a new edge plus a retirement
   proposal for the old one.
 - A **Fact Address** is an element, a predicate, and an applicability scope. An applicability scope
@@ -256,9 +274,9 @@ confirmation judgement and do not change selection.
 ## Validation results and dependencies
 
 A **validation result** records how far checks covered a predicate's **validation items**. For most
-predicates the item is the value itself. A join's existence has one item per pair of corresponding
-Fields, an identifier correspondence's existence has one item per step of its matching condition,
-and a Measure's aggregation rule has the aggregate function and the value expression.
+predicates the item is the value itself. An identifier correspondence's existence has one item per
+pair of corresponding Fields, per normalization step, and per intermediate step of its matching
+condition, and a Measure's aggregation rule has the aggregate function and the value expression.
 
 Each check holds its validation method, the items it covered, a result of supported, refuted, or
 undecidable, and a reference to the input it was checked against: an Input Observation or a Fact
@@ -298,7 +316,8 @@ same acceptance. Cascades follow the set at the latest confirmation, so a depend
 confirmation still cascades until the Fact is confirmed again.
 
 A dependency on another Fact is one of two kinds. A **premise dependency** points to a Fact at
-another Fact Address, such as the existence of the element or of a join: the candidate holds only if
+another Fact Address, such as the existence of the element or of a correspondence: the candidate
+holds only if
 that Fact holds. A **replacement dependency** points to an earlier Fact at the same Fact Address:
 the candidate was made taking that Fact into account, which is what lets it replace that Fact once
 confirmed. Confirmation waits only for premise dependencies, and only premise dependencies cascade
