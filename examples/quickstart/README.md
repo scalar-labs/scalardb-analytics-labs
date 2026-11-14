@@ -119,11 +119,10 @@ Pass SQL as an argument:
 ```
 
 ```json
-{"schema":"scalardb-analytics/query-result","schemaVersion":"3","executionId":"...","fields":[{"name":"id","type":"Int(32, true)",...},{"name":"ordered_on","type":"Date(DAY)",...},{"name":"status","type":"Utf8",...},{"name":"amount","type":"Int(64, true)",...}],"rows":[[1001,20697,"shipped",1200],[1002,20699,"shipped",450],[1003,20706,"cancelled",300]],"truncated":false}
+{"schema":"scalardb-analytics/query-result","schemaVersion":"1","executionId":"...","fields":[{"name":"id","type":"Int(32, true)",...},{"name":"ordered_on","type":"Date(DAY)",...},{"name":"status","type":"Utf8",...},{"name":"amount","type":"Int(64, true)",...}],"rows":[[1001,"2026-09-01","shipped",1200],[1002,"2026-09-03","shipped",450],[1003,"2026-09-10","cancelled",300]],"truncated":false}
 ```
 
-`fields` carries the Arrow type of each column. A `Date(DAY)` value is the number of days since
-1970-01-01.
+`fields` carries the Arrow type of each column. Dates, times, and timestamps are ISO-8601 strings.
 
 From a file, here joining both sources:
 
@@ -158,7 +157,7 @@ Messages do not repeat the SQL or credentials:
 | `--workspace ./nowhere` | `INVALID_WORKSPACE` |
 
 ```json
-{"schema":"scalardb-analytics/error","schemaVersion":"3","executionId":"...","code":"INVALID_QUERY","message":"Only a single read-only SELECT query is allowed."}
+{"schema":"scalardb-analytics/error","schemaVersion":"1","executionId":"...","code":"INVALID_QUERY","message":"Only a single read-only SELECT query is allowed."}
 ```
 
 Invalid command usage exits with code `2`.

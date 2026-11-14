@@ -34,7 +34,7 @@ public final class CliOutput {
 
   public static int writeError(PrintWriter writer, String executionId, String code, String message)
       throws JsonProcessingException {
-    write(writer, new ErrorOutput("scalardb-analytics/error", "3", executionId, code, message));
+    write(writer, new ErrorOutput("scalardb-analytics/error", "1", executionId, code, message));
     return FAILURE;
   }
 

@@ -84,7 +84,7 @@ bin/scalardb-analytics query \
 The command returns a versioned JSON envelope:
 
 ```json
-{"schema":"scalardb-analytics/query-result","schemaVersion":"3","executionId":"...","fields":[{"name":"answer","type":"Int(32, true)","nullable":true,"children":[]}],"rows":[[1]],"truncated":false}
+{"schema":"scalardb-analytics/query-result","schemaVersion":"1","executionId":"...","fields":[{"name":"answer","type":"Int(32, true)","nullable":true,"children":[]}],"rows":[[1]],"truncated":false}
 ```
 
 To try the whole flow against local sample databases, follow the

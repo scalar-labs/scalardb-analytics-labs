@@ -256,6 +256,38 @@ class ScalarDbAnalyticsCliIntegrationTest {
   }
 
   @Test
+  void rendersTemporalValuesAsIsoStringsAtAnyDepth() throws Exception {
+    var result =
+        execute(
+            "",
+            "query",
+            "--workspace",
+            workspace.toString(),
+            "--sql",
+            """
+            SELECT DATE '2026-01-02' AS d, DATE '1969-12-31' AS before_epoch,
+                   TIME '08:15:30.5' AS t, TIME '24:00:00' AS end_of_day,
+                   TIMESTAMP '2026-01-03 04:05:06' AS ts,
+                   TIMESTAMPTZ '2026-01-03 04:05:06+00' AS tz,
+                   [DATE '2026-01-02', NULL] AS dates,
+                   [TIME '08:00:00', TIME '09:30:00']::TIME[2] AS times,
+                   {'d': DATE '2026-01-02', 't': TIME '08:00:00'} AS fields,
+                   MAP {DATE '2026-01-02': TIMESTAMPTZ '1969-12-31 23:59:59.5+00'} AS entries
+            """);
+
+    assertSuccessful(result, "scalardb-analytics/query-result");
+    var output = OBJECT_MAPPER.readTree(result.standardOutput().strip());
+    assertThat(output.get("schemaVersion").textValue()).isEqualTo("1");
+    assertThat(output.get("rows").toString())
+        .isEqualTo(
+            "[[\"2026-01-02\",\"1969-12-31\",\"08:15:30.500\",\"24:00:00\","
+                + "\"2026-01-03T04:05:06\",\"2026-01-03T04:05:06Z\",[\"2026-01-02\",null],"
+                + "[\"08:00\",\"09:30\"],"
+                + "{\"d\":\"2026-01-02\",\"t\":\"08:00\"},"
+                + "[{\"key\":\"2026-01-02\",\"value\":\"1969-12-31T23:59:59.500Z\"}]]]");
+  }
+
+  @Test
   void classifiesTimeLimitsCancellationAndFailuresWithoutLeakingInput() throws Exception {
     var sensitiveSql =
         "SELECT sum(i * random()) FROM range(100000000000) t(i) /* " + POSTGRES_PASSWORD + " */";

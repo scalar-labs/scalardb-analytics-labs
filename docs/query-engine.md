@@ -47,8 +47,8 @@ JDBC, and per-query allocator resources; the resulting typed error retains the e
 The application passes SQL into the engine and receives the Arrow schema and record batches. The
 CLI is an adapter over that contract: it materializes at most 1,000 rows into a versioned JSON
 envelope and reports whether output was truncated. JSON conversion rules, such as Base64 for
-binary values and strings for decimal values, are CLI concerns and are not part of the Query Engine
-contract.
+binary values, strings for decimal values, and ISO-8601 strings for dates, times, and timestamps,
+are CLI concerns and are not part of the Query Engine contract.
 
 Query failures use a sealed `QueryError` hierarchy whose variants are records. This keeps the
 engine error contract closed and lets each application adapter exhaustively encode it. The CLI maps
