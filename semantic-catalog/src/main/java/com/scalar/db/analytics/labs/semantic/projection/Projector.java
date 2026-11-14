@@ -13,13 +13,17 @@ import com.scalar.db.analytics.labs.semantic.model.LogPosition;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord.Basis;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord.FactEvent;
+import com.scalar.db.analytics.labs.semantic.model.LogRecordJson;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
+import com.scalar.db.analytics.labs.semantic.model.SemanticCatalogException;
 import com.scalar.db.analytics.labs.semantic.model.Urns;
+import com.scalar.db.analytics.labs.semantic.model.UsageFeedback;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.AnswerType;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ConfirmationPath;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.InputKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.PolicyResult;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Transition;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.ElementRow;
@@ -134,9 +138,8 @@ public final class Projector {
           projection.addInputResource(
               new InputResourceRow(
                   Urns.of(domain, Urns.INPUT_RESOURCE, at),
-                  resource.kind(),
+                  resource.inputKind(),
                   resource.tableIdentifier(),
-                  resource.question(),
                   commit));
       case LogRecord.InputObservation observation -> applyObservation(at, observation);
       case LogRecord.ObservationEvent event -> {
@@ -171,14 +174,61 @@ public final class Projector {
           }
           case ElementIdentity.Edge edge -> {
             if (validating) {
-              requireElement(edge.from());
-              requireElement(edge.to());
+              validateEnds(edge);
             }
             yield new ElementRow(urn, edge.kind(), null, commit, Projection.edgeIdentity(edge));
           }
         };
     projection.addElement(row);
     newElements.put(urn, element.identity());
+  }
+
+  /**
+   * Checks that an edge's ends exist and have the kinds the edge kind needs. An identifier
+   * correspondence names only Fields, and each side of each hop is the Fields of one Dataset,
+   * because a Field set is what identifies an object in its Dataset. So each end is the Fields of
+   * one Dataset, and a hop starts from the Dataset the previous hop arrived at.
+   */
+  private void validateEnds(ElementIdentity.Edge edge) {
+    switch (edge) {
+      case ElementIdentity.IdentifierCorrespondence correspondence -> {
+        for (var field : correspondence.condition().fields()) {
+          var row = requireElement(field);
+          if (row.kind() != ElementKind.FIELD) {
+            throw reject("An identifier correspondence matches Fields, not " + row.kind());
+          }
+        }
+        String arrivedAt = null;
+        for (var hop : correspondence.condition().hops()) {
+          var from = oneDataset(hop.pairs().stream().map(pair -> pair.from().field()).toList());
+          var to = oneDataset(hop.pairs().stream().map(pair -> pair.to().field()).toList());
+          if (arrivedAt != null && !arrivedAt.equals(from)) {
+            throw reject(
+                "Each hop of a matching condition starts from the Dataset the previous hop arrived"
+                    + " at");
+          }
+          arrivedAt = to;
+        }
+      }
+      case ElementIdentity.ConceptRelationship relationship -> {
+        for (var end : List.of(relationship.from(), relationship.to())) {
+          var row = requireElement(end);
+          if (row.kind() != ElementKind.CONCEPT) {
+            throw reject("A concept relationship relates concepts, not " + row.kind());
+          }
+        }
+      }
+    }
+  }
+
+  /** The Dataset of a side's Fields, which must all belong to that one Dataset. */
+  private String oneDataset(List<Ref> fields) {
+    var datasets = fields.stream().map(field -> requireElement(field).parent()).distinct().toList();
+    if (datasets.size() != 1 || datasets.getFirst() == null) {
+      throw reject(
+          "Each end and each step of an identifier correspondence is the Fields of one Dataset");
+    }
+    return datasets.getFirst();
   }
 
   private void applyFactAddress(LogPosition at, LogRecord.FactAddress address) {
@@ -218,7 +268,10 @@ public final class Projector {
   private void applyObservation(LogPosition at, LogRecord.InputObservation observation) {
     var resource = observation.inputResource().urnValue();
     if (validating) {
-      requireInputResource(observation.inputResource());
+      var resourceRow = requireInputResource(observation.inputResource());
+      if (resourceRow.kind() == InputKind.USAGE_FEEDBACK) {
+        validateFeedback(observation);
+      }
       var previous = observation.previous();
       var expected = projection.latestObservation(resource);
       if (!Objects.equals(expected.orElse(null), previous == null ? null : previous.urnValue())) {
@@ -228,6 +281,31 @@ public final class Projector {
       }
     }
     projection.addObservation(Urns.of(domain, Urns.INPUT_OBSERVATION, at), resource);
+  }
+
+  /**
+   * Checks the observation of usage feedback: its content is {@link UsageFeedback}, its related
+   * Facts exist, and it is the resource's only observation, because feedback is never revised.
+   */
+  private void validateFeedback(LogRecord.InputObservation observation) {
+    if (observation.previous() != null) {
+      throw reject("Usage feedback is never revised; register new feedback instead");
+    }
+    var malformed =
+        "Usage feedback has content, a session purpose, and a summary of its session's context";
+    var content = observation.content();
+    if (content == null || !content.isObject()) {
+      throw reject(malformed);
+    }
+    UsageFeedback feedback;
+    try {
+      feedback = LogRecordJson.fromStored(content, UsageFeedback.class);
+    } catch (SemanticCatalogException e) {
+      throw reject(malformed + ": " + e.getMessage());
+    }
+    for (var fact : feedback.relatedFacts()) {
+      requireFact(fact);
+    }
   }
 
   private void applyFactEvent(LogPosition at, FactEvent event) {

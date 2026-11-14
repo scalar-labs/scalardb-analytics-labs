@@ -14,6 +14,7 @@ import com.scalar.db.analytics.labs.semantic.model.Knowledge;
 import com.scalar.db.analytics.labs.semantic.model.KnowledgeRequest;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord.Basis;
+import com.scalar.db.analytics.labs.semantic.model.MatchingCondition;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
 import com.scalar.db.analytics.labs.semantic.model.Scope;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
@@ -142,6 +143,25 @@ final class Scenario {
       closedRangeFact(address(dataset, Vocabulary.EXISTENCE), "exists");
       closedRangeFact(address(dataset, Vocabulary.TECHNICAL_REFERENCE), table);
       return dataset;
+    }
+
+    /** A Field of a Dataset with accepted existence and technical-reference Facts. */
+    Ref field(Ref dataset, String column) {
+      var field =
+          add(
+              new LogRecord.Element(
+                  new ElementIdentity.PhysicalObject(ElementKind.FIELD, dataset, column)));
+      closedRangeCandidate(address(field, Vocabulary.EXISTENCE), "exists");
+      closedRangeCandidate(address(field, Vocabulary.TECHNICAL_REFERENCE), column);
+      return field;
+    }
+
+    /** An identifier correspondence with an accepted existence Fact. */
+    Ref correspondence(MatchingCondition condition) {
+      var correspondence =
+          add(new LogRecord.Element(new ElementIdentity.IdentifierCorrespondence(condition)));
+      closedRangeCandidate(address(correspondence, Vocabulary.EXISTENCE), "exists");
+      return correspondence;
     }
 
     /** A concept with an accepted existence Fact. */

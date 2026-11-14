@@ -52,7 +52,11 @@ final class SchemaMigrator {
               "Fact lifecycle",
               "com/scalar/db/analytics/labs/semantic/storage/V3__fact_lifecycle.sql"),
           new Change(
-              4, "Selection", "com/scalar/db/analytics/labs/semantic/storage/V4__selection.sql"));
+              4, "Selection", "com/scalar/db/analytics/labs/semantic/storage/V4__selection.sql"),
+          new Change(
+              5,
+              "Correspondences and feedback",
+              "com/scalar/db/analytics/labs/semantic/storage/V5__correspondences_and_feedback.sql"));
 
   private static final int SETUP_ATTEMPTS = 5;
 

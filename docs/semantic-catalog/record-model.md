@@ -50,7 +50,7 @@ the field is aggregated.
 
 | Edge element | Ends and direction | Identifying part | Predicates |
 | --- | --- | --- | --- |
-| Identifier correspondence | Field set to Field set | Matching condition: pairs of corresponding Fields, each side optionally normalized, direct or through another Field or Dataset | Set relationship, business definition that both denote the same object |
+| Identifier correspondence | Field set to Field set, directed | Matching condition: pairs of corresponding Fields, each side optionally normalized, direct or through the Fields of intermediate Datasets | Set relationship, business definition that both denote the same object |
 | Concept relationship | Concept to concept; undirected when both denote the same object | Relationship kind | Multiplicity |
 
 Every element also has an **existence** predicate, which states that the element is a target of the
@@ -65,12 +65,18 @@ the uniqueness of each side's Field set, and whether every row takes part is the
 A foreign key is not an element either. It is a declaration in a physical schema observation and
 supports a correspondence with `declared-enforced` or `declared-unenforced`.
 
+Each end of a correspondence is a non-empty set of Fields of one Dataset, because a Field set is
+what identifies an object in its Dataset. A matching condition through a mapping table is a chain of
+steps, each pairing the Fields of one Dataset with the Fields of the next, and each step starts from
+the Dataset the previous one arrived at. A proposal that breaks either rule is rejected at
+acceptance.
+
 A correspondence's matching condition is part of its identity rather than a predicate, because a
 different condition is a different correspondence, not another value of the same one. Whether the
 condition holds is judged on the edge's existence Fact. A side of a pair may be normalized before
 comparison, for example when e-mail addresses match only when case is ignored. Normalization steps
-are chosen from a closed list the product defines, such as lower-casing, trimming, Unicode
-normalization, conversion to text, and removing non-digits, never written as free expressions: two
+are chosen from a closed list the product defines (lower-casing, trimming, Unicode normalization
+form NFKC, conversion to text, and removing non-digits), never written as free expressions: two
 free expressions of the same normalization would make one correspondence two edges, and a Query
 Agent can turn a listed step into SQL without interpreting it.
 
@@ -105,7 +111,8 @@ Some values deserve note:
   [`../design/semantic-catalog-expression-values.md`](../design/semantic-catalog-expression-values.md)
   records why.
 - An identifier correspondence's **set relationship** is equal, subset, partial overlap, or
-  disjoint. Without it, nobody can tell whether an inner join drops members who appear on one side
+  disjoint, read from the end it starts from, so subset means that end's values are among the
+  other's. Without it, nobody can tell whether an inner join drops members who appear on one side
   only.
 - A concept relationship's **multiplicity** is what the business allows, such as a member making any
   number of purchases. Data can only show what holds now: if every member has bought once so far,

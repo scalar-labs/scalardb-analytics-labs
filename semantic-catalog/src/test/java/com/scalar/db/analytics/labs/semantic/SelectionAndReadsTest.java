@@ -10,10 +10,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.scalar.db.analytics.labs.semantic.model.Dependency;
 import com.scalar.db.analytics.labs.semantic.model.ElementIdentity;
-import com.scalar.db.analytics.labs.semantic.model.IdentityKey;
 import com.scalar.db.analytics.labs.semantic.model.Knowledge;
 import com.scalar.db.analytics.labs.semantic.model.KnowledgeRequest;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
+import com.scalar.db.analytics.labs.semantic.model.MatchingCondition;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
 import com.scalar.db.analytics.labs.semantic.model.SemanticCatalogException;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
@@ -338,36 +338,48 @@ class SelectionAndReadsTest extends StoreScenarioTest {
   void anEdgeIsRequestedByItsKindAndEnds() {
     var s = scenario();
     var c = s.begin();
+    var lines = c.dataset("shop.order_lines");
     var orders = c.dataset("shop.orders");
-    var customers = c.dataset("shop.customers");
-    var join =
-        c.add(
-            new LogRecord.Element(
-                new ElementIdentity.Edge(
-                    ElementKind.JOIN,
-                    orders,
-                    customers,
-                    true,
-                    IdentityKey.choice("orders.customer_id = customers.id"),
-                    JsonNodeFactory.instance.objectNode().put("from", "customer_id"))));
-    c.closedRangeCandidate(c.address(join, Vocabulary.EXISTENCE), "exists");
-    c.closedRangeCandidate(c.address(join, "multiplicity"), "many-to-one");
+    var lineShop = c.field(lines, "shop.order_lines.shop_id");
+    var lineOrder = c.field(lines, "shop.order_lines.order_no");
+    var shop = c.field(orders, "shop.orders.shop_id");
+    var order = c.field(orders, "shop.orders.order_no");
+    var correspondence =
+        c.correspondence(
+            MatchingCondition.direct(
+                MatchingCondition.Pair.of(lineShop, shop),
+                MatchingCondition.Pair.of(lineOrder, order)));
+    c.closedRangeCandidate(c.address(correspondence, "set-relationship"), "subset");
     var written = s.write(c);
     var point = s.lastCommit();
 
+    // An end is named by its Fields in any order.
     var forward =
         KnowledgeRequest.edge(
-            ElementKind.JOIN, written.urn(orders), written.urn(customers), "multiplicity");
+            ElementKind.IDENTIFIER_CORRESPONDENCE,
+            List.of(written.urn(lineOrder), written.urn(lineShop)),
+            List.of(written.urn(shop), written.urn(order)),
+            "set-relationship");
     var backward =
         KnowledgeRequest.edge(
-            ElementKind.JOIN, written.urn(customers), written.urn(orders), "multiplicity");
+            ElementKind.IDENTIFIER_CORRESPONDENCE,
+            List.of(written.urn(shop), written.urn(order)),
+            List.of(written.urn(lineShop), written.urn(lineOrder)),
+            "set-relationship");
+    var part =
+        KnowledgeRequest.edge(
+            ElementKind.IDENTIFIER_CORRESPONDENCE,
+            List.of(written.urn(lineShop)),
+            List.of(written.urn(shop)),
+            "set-relationship");
     List<Knowledge.Answer> answers =
-        s.at(point, snapshot -> snapshot.request(List.of(forward, backward)));
+        s.at(point, snapshot -> snapshot.request(List.of(forward, backward, part)));
     assertThat(answers.getFirst().addresses())
         .singleElement()
-        .satisfies(at -> assertThat(at.element()).isEqualTo(written.urn(join)));
-    // A directed edge is named in its direction.
+        .satisfies(at -> assertThat(at.element()).isEqualTo(written.urn(correspondence)));
+    // A directed edge is named in its direction, and an end is the whole Field set.
     assertThat(answers.get(1).addresses()).isEmpty();
+    assertThat(answers.get(2).addresses()).isEmpty();
   }
 
   @Test
@@ -375,7 +387,7 @@ class SelectionAndReadsTest extends StoreScenarioTest {
     var s = scenario();
     var c = s.begin();
     var orders = c.dataset("shop.orders");
-    var resource = c.add(new LogRecord.InputResource("physical-schema", "shop.orders", null));
+    var resource = c.add(LogRecord.InputResource.physicalSchema("shop.orders"));
     var observation =
         c.add(
             new LogRecord.InputObservation(

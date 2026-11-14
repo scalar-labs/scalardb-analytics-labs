@@ -179,13 +179,8 @@ public final class CommitResolver {
       case LogRecord.Fact fact ->
           lookup.closedRangeFact(
               fact.address().urnValue(), requireKey(fact.identityKey()).canonical());
-      case LogRecord.InputResource resource -> {
-        var table = resource.tableIdentifier();
-        var question = resource.question();
-        yield table != null
-            ? lookup.inputResourceByTable(table)
-            : lookup.inputResourceByQuestion(requireKey(question));
-      }
+      case LogRecord.InputResource resource ->
+          lookup.inputResourceByTable(requireKey(resource.tableIdentifier()));
       default -> Optional.empty();
     };
   }
@@ -223,14 +218,10 @@ public final class CommitResolver {
             ? Optional.empty()
             : Optional.of("fact " + fact.address().urnValue() + " " + key.canonical());
       }
-      case LogRecord.InputResource resource -> {
-        if (resource.tableIdentifier() != null) {
-          yield Optional.of("table " + resource.tableIdentifier());
-        }
-        yield resource.question() != null
-            ? Optional.of("question " + resource.question())
-            : Optional.empty();
-      }
+      case LogRecord.InputResource resource ->
+          resource.tableIdentifier() == null
+              ? Optional.empty()
+              : Optional.of("table " + resource.tableIdentifier());
       default -> Optional.empty();
     };
   }
@@ -256,14 +247,7 @@ public final class CommitResolver {
                         technical.kind(),
                         technical.parent() == null ? null : toRecord.apply(technical.parent()),
                         technical.technicalReference());
-                case ElementIdentity.Edge edge ->
-                    new ElementIdentity.Edge(
-                        edge.kind(),
-                        toRecord.apply(edge.from()),
-                        toRecord.apply(edge.to()),
-                        edge.directed(),
-                        edge.identityKey().mapRefs(toRecord),
-                        edge.identifyingPart());
+                case ElementIdentity.Edge edge -> edge.mapRefs(toRecord);
               });
       case LogRecord.FactAddress address ->
           new LogRecord.FactAddress(
@@ -276,13 +260,7 @@ public final class CommitResolver {
               toRecord.apply(fact.address()),
               fact.value(),
               fact.identityKey() == null ? null : fact.identityKey().mapRefs(toRecord));
-      case LogRecord.InputResource resource -> {
-        if (resource.tableIdentifier() != null && resource.question() != null) {
-          throw new IllegalArgumentException(
-              "An Input Resource is a table's physical schema or a question, not both");
-        }
-        yield resource;
-      }
+      case LogRecord.InputResource resource -> resource;
       case LogRecord.InputObservation observation -> {
         if (observation.previous() != null) {
           throw new IllegalArgumentException(

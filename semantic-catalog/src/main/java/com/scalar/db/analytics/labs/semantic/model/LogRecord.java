@@ -9,6 +9,7 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.AnswerType;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ConfirmationPath;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.InputKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.PolicyResult;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.RetirementReason;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Transition;
@@ -83,16 +84,33 @@ public sealed interface LogRecord {
 
   /**
    * A new Input Resource: a source of input whose changes are tracked, such as one table's physical
-   * schema or one registered document.
+   * schema, one registered document, or one piece of usage feedback.
    *
-   * @param kind what kind of input this is, such as a physical schema or a document
+   * @param inputKind what kind of input this is, which decides how it is identified
    * @param tableIdentifier the Physical Catalog's resource identifier of the table whose physical
-   *     schema this is; two Input Resources with the same one are the same
-   * @param question the URN of the question at which missing knowledge was found; two Input
-   *     Resources with the same one are the same
+   *     schema this is; two Input Resources with the same one are the same. Present for a physical
+   *     schema and only for it; every other Input Resource is new when it is registered.
    */
-  record InputResource(String kind, @Nullable String tableIdentifier, @Nullable String question)
-      implements LogRecord {}
+  record InputResource(InputKind inputKind, @Nullable String tableIdentifier) implements LogRecord {
+    public InputResource {
+      if ((inputKind == InputKind.PHYSICAL_SCHEMA) != (tableIdentifier != null)) {
+        throw new IllegalArgumentException(
+            "A physical schema, and only a physical schema, has a table identifier");
+      }
+    }
+
+    public static InputResource physicalSchema(String tableIdentifier) {
+      return new InputResource(InputKind.PHYSICAL_SCHEMA, tableIdentifier);
+    }
+
+    public static InputResource document() {
+      return new InputResource(InputKind.DOCUMENT, null);
+    }
+
+    public static InputResource usageFeedback() {
+      return new InputResource(InputKind.USAGE_FEEDBACK, null);
+    }
+  }
 
   /**
    * A new Input Observation: the content of an Input Resource as observed at one commit.
@@ -100,10 +118,16 @@ public sealed interface LogRecord {
    * @param inputResource the Input Resource observed
    * @param previous the previous observation of the same Input Resource; the store sets it when the
    *     commit is written, so a commit request leaves it absent
-   * @param content the content observed
+   * @param content the content observed; for usage feedback, a {@link UsageFeedback} in its stored
+   *     JSON form
    */
   record InputObservation(Ref inputResource, @Nullable Ref previous, JsonNode content)
-      implements LogRecord {}
+      implements LogRecord {
+    /** The observation of a usage-feedback Input Resource, for a commit request. */
+    public static InputObservation of(Ref inputResource, UsageFeedback feedback) {
+      return new InputObservation(inputResource, null, LogRecordJson.toStored(feedback));
+    }
+  }
 
   /**
    * The Observation Event recording one Input Observation, written in the same commit.

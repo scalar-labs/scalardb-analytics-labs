@@ -4,10 +4,12 @@
  */
 package com.scalar.db.analytics.labs.semantic.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
+import java.util.List;
+import java.util.function.UnaryOperator;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -21,7 +23,12 @@ import org.jspecify.annotations.Nullable;
 @JsonSubTypes({
   @JsonSubTypes.Type(value = ElementIdentity.Unique.class, name = "unique"),
   @JsonSubTypes.Type(value = ElementIdentity.PhysicalObject.class, name = "physical-object"),
-  @JsonSubTypes.Type(value = ElementIdentity.Edge.class, name = "edge")
+  @JsonSubTypes.Type(
+      value = ElementIdentity.IdentifierCorrespondence.class,
+      name = "identifier-correspondence"),
+  @JsonSubTypes.Type(
+      value = ElementIdentity.ConceptRelationship.class,
+      name = "concept-relationship")
 })
 public sealed interface ElementIdentity {
   ElementKind kind();
@@ -61,29 +68,116 @@ public sealed interface ElementIdentity {
   }
 
   /**
-   * A join, an identifier correspondence, or a concept relationship. It is the same as an existing
-   * edge when kind, ends, direction, and identifying part match; an undirected edge ignores the
-   * order of its ends. A different identifying part, such as another join condition, is a different
-   * edge.
-   *
-   * @param from the end the edge starts from, or one end of an undirected edge
-   * @param to the end the edge goes to, or the other end of an undirected edge
-   * @param identityKey the identity key of the identifying part, which decides sameness
-   * @param identifyingPart the identifying part as stated, such as the pairs of corresponding
-   *     Fields of a join condition
+   * An edge. It is the same as an existing edge when kind, ends, direction, and identifying part
+   * match; an undirected edge ignores the order of its ends. A different identifying part, such as
+   * another matching condition, is a different edge.
    */
-  record Edge(
-      ElementKind kind,
-      Ref from,
-      Ref to,
-      boolean directed,
-      IdentityKey identityKey,
-      JsonNode identifyingPart)
-      implements ElementIdentity {
-    public Edge {
-      if (!kind.edge()) {
-        throw new IllegalArgumentException(kind + " is not an edge");
+  sealed interface Edge extends ElementIdentity {
+    /** The elements of the end the edge starts from, or of one end of an undirected edge. */
+    List<Ref> fromEnd();
+
+    /** The elements of the end the edge goes to, or of the other end of an undirected edge. */
+    List<Ref> toEnd();
+
+    boolean directed();
+
+    /**
+     * The canonical identity key of the identifying part, which decides sameness. Every reference
+     * must be resolved to a URN.
+     */
+    String identityKey();
+
+    /** The same edge with each element reference replaced. */
+    Edge mapRefs(UnaryOperator<Ref> mapping);
+  }
+
+  /**
+   * An identifier correspondence: the Field set at one end and the Field set at the other denote
+   * the same object. It is directed, and its set relationship reads from the starting end to the
+   * other, so a subset means that the starting end's values are among the other's. Its ends are the
+   * Fields its matching condition starts from and arrives at.
+   *
+   * @param condition the matching condition, which is the identifying part
+   */
+  record IdentifierCorrespondence(MatchingCondition condition) implements Edge {
+    @JsonIgnore
+    @Override
+    public ElementKind kind() {
+      return ElementKind.IDENTIFIER_CORRESPONDENCE;
+    }
+
+    @JsonIgnore
+    @Override
+    public List<Ref> fromEnd() {
+      return condition.fromFields();
+    }
+
+    @JsonIgnore
+    @Override
+    public List<Ref> toEnd() {
+      return condition.toFields();
+    }
+
+    @JsonIgnore
+    @Override
+    public boolean directed() {
+      return true;
+    }
+
+    @JsonIgnore
+    @Override
+    public String identityKey() {
+      return condition.canonical();
+    }
+
+    @Override
+    public IdentifierCorrespondence mapRefs(UnaryOperator<Ref> mapping) {
+      return new IdentifierCorrespondence(condition.mapRefs(mapping));
+    }
+  }
+
+  /**
+   * A concept relationship between two concepts.
+   *
+   * @param directed false when both concepts denote the same object
+   * @param relationshipKind the relationship kind, which is the identifying part
+   */
+  record ConceptRelationship(Ref from, Ref to, boolean directed, String relationshipKind)
+      implements Edge {
+    public ConceptRelationship {
+      if (relationshipKind.isBlank()) {
+        throw new IllegalArgumentException("A concept relationship names its kind");
       }
+    }
+
+    @JsonIgnore
+    @Override
+    public ElementKind kind() {
+      return ElementKind.CONCEPT_RELATIONSHIP;
+    }
+
+    @JsonIgnore
+    @Override
+    public List<Ref> fromEnd() {
+      return List.of(from);
+    }
+
+    @JsonIgnore
+    @Override
+    public List<Ref> toEnd() {
+      return List.of(to);
+    }
+
+    @JsonIgnore
+    @Override
+    public String identityKey() {
+      return IdentityKey.choice(relationshipKind).canonical();
+    }
+
+    @Override
+    public ConceptRelationship mapRefs(UnaryOperator<Ref> mapping) {
+      return new ConceptRelationship(
+          mapping.apply(from), mapping.apply(to), directed, relationshipKind);
     }
   }
 }

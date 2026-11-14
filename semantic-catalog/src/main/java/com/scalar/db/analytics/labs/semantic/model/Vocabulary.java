@@ -32,7 +32,6 @@ public final class Vocabulary {
     MEASURE(false),
     DIMENSION(false),
     BUSINESS_TERM(false),
-    JOIN(true),
     IDENTIFIER_CORRESPONDENCE(true),
     CONCEPT_RELATIONSHIP(true);
 
@@ -50,6 +49,55 @@ public final class Vocabulary {
     public boolean technical() {
       return this == DATASET || this == FIELD;
     }
+  }
+
+  /**
+   * A value normalization step an identifier correspondence may apply to one side of a pair of
+   * Fields before comparing them (see {@code docs/semantic-catalog/record-model.md}, "Elements and
+   * predicates"). The list is closed, never a free expression, because the matching condition is
+   * part of the edge's identity: two free expressions of the same normalization would make one
+   * correspondence two edges, and a Query Agent turns a listed step into SQL without interpreting
+   * it.
+   */
+  public enum Normalization {
+    /** Converts letters to lower case. */
+    LOWER_CASE,
+    /** Removes leading and trailing white space. */
+    TRIM,
+    /** Applies Unicode normalization form NFKC, which also folds full-width characters. */
+    UNICODE_NFKC,
+    /** Converts the value to its text form. */
+    TO_TEXT,
+    /** Removes every character that is not a digit. */
+    DIGITS_ONLY
+  }
+
+  /** The kinds of Input Resource, which decide how a resource is identified. */
+  public enum InputKind {
+    /**
+     * One table's physical schema, identified by the Physical Catalog's table identifier, so every
+     * registration of the same table observes the same resource.
+     */
+    PHYSICAL_SCHEMA,
+    /** One registered document, which is new at registration and observed again on each change. */
+    DOCUMENT,
+    /**
+     * One piece of usage feedback from a user's LLM session: missing knowledge or a statement,
+     * including the wording of a correction. Feedback is never revised, so each registration is a
+     * new resource with exactly one observation.
+     */
+    USAGE_FEEDBACK
+  }
+
+  /**
+   * The purpose of the session usage feedback came from. The same statement is a premise of an
+   * answer in one and a judgement on a candidate in the other.
+   */
+  public enum SessionPurpose {
+    /** Composing a query with the catalog's knowledge. */
+    COMPOSING_A_QUERY,
+    /** Constructing the catalog, including corrections given in review. */
+    CONSTRUCTING_THE_CATALOG
   }
 
   /**

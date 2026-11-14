@@ -45,7 +45,4 @@ public interface IdentityLookup {
 
   /** The Input Resource of a table's physical schema, by the Physical Catalog's identifier. */
   Optional<String> inputResourceByTable(String tableIdentifier);
-
-  /** The Input Resource of missing knowledge found at a question, by the question URN. */
-  Optional<String> inputResourceByQuestion(String question);
 }

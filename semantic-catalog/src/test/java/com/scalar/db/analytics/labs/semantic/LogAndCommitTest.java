@@ -7,12 +7,17 @@ package com.scalar.db.analytics.labs.semantic;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.NullNode;
 import com.scalar.db.analytics.labs.semantic.model.ElementIdentity;
-import com.scalar.db.analytics.labs.semantic.model.IdentityKey;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
+import com.scalar.db.analytics.labs.semantic.model.MatchingCondition;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
+import com.scalar.db.analytics.labs.semantic.model.UsageFeedback;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Normalization;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.SessionPurpose;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class LogAndCommitTest extends StoreScenarioTest {
@@ -22,7 +27,7 @@ class LogAndCommitTest extends StoreScenarioTest {
     var c = s.begin();
     var orders = c.dataset("shop.orders");
     var rowKind = c.address(orders, "row-kind");
-    var resource = c.add(new LogRecord.InputResource("physical-schema", "shop.orders", null));
+    var resource = c.add(LogRecord.InputResource.physicalSchema("shop.orders"));
     var first =
         c.add(
             new LogRecord.InputObservation(
@@ -76,28 +81,38 @@ class LogAndCommitTest extends StoreScenarioTest {
     assertThat(s.lastCommit()).isEqualTo(before);
 
     c = s.begin();
-    var join = join(c, Ref.urn(ordersUrn), Ref.urn(customersUrn));
-    var correspondence = correspondence(c, Ref.urn(ordersUrn), Ref.urn(customersUrn));
-    var multiplicity = c.closedRangeCandidate(c.address(join, "multiplicity"), "many-to-one");
+    var customerId = c.field(Ref.urn(ordersUrn), "shop.orders.customer_id");
+    var id = c.field(Ref.urn(customersUrn), "shop.customers.id");
+    var correspondence =
+        c.correspondence(MatchingCondition.direct(MatchingCondition.Pair.of(customerId, id)));
+    var setRelationship =
+        c.closedRangeCandidate(c.address(correspondence, "set-relationship"), "subset");
+    var one = c.concept();
+    var other = c.concept();
+    var sameObject = sameObject(c, one, other);
     var edges = s.write(c);
 
-    // The same join, and the undirected correspondence with its ends reversed.
+    // The same correspondence, and the undirected concept relationship with its ends reversed.
     c = s.begin();
-    var joinAgain = join(c, Ref.urn(ordersUrn), Ref.urn(customersUrn));
-    var reversed = correspondence(c, Ref.urn(customersUrn), Ref.urn(ordersUrn));
-    var sameValue = c.closedRangeFact(c.address(joinAgain, "multiplicity"), "many-to-one");
-    var otherValue = c.closedRangeCandidate(c.address(joinAgain, "multiplicity"), "one-to-one");
+    var sameCorrespondence =
+        c.correspondence(
+            MatchingCondition.direct(
+                MatchingCondition.Pair.of(edges.ref(customerId), edges.ref(id))));
+    var reversed = sameObject(c, edges.ref(other), edges.ref(one));
+    var sameValue = c.closedRangeFact(c.address(sameCorrespondence, "set-relationship"), "subset");
+    var otherValue =
+        c.closedRangeCandidate(c.address(sameCorrespondence, "set-relationship"), "equal");
     var proposed = s.write(c);
-    assertThat(proposed.urn(joinAgain)).isEqualTo(edges.urn(join));
-    assertThat(proposed.urn(reversed)).isEqualTo(edges.urn(correspondence));
-    assertThat(proposed.urn(sameValue)).isEqualTo(edges.urn(multiplicity));
-    assertThat(proposed.urn(otherValue)).isNotEqualTo(edges.urn(multiplicity));
+    assertThat(proposed.urn(sameCorrespondence)).isEqualTo(edges.urn(correspondence));
+    assertThat(proposed.urn(reversed)).isEqualTo(edges.urn(sameObject));
+    assertThat(proposed.urn(sameValue)).isEqualTo(edges.urn(setRelationship));
+    assertThat(proposed.urn(otherValue)).isNotEqualTo(edges.urn(setRelationship));
 
     c = s.begin();
-    var table = c.add(new LogRecord.InputResource("physical-schema", "shop.orders", null));
+    var table = c.add(LogRecord.InputResource.physicalSchema("shop.orders"));
     var firstResource = s.write(c).urn(table);
     c = s.begin();
-    var sameTable = c.add(new LogRecord.InputResource("physical-schema", "shop.orders", null));
+    var sameTable = c.add(LogRecord.InputResource.physicalSchema("shop.orders"));
     var secondResource = s.write(c);
     assertThat(secondResource.urn(sameTable)).isEqualTo(firstResource);
     assertThat(secondResource.commit()).isEmpty();
@@ -126,6 +141,213 @@ class LogAndCommitTest extends StoreScenarioTest {
         new LogRecord.Element(
             new ElementIdentity.PhysicalObject(ElementKind.FIELD, concept, "shop.orders.id")));
     assertRejected(s, field, "The parent of a Field is a Dataset");
+
+    assertThat(s.lastCommit()).isEqualTo(before);
+  }
+
+  @Test
+  void aCorrespondenceIsIdentifiedByItsMatchingCondition() {
+    var s = scenario();
+    var c = s.begin();
+    var members = c.dataset("pos.members");
+    var customers = c.dataset("shop.customers");
+    var memberShop = c.field(members, "pos.members.shop_code");
+    var memberMail = c.field(members, "pos.members.mail");
+    var customerShop = c.field(customers, "shop.customers.shop_code");
+    var customerMail = c.field(customers, "shop.customers.email");
+    var composite =
+        c.correspondence(
+            MatchingCondition.direct(
+                MatchingCondition.Pair.of(customerShop, memberShop),
+                MatchingCondition.Pair.of(customerMail, memberMail)));
+    var written = s.write(c);
+    var shop = MatchingCondition.Pair.of(written.ref(customerShop), written.ref(memberShop));
+    var mail = MatchingCondition.Pair.of(written.ref(customerMail), written.ref(memberMail));
+
+    c = s.begin();
+    // The pairs stated in another order: the same correspondence.
+    var reordered = c.correspondence(MatchingCondition.direct(mail, shop));
+    // E-mail addresses that match only when case is ignored: another correspondence.
+    var ignoringCase =
+        c.correspondence(
+            MatchingCondition.direct(
+                shop,
+                new MatchingCondition.Pair(
+                    MatchingCondition.Side.of(written.ref(customerMail), Normalization.LOWER_CASE),
+                    MatchingCondition.Side.of(written.ref(memberMail), Normalization.LOWER_CASE))));
+    // From the members to the customers: another correspondence, since it is directed.
+    var reversed =
+        c.correspondence(
+            MatchingCondition.direct(
+                MatchingCondition.Pair.of(written.ref(memberShop), written.ref(customerShop)),
+                MatchingCondition.Pair.of(written.ref(memberMail), written.ref(customerMail))));
+    var proposed = s.write(c);
+    assertThat(proposed.urn(reordered)).isEqualTo(written.urn(composite));
+    assertThat(proposed.urn(ignoringCase)).isNotEqualTo(written.urn(composite));
+    assertThat(proposed.urn(reversed))
+        .isNotEqualTo(written.urn(composite))
+        .isNotEqualTo(proposed.urn(ignoringCase));
+  }
+
+  @Test
+  void eachEndOfACorrespondenceIsTheFieldsOfOneDataset() {
+    var s = scenario();
+    var c = s.begin();
+    var orders = c.dataset("shop.orders");
+    var customers = c.dataset("shop.customers");
+    var members = c.dataset("pos.members");
+    var customerId = c.field(orders, "shop.orders.customer_id");
+    var id = c.field(customers, "shop.customers.id");
+    var memberName = c.field(members, "pos.members.name");
+    var customerName = c.field(customers, "shop.customers.name");
+    var written = s.write(c);
+    var before = s.lastCommit();
+
+    // The starting end would take Fields of the orders and of the members.
+    var twoDatasets = s.begin();
+    twoDatasets.correspondence(
+        MatchingCondition.direct(
+            MatchingCondition.Pair.of(written.ref(customerId), written.ref(id)),
+            MatchingCondition.Pair.of(written.ref(memberName), written.ref(customerName))));
+    assertRejected(s, twoDatasets, "the Fields of one Dataset");
+
+    var notFields = s.begin();
+    notFields.correspondence(
+        MatchingCondition.direct(
+            MatchingCondition.Pair.of(written.ref(orders), written.ref(customers))));
+    assertRejected(s, notFields, "matches Fields");
+
+    assertThat(s.lastCommit()).isEqualTo(before);
+  }
+
+  @Test
+  void aCorrespondenceThroughAMappingTableIsAChainOfHops() {
+    var s = scenario();
+    var c = s.begin();
+    var customers = c.dataset("shop.customers");
+    var mapping = c.dataset("crm.customer_members");
+    var members = c.dataset("pos.members");
+    var orders = c.dataset("shop.orders");
+    var customerId = c.field(customers, "shop.customers.id");
+    var mappedCustomer = c.field(mapping, "crm.customer_members.customer_id");
+    var mappedMember = c.field(mapping, "crm.customer_members.member_id");
+    var memberId = c.field(members, "pos.members.id");
+    var orderId = c.field(orders, "shop.orders.id");
+    var written = s.write(c);
+
+    // From the customers through the mapping table to the members.
+    c = s.begin();
+    var throughMapping =
+        c.correspondence(
+            new MatchingCondition(
+                List.of(
+                    new MatchingCondition.Hop(
+                        List.of(
+                            MatchingCondition.Pair.of(
+                                written.ref(customerId), written.ref(mappedCustomer)))),
+                    new MatchingCondition.Hop(
+                        List.of(
+                            MatchingCondition.Pair.of(
+                                written.ref(mappedMember), written.ref(memberId)))))));
+    assertThat(s.write(c).urn(throughMapping)).isNotNull();
+    var before = s.lastCommit();
+
+    // The second hop starts from the orders, which the first hop did not arrive at.
+    var disconnected = s.begin();
+    disconnected.correspondence(
+        new MatchingCondition(
+            List.of(
+                new MatchingCondition.Hop(
+                    List.of(
+                        MatchingCondition.Pair.of(
+                            written.ref(customerId), written.ref(mappedCustomer)))),
+                new MatchingCondition.Hop(
+                    List.of(
+                        MatchingCondition.Pair.of(written.ref(orderId), written.ref(memberId)))))));
+    assertRejected(s, disconnected, "starts from the Dataset the previous hop arrived at");
+
+    assertThat(s.lastCommit()).isEqualTo(before);
+  }
+
+  @Test
+  void eachRegistrationOfUsageFeedbackIsANewInputResource() {
+    var s = scenario();
+    var feedback =
+        new UsageFeedback(
+            "Sales are tax-exclusive",
+            SessionPurpose.COMPOSING_A_QUERY,
+            "Asked for monthly sales; the user corrected the total",
+            List.of());
+
+    var c = s.begin();
+    var first = c.add(LogRecord.InputResource.usageFeedback());
+    c.add(LogRecord.InputObservation.of(first, feedback));
+    var second = c.add(LogRecord.InputResource.usageFeedback());
+    c.add(LogRecord.InputObservation.of(second, feedback));
+    var written = s.write(c);
+    assertThat(written.urn(first)).isNotEqualTo(written.urn(second));
+
+    c = s.begin();
+    var again = c.add(LogRecord.InputResource.usageFeedback());
+    c.add(LogRecord.InputObservation.of(again, feedback));
+    assertThat(s.write(c).urn(again)).isNotIn(written.urn(first), written.urn(second));
+  }
+
+  @Test
+  void usageFeedbackCarriesItsPurposeAndContextAndIsNeverRevised() {
+    var s = scenario();
+    var c = s.begin();
+    var resource = c.add(LogRecord.InputResource.usageFeedback());
+    c.add(
+        LogRecord.InputObservation.of(
+            resource,
+            new UsageFeedback(
+                "Members are shops' customers",
+                SessionPurpose.CONSTRUCTING_THE_CATALOG,
+                "Review of the member correspondence",
+                List.of())));
+    var written = s.write(c);
+    var before = s.lastCommit();
+
+    var revised = s.begin();
+    revised.add(
+        LogRecord.InputObservation.of(
+            written.ref(resource),
+            new UsageFeedback(
+                "Members are not customers",
+                SessionPurpose.CONSTRUCTING_THE_CATALOG,
+                "Review of the member correspondence",
+                List.of())));
+    assertRejected(s, revised, "never revised");
+
+    var withoutContext = s.begin();
+    var bare = withoutContext.add(LogRecord.InputResource.usageFeedback());
+    withoutContext.add(
+        new LogRecord.InputObservation(
+            bare,
+            null,
+            JsonNodeFactory.instance
+                .objectNode()
+                .put("content", "Sales are tax-exclusive")
+                .put("purpose", SessionPurpose.COMPOSING_A_QUERY.name())));
+    assertRejected(s, withoutContext, "summary of its session's context");
+
+    var empty = s.begin();
+    var nothing = empty.add(LogRecord.InputResource.usageFeedback());
+    empty.add(new LogRecord.InputObservation(nothing, null, NullNode.getInstance()));
+    assertRejected(s, empty, "summary of its session's context");
+
+    var unknownFact = s.begin();
+    var related = unknownFact.add(LogRecord.InputResource.usageFeedback());
+    unknownFact.add(
+        LogRecord.InputObservation.of(
+            related,
+            new UsageFeedback(
+                "That one is tax-exclusive",
+                SessionPurpose.COMPOSING_A_QUERY,
+                "Monthly sales by shop",
+                List.of(Ref.urn("urn:scalardb:analytics:" + s.domain + ":fact:c99.1")))));
+    assertRejected(s, unknownFact, "Missing reference: no Fact");
 
     assertThat(s.lastCommit()).isEqualTo(before);
   }
@@ -165,40 +387,13 @@ class LogAndCommitTest extends StoreScenarioTest {
     }
   }
 
-  /** A join with an accepted existence Fact. */
-  private static Ref join(Scenario.Commit c, Ref from, Ref to) {
+  /** An undirected concept relationship stating that two concepts denote the same object. */
+  private static Ref sameObject(Scenario.Commit c, Ref one, Ref other) {
     return withExistence(
         c,
         c.add(
             new LogRecord.Element(
-                new ElementIdentity.Edge(
-                    ElementKind.JOIN,
-                    from,
-                    to,
-                    true,
-                    IdentityKey.choice("orders.customer_id = customers.id"),
-                    JsonNodeFactory.instance
-                        .arrayNode()
-                        .add(
-                            JsonNodeFactory.instance
-                                .objectNode()
-                                .put("from", "customer_id")
-                                .put("to", "id"))))));
-  }
-
-  /** An undirected identifier correspondence with an accepted existence Fact. */
-  private static Ref correspondence(Scenario.Commit c, Ref one, Ref other) {
-    return withExistence(
-        c,
-        c.add(
-            new LogRecord.Element(
-                new ElementIdentity.Edge(
-                    ElementKind.IDENTIFIER_CORRESPONDENCE,
-                    one,
-                    other,
-                    false,
-                    IdentityKey.choice("direct"),
-                    JsonNodeFactory.instance.objectNode().put("match", "direct")))));
+                new ElementIdentity.ConceptRelationship(one, other, false, "same-object"))));
   }
 
   private static Ref withExistence(Scenario.Commit c, Ref element) {

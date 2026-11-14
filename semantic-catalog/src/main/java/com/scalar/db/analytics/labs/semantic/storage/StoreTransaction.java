@@ -13,6 +13,7 @@ import com.scalar.db.analytics.labs.semantic.model.Urns;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.InputKind;
 import com.scalar.db.analytics.labs.semantic.projection.IdentityLookup;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.AddressSelectionRow;
@@ -284,14 +285,12 @@ public final class StoreTransaction {
       case InputResourceRow resource ->
           jdbc.sql(
                   "INSERT INTO semantic_catalog.input_resources"
-                      + " (domain, input_resource, kind, table_identifier, question,"
-                      + " created_commit)"
-                      + " VALUES (:domain, :resource, :kind, :table, :question, :created)")
+                      + " (domain, input_resource, kind, table_identifier, created_commit)"
+                      + " VALUES (:domain, :resource, :kind, :table, :created)")
               .param("domain", domain)
               .param("resource", resource.inputResource())
-              .param("kind", resource.kind())
+              .param("kind", resource.kind().name())
               .param("table", resource.tableIdentifier(), Types.VARCHAR)
-              .param("question", resource.question(), Types.VARCHAR)
               .param("created", resource.createdCommit())
               .update();
     }
@@ -383,11 +382,12 @@ public final class StoreTransaction {
   }
 
   /**
-   * The edges of a kind between two elements, for several such questions at once.
+   * The edges of a kind between two ends, for several such questions at once.
    *
    * @param kind the edge kind of the question
-   * @param from the end the edge starts from; for an undirected edge, either end
-   * @param to the other end
+   * @param from the canonical form of the end the edge starts from; for an undirected edge, either
+   *     end
+   * @param to the canonical form of the other end
    */
   public record EdgeQuestion(ElementKind kind, String from, String to) {}
 
@@ -911,16 +911,6 @@ public final class StoreTransaction {
           .query(String.class)
           .optional();
     }
-
-    @Override
-    public Optional<String> inputResourceByQuestion(String question) {
-      return jdbc.sql(
-              "SELECT input_resource FROM semantic_catalog.input_resources"
-                  + " WHERE domain = ? AND question = ?")
-          .params(domain, question)
-          .query(String.class)
-          .optional();
-    }
   }
 
   // Row mapping
@@ -942,7 +932,7 @@ public final class StoreTransaction {
       "SELECT fact, fact_address, identity_key, created_commit FROM semantic_catalog.facts";
 
   private static final String RESOURCES =
-      "SELECT input_resource, kind, table_identifier, question, created_commit"
+      "SELECT input_resource, kind, table_identifier, created_commit"
           + " FROM semantic_catalog.input_resources";
 
   private static final String RECORDS =
@@ -1014,9 +1004,8 @@ public final class StoreTransaction {
   private InputResourceRow resource(ResultSet rs, int row) throws SQLException {
     return new InputResourceRow(
         rs.getString("input_resource"),
-        rs.getString("kind"),
+        InputKind.valueOf(rs.getString("kind")),
         rs.getString("table_identifier"),
-        rs.getString("question"),
         rs.getLong("created_commit"));
   }
 

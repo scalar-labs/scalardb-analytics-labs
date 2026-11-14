@@ -206,8 +206,8 @@ It does not interpret question wording; finding elements from a question is the 
 Requesting knowledge takes a point, a sequence of requests, and optionally one set of entity URNs
 the question mentions. A request is a target element and one of its kind's predicates, or all of
 them. An edge whose
-URN is unknown can be given by its kind and the URNs of its ends in direction order (any order if
-undirected), without its identifying part. For each request the Semantic Catalog:
+URN is unknown can be given by its kind and its ends in direction order (any order if
+undirected), each end as the URNs of all its elements in any order, without its identifying part. For each request the Semantic Catalog:
 
 1. Resolves the target elements: the given element, or every edge of that kind between those ends up
    to the point.

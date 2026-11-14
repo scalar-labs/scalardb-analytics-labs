@@ -9,6 +9,7 @@ import com.scalar.db.analytics.labs.semantic.model.ElementIdentity;
 import com.scalar.db.analytics.labs.semantic.model.LogPosition;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord.FactEvent;
 import com.scalar.db.analytics.labs.semantic.model.LogRecordJson;
+import com.scalar.db.analytics.labs.semantic.model.Ref;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.AddressSelectionRow;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.DependencyRow;
@@ -21,6 +22,7 @@ import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.InputRes
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.PresentablePeriodRow;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.RowKey;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -437,18 +439,28 @@ public final class Projection {
   }
 
   /**
-   * The identity of an edge whose references are resolved, with the ends of an undirected edge
-   * sorted by URN, so two proposals of the same edge give equal identities.
+   * The identity of an edge whose references are resolved, with each end in its {@linkplain
+   * #canonicalEnd canonical form} and the ends of an undirected edge sorted, so two proposals of
+   * the same edge give equal identities.
    */
   public static EdgeIdentity edgeIdentity(ElementIdentity.Edge edge) {
-    var from = edge.from().urnValue();
-    var to = edge.to().urnValue();
+    var from = canonicalEnd(edge.fromEnd().stream().map(Ref::urnValue).toList());
+    var to = canonicalEnd(edge.toEnd().stream().map(Ref::urnValue).toList());
     var swap = !edge.directed() && from.compareTo(to) > 0;
     return new EdgeIdentity(
         swap ? to : from,
         swap ? from : to,
         edge.directed(),
-        edge.identityKey().canonical(),
-        edge.identifyingPart());
+        edge.identityKey(),
+        LogRecordJson.toStored(edge));
+  }
+
+  /**
+   * The canonical form of an edge end stored and compared: a JSON array of the URNs of its
+   * elements, sorted and without duplicates, so the order in which a set of Fields is named does
+   * not matter.
+   */
+  public static String canonicalEnd(Collection<String> urns) {
+    return LogRecordJson.writeStrings(urns.stream().sorted().distinct().toList());
   }
 }

@@ -5,6 +5,7 @@
 package com.scalar.db.analytics.labs.semantic.model;
 
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
+import java.util.List;
 
 /**
  * One request for knowledge: a target and one of its kind's predicates (see {@code
@@ -18,20 +19,30 @@ public record KnowledgeRequest(Target target, String predicate) {
     record Element(String element) implements Target {}
 
     /**
-     * Every edge of a kind between two elements, whatever its identifying part, for a caller that
-     * does not know the edge's URN.
+     * Every edge of a kind between two ends, whatever its identifying part, for a caller that does
+     * not know the edge's URN. An end is named by the URNs of its elements in any order, such as
+     * the Fields of an identifier correspondence's end.
      *
-     * @param from the end the edge starts from; for an undirected edge, either end
-     * @param to the other end
+     * @param from the URNs of the end the edge starts from; for an undirected edge, either end
+     * @param to the URNs of the other end
      */
-    record Edge(ElementKind kind, String from, String to) implements Target {}
+    record Edge(ElementKind kind, List<String> from, List<String> to) implements Target {
+      public Edge {
+        from = List.copyOf(from);
+        to = List.copyOf(to);
+        if (from.isEmpty() || to.isEmpty()) {
+          throw new IllegalArgumentException("An edge end names at least one element");
+        }
+      }
+    }
   }
 
   public static KnowledgeRequest of(String element, String predicate) {
     return new KnowledgeRequest(new Target.Element(element), predicate);
   }
 
-  public static KnowledgeRequest edge(ElementKind kind, String from, String to, String predicate) {
+  public static KnowledgeRequest edge(
+      ElementKind kind, List<String> from, List<String> to, String predicate) {
     return new KnowledgeRequest(new Target.Edge(kind, from, to), predicate);
   }
 }

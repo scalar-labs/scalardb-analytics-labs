@@ -149,8 +149,10 @@ it no longer does.
 
 Unique constraints enforce the identity rules that can be expressed as uniqueness:
 
-- `elements`: an edge's kind, ends, direction, and identifying part. The ends of an undirected edge
-  are sorted by URN first.
+- `elements`: an edge's kind, ends, direction, and identifying part. Each end is stored as the
+  sorted URNs of its elements, such as the Fields of a correspondence's end, and the ends of an
+  undirected edge are sorted first. The identifying part is compared by its identity key, which the
+  store derives from a correspondence's matching condition with the pairs of each step sorted.
 - `fact_addresses`: element and predicate, for rows with an empty scope and a closed-core or
   Generator-declared predicate. Free-description rows are matched only by pointing and are not
   unique.

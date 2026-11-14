@@ -44,7 +44,7 @@ class ConcurrentWritersTest {
 
   private static CommitRequest observeTable(String table) {
     var request = CommitRequest.builder("observe", "scanner");
-    request.add(new LogRecord.InputResource("physical-schema", table, null));
+    request.add(LogRecord.InputResource.physicalSchema(table));
     return request.build();
   }
 

@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.scalar.db.analytics.labs.semantic.model.LogPosition;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.InputKind;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 
@@ -65,10 +66,12 @@ public sealed interface MaterializedRow {
   /**
    * An edge's identity: kind aside, what makes two edges the same.
    *
-   * @param endA the end the edge starts from; for an undirected edge, the end whose URN sorts first
-   * @param endB the end the edge goes to; for an undirected edge, the end whose URN sorts last
+   * @param endA the canonical form of the end the edge starts from; for an undirected edge, the end
+   *     whose canonical form sorts first
+   * @param endB the canonical form of the end the edge goes to; for an undirected edge, the end
+   *     whose canonical form sorts last
    * @param identityKey the canonical identity key of the identifying part
-   * @param identifyingPart the identifying part as stated
+   * @param identifyingPart the edge identity as stated, including its identifying part
    */
   record EdgeIdentity(
       String endA, String endB, boolean directed, String identityKey, JsonNode identifyingPart) {}
@@ -124,19 +127,14 @@ public sealed interface MaterializedRow {
   }
 
   /**
-   * An Input Resource, used to look one up by table identifier or by question.
+   * An Input Resource, used to look one up by table identifier.
    *
    * @param tableIdentifier the Physical Catalog's identifier of the table whose physical schema it
    *     is
-   * @param question the URN of the question at which missing knowledge was found
    * @param createdCommit the commit that created the Input Resource
    */
   record InputResourceRow(
-      String inputResource,
-      String kind,
-      @Nullable String tableIdentifier,
-      @Nullable String question,
-      long createdCommit)
+      String inputResource, InputKind kind, @Nullable String tableIdentifier, long createdCommit)
       implements MaterializedRow {
     @Override
     public RowKey key() {

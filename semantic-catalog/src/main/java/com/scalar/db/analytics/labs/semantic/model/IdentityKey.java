@@ -14,10 +14,10 @@ import java.util.function.UnaryOperator;
  * An identity key: the closed choices and record references in a value that decide whether two
  * records are the same (see {@code docs/semantic-catalog/storage.md}, "Tables").
  *
- * <p>It decides sameness in two places. Two Facts of a closed-range predicate at the same Fact
- * Address are the same exactly when their identity keys are equal. Two edges of the same kind,
- * ends, and direction are the same exactly when the identity keys of their identifying parts are
- * equal.
+ * <p>Two Facts of a closed-range predicate at the same Fact Address are the same exactly when their
+ * identity keys are equal. A concept relationship's relationship kind is compared in the same form;
+ * an identifier correspondence's matching condition has its own {@linkplain
+ * MatchingCondition#canonical() canonical form}.
  *
  * <p>Which parts of a value are closed choices or references depends on the predicate, so the
  * proposer, usually a Generator, states the identity key; the store only compares {@linkplain

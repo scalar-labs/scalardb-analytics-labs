@@ -19,6 +19,7 @@ import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.AddressS
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.ElementRow;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.FactAddressRow;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.FactRecordRow;
+import com.scalar.db.analytics.labs.semantic.projection.Projection;
 import com.scalar.db.analytics.labs.semantic.storage.StoreTransaction;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -151,7 +152,11 @@ public final class CatalogSnapshot {
     var edgeQuestions = new ArrayList<StoreTransaction.EdgeQuestion>();
     for (var request : requests) {
       if (request.target() instanceof KnowledgeRequest.Target.Edge edge) {
-        edgeQuestions.add(new StoreTransaction.EdgeQuestion(edge.kind(), edge.from(), edge.to()));
+        edgeQuestions.add(
+            new StoreTransaction.EdgeQuestion(
+                edge.kind(),
+                Projection.canonicalEnd(edge.from()),
+                Projection.canonicalEnd(edge.to())));
       }
     }
     var edges =
