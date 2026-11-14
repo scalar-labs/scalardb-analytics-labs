@@ -43,6 +43,7 @@ import org.junit.jupiter.api.io.TempDir;
 @TestMethodOrder(OrderAnnotation.class)
 class DistributionSmokeTest {
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final String SOURCE = "source";
   // "<name> <version> (<license>)", as the scanner provenance records each bundled component.
   private static final Pattern BUNDLED_COMPONENT =
       Pattern.compile("(.+) ([0-9][0-9.]*) \\(([^)]+)\\)");
@@ -74,32 +75,21 @@ class DistributionSmokeTest {
 
   @BeforeAll
   void unpackAndStart() throws Exception {
-    var archive = Path.of(requiredProperty("distribution.archive"));
-    var unpacked = Files.createDirectories(scratch.resolve("unpacked"));
-    var tar =
-        new ProcessBuilder("tar", "-xzf", archive.toString(), "-C", unpacked.toString())
-            .inheritIO()
-            .start();
-    assertThat(tar.waitFor(5, TimeUnit.MINUTES) && tar.exitValue() == 0).isTrue();
-    try (var entries = Files.list(unpacked)) {
-      var roots = entries.toList();
-      assertThat(roots).hasSize(1);
-      distribution = roots.get(0);
-    }
+    distribution = DistributionArchive.unpack(scratch.resolve("unpacked"));
     environment =
         RestrictedEnvironment.start(
             requiredProperty("distribution.platform"),
             distribution,
-            Files.createDirectories(scratch.resolve("environment")));
-    environment
-        .source()
-        .execute("CREATE TABLE orders (id INT PRIMARY KEY, amount BIGINT, note TEXT)");
-    environment.source().execute("INSERT INTO orders VALUES (1, 10, 'first'), (2, 20, NULL)");
+            Files.createDirectories(scratch.resolve("environment")),
+            Map.of(SOURCE, RestrictedEnvironment.ServerType.POSTGRESQL));
+    var source = environment.server(SOURCE);
+    source.execute(null, "CREATE TABLE orders (id INT PRIMARY KEY, amount BIGINT, note TEXT)");
+    source.execute(null, "INSERT INTO orders VALUES (1, 10, 'first'), (2, 20, NULL)");
     workspace = environment.workspace("workspace");
     credentials =
         Map.of(
             "STORE_PASSWORD", environment.store().password(),
-            "SOURCE_PASSWORD", environment.source().password());
+            "SOURCE_PASSWORD", environment.server(SOURCE).password());
   }
 
   @AfterAll
@@ -238,7 +228,7 @@ class DistributionSmokeTest {
   @Test
   @Order(5)
   void registersASource() throws Exception {
-    var source = requireEnvironment().source();
+    var source = requireEnvironment().server(SOURCE);
     var registered = registerSource("warehouse", "SOURCE_PASSWORD", credentials);
     assertSuccessful(registered, "scalardb-analytics/source");
     assertThat(registered.allOutput()).doesNotContain(source.password());
@@ -326,13 +316,13 @@ class DistributionSmokeTest {
     var environment = requireEnvironment();
     for (var result : List.of(wrongPassword, missingCredential, invalid, noWorkspace)) {
       assertThat(result.allOutput())
-          .doesNotContain(environment.store().password(), environment.source().password());
+          .doesNotContain(environment.store().password(), environment.server(SOURCE).password());
     }
   }
 
   private Result registerSource(String name, String passwordVariable, Map<String, String> variables)
       throws Exception {
-    var source = requireEnvironment().source();
+    var source = requireEnvironment().server(SOURCE);
     var environmentVariables = new HashMap<>(credentials);
     environmentVariables.putAll(variables);
     return run(

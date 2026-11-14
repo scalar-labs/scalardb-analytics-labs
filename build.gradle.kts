@@ -87,3 +87,9 @@ tasks.register("distSmokeTest") {
     dependsOn(":application:distSmokeTest")
 }
 
+tasks.register("queryAcceptanceTest") {
+    group = LifecycleBasePlugin.VERIFICATION_GROUP
+    description = "Proves the query path end to end through the CLI distribution archive."
+    dependsOn(":application:queryAcceptanceTest")
+}
+

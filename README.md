@@ -136,3 +136,19 @@ databases. On macOS, the launcher runs under `sandbox-exec`. On Linux, it runs i
 `eclipse-temurin:25-jre` container on an internal Docker network that contains only the databases.
 The test needs a Docker-compatible daemon, and Gradle provisions a Java 21 toolchain to exercise the
 launcher's rejection of older runtimes.
+
+Run the query-path acceptance suite:
+
+```console
+./gradlew queryAcceptanceTest
+```
+
+It runs the archive in the same restricted environment against a PostgreSQL and a MySQL source
+loaded with business fixtures. Starting from an empty workspace, it registers both sources and
+queries them with the commands of Query Agent Skill v0. It checks type and value fidelity in the
+JSON output, a cross-source join, deterministic output and exit codes, pushdown in the SQL each
+source server logs, the time limit, output truncation, SIGINT cancellation, unsafe-SQL rejection,
+and secret redaction. It fails if an invocation leaves a source session or temporary file behind,
+or if a query reaches the network, loads an extension from the user's DuckDB directory, reaches a
+database other than the registered sources, or is answered from anything other than the live
+source. Row, byte, and memory limits are not covered because the CLI does not expose them yet.

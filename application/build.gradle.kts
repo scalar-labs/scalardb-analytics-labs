@@ -349,20 +349,23 @@ tasks.installDist {
     }
 }
 
-// The smoke test needs the full distribution, so check only compiles it.
+// The distribution tests need the full distribution, so check only compiles them.
 tasks.check {
     dependsOn(tasks.named(distributionTest.classesTaskName))
 }
 
 val javaToolchains = extensions.getByType<JavaToolchainService>()
+val distributionDuckDbVersion = libs.versions.duckdb.asProvider().get()
 
-tasks.register<Test>("distSmokeTest") {
-    group = LifecycleBasePlugin.VERIFICATION_GROUP
-    description = "Unpacks the distribution archive and runs it in an isolated, network-restricted environment."
-
+// Both suites run the unpacked archive in the same isolated, network-restricted environment; each
+// task runs one suite.
+fun Test.runsDistributionSuite(testClass: String) {
     testClassesDirs = distributionTest.output.classesDirs
     classpath = distributionTest.runtimeClasspath
     useJUnitPlatform()
+    filter {
+        includeTestsMatching("com.scalar.db.analytics.labs.application.distribution.$testClass")
+    }
 
     val archive = tasks.distTar.flatMap { it.archiveFile }
     inputs.file(archive)
@@ -377,12 +380,28 @@ tasks.register<Test>("distSmokeTest") {
     inputs.property("olderJava", olderJava)
     inputs.property("platform", distributionPlatform)
     inputs.property("version", project.version.toString())
+    val duckDbVersion = distributionDuckDbVersion
+    inputs.property("duckDbVersion", duckDbVersion)
 
     doFirst {
         systemProperty("distribution.archive", archive.get().asFile.absolutePath)
         systemProperty("distribution.platform", distributionPlatform.get())
         systemProperty("distribution.version", project.version.toString())
+        systemProperty("distribution.duckdbVersion", duckDbVersion)
         systemProperty("distribution.javaHome", supportedJava.get())
         systemProperty("distribution.olderJavaHome", olderJava.get())
     }
+}
+
+tasks.register<Test>("distSmokeTest") {
+    group = LifecycleBasePlugin.VERIFICATION_GROUP
+    description = "Unpacks the distribution archive and runs it in an isolated, network-restricted environment."
+    runsDistributionSuite("DistributionSmokeTest")
+}
+
+tasks.register<Test>("queryAcceptanceTest") {
+    group = LifecycleBasePlugin.VERIFICATION_GROUP
+    description = "Proves the query path end to end through the distribution archive against real " +
+        "PostgreSQL and MySQL sources."
+    runsDistributionSuite("QueryPathAcceptanceTest")
 }
