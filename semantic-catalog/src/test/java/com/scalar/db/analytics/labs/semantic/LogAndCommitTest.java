@@ -5,6 +5,7 @@
 package com.scalar.db.analytics.labs.semantic;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.NullNode;
@@ -12,6 +13,7 @@ import com.scalar.db.analytics.labs.semantic.model.ElementIdentity;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.MatchingCondition;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
+import com.scalar.db.analytics.labs.semantic.model.Scope;
 import com.scalar.db.analytics.labs.semantic.model.UsageFeedback;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
@@ -22,10 +24,10 @@ import org.junit.jupiter.api.Test;
 
 class LogAndCommitTest extends StoreScenarioTest {
   @Test
-  void urnsAreIssuedFromLogPositionsAndTemporaryNumbersAreReplaced() {
+  void urnsAreBuiltFromNamesAndTemporaryNumbersAreReplaced() {
     var s = scenario();
     var c = s.begin();
-    var orders = c.dataset("shop.orders");
+    var orders = c.dataset("shop.public.orders");
     var rowKind = c.address(orders, "row-kind");
     var resource = c.add(LogRecord.InputResource.physicalSchema("shop.orders"));
     var first =
@@ -33,14 +35,49 @@ class LogAndCommitTest extends StoreScenarioTest {
             new LogRecord.InputObservation(
                 resource, null, JsonNodeFactory.instance.objectNode().put("columns", 3)));
     c.add(new LogRecord.ObservationEvent(first, Scenario.NOTHING));
+    var amount = c.field(orders, "shop.public.orders.amount");
+    var unitPrice = c.field(orders, "shop.public.orders.unit price");
+    var sales = c.measure("ec-sales");
+    var meaning = c.address(amount, "meaning");
+    var gross = c.candidate(meaning, "gross amount");
+    var net = c.candidate(meaning, "net amount");
+    var scoped =
+        c.add(
+            new LogRecord.FactAddress(
+                amount, "meaning", Scope.described("for accounting", List.of()), null));
     var written = s.write(c);
 
-    // The policy version is commit 1, so this is commit 2, and each record has its position:
-    // the Dataset's two Facts each come with their acceptance.
+    // The policy version is commit 1, so this is commit 2. A person can tell from each URN of an
+    // element, a Fact Address, or a Fact what it names; names that a URN cannot carry as written
+    // are percent-encoded.
     var prefix = "urn:scalardb:analytics:" + s.domain + ":";
     assertThat(written.commit()).hasValue(2);
-    assertThat(written.urn(orders)).isEqualTo(prefix + "element:c2.1");
-    assertThat(written.urn(rowKind)).isEqualTo(prefix + "fact-address:c2.8");
+    assertThat(written.urn(orders)).isEqualTo(prefix + "dataset:shop.public.orders");
+    assertThat(written.urn(amount)).isEqualTo(prefix + "field:shop.public.orders.amount");
+    assertThat(written.urn(unitPrice)).isEqualTo(prefix + "field:shop.public.orders.unit%20price");
+    assertThat(written.urn(sales)).isEqualTo(prefix + "measure:ec-sales");
+    assertThat(written.urn(rowKind))
+        .isEqualTo(prefix + "fact-address:dataset:shop.public.orders/row-kind");
+    assertThat(written.urn(new Ref.Temp(2)))
+        .isEqualTo(prefix + "fact:dataset:shop.public.orders/existence/1");
+    assertThat(written.urn(meaning))
+        .isEqualTo(prefix + "fact-address:field:shop.public.orders.amount/meaning");
+    assertThat(written.urn(gross))
+        .isEqualTo(prefix + "fact:field:shop.public.orders.amount/meaning/1");
+    assertThat(written.urn(net))
+        .isEqualTo(prefix + "fact:field:shop.public.orders.amount/meaning/2");
+    // A Fact Address with an applicability scope is found only by pointing, so it takes a
+    // sequence number and leaves the plain identifier to the one found by element and predicate.
+    assertThat(written.urn(scoped))
+        .isEqualTo(prefix + "fact-address:field:shop.public.orders.amount/meaning~2");
+    assertThat(s.revision(written.urn(gross)).urn())
+        .isEqualTo(
+            prefix
+                + "fact-revision:field:shop.public.orders.amount/meaning/1@c2."
+                + (((Ref.Temp) gross).number() + 2));
+
+    // Records that are not named keep the URN of their log position: the Dataset's two Facts each
+    // come with their acceptance.
     assertThat(written.urn(resource)).isEqualTo(prefix + "input-resource:c2.9");
     assertThat(written.urn(first)).isEqualTo(prefix + "input-observation:c2.10");
 
@@ -62,8 +99,8 @@ class LogAndCommitTest extends StoreScenarioTest {
   void proposalsOfExistingRecordsYieldTheExistingRecords() {
     var s = scenario();
     var c = s.begin();
-    var orders = c.dataset("shop.orders");
-    var customers = c.dataset("shop.customers");
+    var orders = c.dataset("shop.public.orders");
+    var customers = c.dataset("shop.public.customers");
     var written = s.write(c);
     var ordersUrn = written.urn(orders);
     var customersUrn = written.urn(customers);
@@ -72,7 +109,7 @@ class LogAndCommitTest extends StoreScenarioTest {
     // A Dataset is found by its technical reference; its empty-scope Fact Addresses and
     // closed-range Facts are found too, so nothing new is written.
     c = s.begin();
-    var again = c.datasetProposal("shop.orders");
+    var again = c.datasetProposal("shop.public.orders");
     var existence = c.address(again, Vocabulary.EXISTENCE);
     var reproposed = s.write(c);
     assertThat(reproposed.urn(again)).isEqualTo(ordersUrn);
@@ -81,16 +118,25 @@ class LogAndCommitTest extends StoreScenarioTest {
     assertThat(s.lastCommit()).isEqualTo(before);
 
     c = s.begin();
-    var customerId = c.field(Ref.urn(ordersUrn), "shop.orders.customer_id");
-    var id = c.field(Ref.urn(customersUrn), "shop.customers.id");
+    var customerId = c.field(Ref.urn(ordersUrn), "shop.public.orders.customer_id");
+    var id = c.field(Ref.urn(customersUrn), "shop.public.customers.id");
     var correspondence =
         c.correspondence(MatchingCondition.direct(MatchingCondition.Pair.of(customerId, id)));
     var setRelationship =
         c.closedRangeCandidate(c.address(correspondence, "set-relationship"), "subset");
-    var one = c.concept();
-    var other = c.concept();
+    var one = c.concept("member");
+    var other = c.concept("customer");
     var sameObject = sameObject(c, one, other);
     var edges = s.write(c);
+    // An edge is named by its kind and the identifiers of its ends; an undirected edge's ends are
+    // in a fixed order.
+    var prefix = "urn:scalardb:analytics:" + s.domain + ":";
+    assertThat(edges.urn(correspondence))
+        .isEqualTo(
+            prefix
+                + "identifier-correspondence:shop.public.orders.customer_id,"
+                + "shop.public.customers.id");
+    assertThat(edges.urn(sameObject)).isEqualTo(prefix + "concept-relationship:customer,member");
 
     // The same correspondence, and the undirected concept relationship with its ends reversed.
     c = s.begin();
@@ -124,7 +170,8 @@ class LogAndCommitTest extends StoreScenarioTest {
     var before = s.lastCommit();
 
     var absent = s.begin();
-    absent.address(Ref.urn("urn:scalardb:analytics:" + s.domain + ":element:c99.1"), "meaning");
+    absent.address(
+        Ref.urn("urn:scalardb:analytics:" + s.domain + ":dataset:shop.public.none"), "meaning");
     assertRejected(s, absent, "Missing reference: no element");
 
     var later = s.begin();
@@ -132,29 +179,109 @@ class LogAndCommitTest extends StoreScenarioTest {
     assertRejected(s, later, "does not name an earlier record");
 
     var otherDomain = s.begin();
-    otherDomain.address(Ref.urn("urn:scalardb:analytics:elsewhere:element:c2.1"), "meaning");
+    otherDomain.address(
+        Ref.urn("urn:scalardb:analytics:elsewhere:dataset:shop.public.orders"), "meaning");
     assertRejected(s, otherDomain, "another domain");
 
     var field = s.begin();
-    var concept = field.add(new LogRecord.Element(new ElementIdentity.Unique(ElementKind.CONCEPT)));
+    var concept =
+        field.add(new LogRecord.Element(new ElementIdentity.Unique(ElementKind.CONCEPT, "order")));
     field.add(
         new LogRecord.Element(
-            new ElementIdentity.PhysicalObject(ElementKind.FIELD, concept, "shop.orders.id")));
+            ElementIdentity.PhysicalObject.field(
+                concept, Scenario.column("shop.public.orders.id"))));
     assertRejected(s, field, "The parent of a Field is a Dataset");
 
     assertThat(s.lastCommit()).isEqualTo(before);
   }
 
   @Test
+  void sameNamesNeverMakeTheSameElement() {
+    var s = scenario();
+    var c = s.begin();
+    var sales = c.measure("ec-sales");
+    var otherSales = c.measure("ec-sales");
+    var first = s.write(c);
+    c = s.begin();
+    var laterSales = c.measure("ec-sales");
+    var later = s.write(c);
+
+    // Two Measures a model names alike stay distinct: the store appends a sequence number to a
+    // slug already taken, in log order, whether earlier in the request or in an earlier commit.
+    var prefix = "urn:scalardb:analytics:" + s.domain + ":";
+    assertThat(first.urn(sales)).isEqualTo(prefix + "measure:ec-sales");
+    assertThat(first.urn(otherSales)).isEqualTo(prefix + "measure:ec-sales~2");
+    assertThat(later.urn(laterSales)).isEqualTo(prefix + "measure:ec-sales~3");
+
+    // A slug is not shared across kinds, since an element's kind is part of its URN.
+    c = s.begin();
+    var concept = c.concept("ec-sales");
+    assertThat(s.write(c).urn(concept)).isEqualTo(prefix + "concept:ec-sales");
+
+    // Facts at one Fact Address keep counting across commits.
+    c = s.begin();
+    var meaning = c.address(first.ref(sales), "meaning");
+    c.candidate(meaning, "sales including tax");
+    var withMeaning = s.write(c);
+    c = s.begin();
+    var excludingTax = c.candidate(withMeaning.ref(meaning), "sales excluding tax");
+    assertThat(s.write(c).urn(excludingTax)).isEqualTo(prefix + "fact:measure:ec-sales/meaning/2");
+  }
+
+  @Test
+  void aFieldIsAColumnOfItsDatasetsTable() {
+    var s = scenario();
+    var c = s.begin();
+    var orders = c.dataset("shop.public.orders");
+    var customers = c.dataset("shop.public.customers");
+    c.field(customers, "shop.public.customers.id");
+    var written = s.write(c);
+    var ordersUrn = written.urn(orders);
+    var before = s.lastCommit();
+
+    // A column of another table, whether or not a Field for it exists already.
+    var elsewhere = s.begin();
+    elsewhere.field(Ref.urn(ordersUrn), "shop.public.customers.name");
+    assertRejected(s, elsewhere, "belongs to its Dataset's table");
+    var existingElsewhere = s.begin();
+    existingElsewhere.field(Ref.urn(ordersUrn), "shop.public.customers.id");
+    assertRejected(s, existingElsewhere, "belongs to Dataset " + written.urn(customers));
+
+    // A technical reference never moves, so a Dataset cannot be pointed at another table.
+    var moved = s.begin();
+    var reference = moved.address(Ref.urn(ordersUrn), Vocabulary.TECHNICAL_REFERENCE);
+    moved.accept(moved.closedRangeFact(reference, Scenario.table("shop.public.sales").canonical()));
+    assertRejected(s, moved, "A technical reference never moves");
+
+    var proposed = s.begin();
+    proposed.add(
+        new LogRecord.Element(
+            ordersUrn.replace(":dataset:", ":concept:"),
+            new ElementIdentity.Unique(ElementKind.CONCEPT, "order")));
+    assertRejected(s, proposed, "issued when it is written");
+
+    assertThat(s.lastCommit()).isEqualTo(before);
+  }
+
+  @Test
+  void aSlugIsAShortBusinessName() {
+    for (var slug : List.of("", "EC-Sales", "ec sales", "ec--sales", "-ec", "ec.sales")) {
+      assertThatThrownBy(() -> new ElementIdentity.Unique(ElementKind.MEASURE, slug))
+          .as(slug)
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+  }
+
+  @Test
   void aCorrespondenceIsIdentifiedByItsMatchingCondition() {
     var s = scenario();
     var c = s.begin();
-    var members = c.dataset("pos.members");
-    var customers = c.dataset("shop.customers");
-    var memberShop = c.field(members, "pos.members.shop_code");
-    var memberMail = c.field(members, "pos.members.mail");
-    var customerShop = c.field(customers, "shop.customers.shop_code");
-    var customerMail = c.field(customers, "shop.customers.email");
+    var members = c.dataset("pos.public.members");
+    var customers = c.dataset("shop.public.customers");
+    var memberShop = c.field(members, "pos.public.members.shop_code");
+    var memberMail = c.field(members, "pos.public.members.mail");
+    var customerShop = c.field(customers, "shop.public.customers.shop_code");
+    var customerMail = c.field(customers, "shop.public.customers.email");
     var composite =
         c.correspondence(
             MatchingCondition.direct(
@@ -193,13 +320,13 @@ class LogAndCommitTest extends StoreScenarioTest {
   void eachEndOfACorrespondenceIsTheFieldsOfOneDataset() {
     var s = scenario();
     var c = s.begin();
-    var orders = c.dataset("shop.orders");
-    var customers = c.dataset("shop.customers");
-    var members = c.dataset("pos.members");
-    var customerId = c.field(orders, "shop.orders.customer_id");
-    var id = c.field(customers, "shop.customers.id");
-    var memberName = c.field(members, "pos.members.name");
-    var customerName = c.field(customers, "shop.customers.name");
+    var orders = c.dataset("shop.public.orders");
+    var customers = c.dataset("shop.public.customers");
+    var members = c.dataset("pos.public.members");
+    var customerId = c.field(orders, "shop.public.orders.customer_id");
+    var id = c.field(customers, "shop.public.customers.id");
+    var memberName = c.field(members, "pos.public.members.name");
+    var customerName = c.field(customers, "shop.public.customers.name");
     var written = s.write(c);
     var before = s.lastCommit();
 
@@ -224,15 +351,15 @@ class LogAndCommitTest extends StoreScenarioTest {
   void aCorrespondenceThroughAMappingTableIsAChainOfHops() {
     var s = scenario();
     var c = s.begin();
-    var customers = c.dataset("shop.customers");
-    var mapping = c.dataset("crm.customer_members");
-    var members = c.dataset("pos.members");
-    var orders = c.dataset("shop.orders");
-    var customerId = c.field(customers, "shop.customers.id");
-    var mappedCustomer = c.field(mapping, "crm.customer_members.customer_id");
-    var mappedMember = c.field(mapping, "crm.customer_members.member_id");
-    var memberId = c.field(members, "pos.members.id");
-    var orderId = c.field(orders, "shop.orders.id");
+    var customers = c.dataset("shop.public.customers");
+    var mapping = c.dataset("crm.public.customer_members");
+    var members = c.dataset("pos.public.members");
+    var orders = c.dataset("shop.public.orders");
+    var customerId = c.field(customers, "shop.public.customers.id");
+    var mappedCustomer = c.field(mapping, "crm.public.customer_members.customer_id");
+    var mappedMember = c.field(mapping, "crm.public.customer_members.member_id");
+    var memberId = c.field(members, "pos.public.members.id");
+    var orderId = c.field(orders, "shop.public.orders.id");
     var written = s.write(c);
 
     // From the customers through the mapping table to the members.
@@ -346,7 +473,11 @@ class LogAndCommitTest extends StoreScenarioTest {
                 "That one is tax-exclusive",
                 SessionPurpose.COMPOSING_A_QUERY,
                 "Monthly sales by shop",
-                List.of(Ref.urn("urn:scalardb:analytics:" + s.domain + ":fact:c99.1")))));
+                List.of(
+                    Ref.urn(
+                        "urn:scalardb:analytics:"
+                            + s.domain
+                            + ":fact:dataset:shop.public.none/existence/1")))));
     assertRejected(s, unknownFact, "Missing reference: no Fact");
 
     assertThat(s.lastCommit()).isEqualTo(before);
@@ -356,7 +487,7 @@ class LogAndCommitTest extends StoreScenarioTest {
   void theReplayCheckReportsMaterializedRecordsThatDivergeFromTheLog() throws Exception {
     var s = scenario();
     var c = s.begin();
-    var orders = c.dataset("shop.orders");
+    var orders = c.dataset("shop.public.orders");
     var rowKind = c.address(orders, "row-kind");
     var written = s.write(c);
     var address = written.urn(rowKind);

@@ -189,22 +189,38 @@ references and written forms, and the form of newly issued URNs may change. The 
 never knowledge either: meaning is read only from Facts.
 [`../design/semantic-catalog-urn-form.md`](../design/semantic-catalog-urn-form.md) records why.
 
-| Record | Identifier, for example | A new one appears |
-| --- | --- | --- |
-| Catalog Snapshot | Commit number | At each commit |
-| Log record | Commit number and order within the commit | For each record |
-| Dataset | Data-source registration, namespace, and table name: `dataset:shop.public.orders` | When a Fact stating its existence is first accepted |
-| Field | Its table's identifier and the column name: `field:shop.public.orders.amount` | When a Fact stating its existence is first accepted |
-| Concept, Measure, Dimension, business term | A slug the proposing Generator gives: `measure:ec-sales` | When a Fact stating its existence is first accepted |
-| Edge element | Its kind and the identifiers of its ends | When no existing one is the same under the rules below |
-| Fact Address | Its element's identifier and predicate: `…orders.amount/meaning` | When no existing one is the same under the rules below |
-| Fact | Its Fact Address's identifier and a sequence number | When no existing one is the same under the rules below |
-| Fact Revision | Fact URN and the position of the Fact Event that produced it | Each time a Fact Event applies |
-| Input Resource, Input Observation, build task | Issued value | On a new source, on each observation, for each build task |
+The record kind and identifier of each record, with full URNs for a domain `sales`:
 
-Where an identifier built this way is already taken, as for two edges between the same ends with
-different identifying parts, or a Fact Address with a non-empty applicability scope, a sequence
-number is appended. Characters a URN cannot carry as written are percent-encoded.
+| Record | Record kind | Identifier | Example | A new one appears |
+| --- | --- | --- | --- | --- |
+| Catalog Snapshot | `catalog-snapshot` | Commit number | `urn:scalardb:analytics:sales:catalog-snapshot:3` | At each commit |
+| Log record | `log-record` | Log position: `c<commit>.<order within the commit>` | `urn:scalardb:analytics:sales:log-record:c2.14` | For each record |
+| Dataset | `dataset` | `<data-source registration>.<namespace>.<table>` | `urn:scalardb:analytics:sales:dataset:shop.public.orders` | When a Fact stating its existence is first accepted |
+| Field | `field` | Its table's identifier and `.<column>` | `urn:scalardb:analytics:sales:field:shop.public.orders.amount` | When a Fact stating its existence is first accepted |
+| Concept, Measure, Dimension, business term | `concept`, `measure`, `dimension`, `business-term` | The slug the proposing Generator gives | `urn:scalardb:analytics:sales:measure:ec-sales` | When a Fact stating its existence is first accepted |
+| Edge element | `identifier-correspondence`, `concept-relationship` | `<one end>,<other end>`, each end the identifiers of its elements, sorted and joined by `+`; an undirected edge's ends in a fixed order | `urn:scalardb:analytics:sales:identifier-correspondence:shop.public.orders.customer_id,shop.public.customers.id` | When no existing one is the same under the rules below |
+| Fact Address | `fact-address` | `<element kind>:<element identifier>/<predicate>` | `urn:scalardb:analytics:sales:fact-address:field:shop.public.orders.amount/meaning` | When no existing one is the same under the rules below |
+| Fact | `fact` | `<Fact Address identifier>/<sequence number from 1>` | `urn:scalardb:analytics:sales:fact:field:shop.public.orders.amount/meaning/1` | When no existing one is the same under the rules below |
+| Fact Revision | `fact-revision` | `<Fact identifier>@<log position of the producing Fact Event>` | `urn:scalardb:analytics:sales:fact-revision:field:shop.public.orders.amount/meaning/1@c2.32` | Each time a Fact Event applies |
+| Input Resource, Input Observation | `input-resource`, `input-observation` | Log position of the creating record | `urn:scalardb:analytics:sales:input-observation:c2.10` | On a new source, on each observation |
+| Build task | — | Issued value | — | For each build task |
+
+Where an identifier built this way is already taken, `~<n>` is appended with the first free `n`
+from 2, in log order: a second Measure proposed with the slug `ec-sales` is
+`urn:scalardb:analytics:sales:measure:ec-sales~2`, and a third, in a later commit, `~3`. Two edges
+between the same ends with different identifying parts are told apart the same way. A Fact Address
+with a non-empty applicability scope, or of a free-description predicate, always has one
+(`…/meaning~2`), so the plain identifier stays with the Fact Address found by element and
+predicate. A Fact Address carries its element's kind as well as its identifier, because elements of
+different kinds may share a slug: `concept:ec-sales` and `measure:ec-sales` have different Fact
+Addresses. Facts at one Fact Address are numbered in log order, across commits.
+
+Names are percent-encoded as UTF-8 bytes, leaving only ASCII letters, digits, `-`, and `_` as
+written, so a name never contains a separator (`.`, `/`, `~`, `@`, `,`, `+`, `:`). A column
+`unit price` gives `field:shop.public.orders.unit%20price`, a column `売上` gives
+`field:shop.public.orders.%E5%A3%B2%E4%B8%8A`, and a table `sales.v2` gives
+`dataset:shop.public.sales%2Ev2`. A slug is lowercase words of letters and digits joined by single
+hyphens, at most 63 characters, so it needs no encoding.
 
 A slug is a short business name such as `ec-sales`, never a definitional attribute such as tax
 treatment, because a slug stays as issued. The proposing Generator, which for these kinds always

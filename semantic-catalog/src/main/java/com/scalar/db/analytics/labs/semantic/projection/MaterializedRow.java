@@ -47,6 +47,9 @@ public sealed interface MaterializedRow {
    * An element, used to match edges by identity and to find the Fields of a Dataset.
    *
    * @param parent the Dataset of a Field; absent for other kinds
+   * @param technicalReference the canonical form of the technical reference that identifies a
+   *     Dataset or a Field, by which a Field is checked to be a column of its Dataset's table;
+   *     absent for other kinds
    * @param createdCommit the commit that created the element
    * @param edge the identity of an edge; absent for a node
    */
@@ -54,6 +57,7 @@ public sealed interface MaterializedRow {
       String element,
       ElementKind kind,
       @Nullable String parent,
+      @Nullable String technicalReference,
       long createdCommit,
       @Nullable EdgeIdentity edge)
       implements MaterializedRow {

@@ -36,34 +36,49 @@ public sealed interface ElementIdentity {
   /**
    * A concept, Measure, Dimension, or business term. It is the same as an existing element only
    * when the proposer points to that element by its URN, so an element with this identity is always
-   * new.
+   * new, even when another element has the same slug.
+   *
+   * @param slug the short business name its proposer gives, such as {@code ec-sales}, from which
+   *     its URN is built; it is never knowledge about the element
    */
-  record Unique(ElementKind kind) implements ElementIdentity {
+  record Unique(ElementKind kind, String slug) implements ElementIdentity {
     public Unique {
       if (kind.edge() || kind.technical()) {
         throw new IllegalArgumentException(kind + " is not identified by pointing");
       }
+      Urns.requireSlug(slug);
     }
   }
 
   /**
    * A Dataset or a Field. It is the same as an existing element of its kind when their
    * technical-reference Facts that are neither rejected nor retired point to the same physical
-   * object, so a table rename keeps the element when only the technical reference is replaced.
+   * object. A technical reference never moves, so a renamed table or column is a new element.
    *
-   * @param parent the Dataset of a Field; absent for a Dataset
-   * @param technicalReference the physical object the element refers to, which is also the matching
-   *     value of the element's technical-reference Fact
+   * @param parent the Dataset of a Field, which refers to the Field's table; absent for a Dataset
+   * @param technicalReference the physical object the element refers to, whose canonical form is
+   *     also the matching value of the element's technical-reference Fact
    */
-  record PhysicalObject(ElementKind kind, @Nullable Ref parent, String technicalReference)
+  record PhysicalObject(@Nullable Ref parent, TechnicalReference technicalReference)
       implements ElementIdentity {
     public PhysicalObject {
-      if (!kind.technical()) {
-        throw new IllegalArgumentException(kind + " is not identified by a technical reference");
-      }
-      if ((kind == ElementKind.FIELD) != (parent != null)) {
+      if ((technicalReference instanceof TechnicalReference.Column) != (parent != null)) {
         throw new IllegalArgumentException("A Field, and only a Field, has a parent Dataset");
       }
+    }
+
+    public static PhysicalObject dataset(TechnicalReference.Table table) {
+      return new PhysicalObject(null, table);
+    }
+
+    public static PhysicalObject field(Ref dataset, TechnicalReference.Column column) {
+      return new PhysicalObject(dataset, column);
+    }
+
+    @JsonIgnore
+    @Override
+    public ElementKind kind() {
+      return technicalReference.elementKind();
     }
   }
 

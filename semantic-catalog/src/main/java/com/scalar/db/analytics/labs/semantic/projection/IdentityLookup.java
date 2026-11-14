@@ -45,4 +45,13 @@ public interface IdentityLookup {
 
   /** The Input Resource of a table's physical schema, by the Physical Catalog's identifier. */
   Optional<String> inputResourceByTable(String tableIdentifier);
+
+  /**
+   * Whether a name-based URN of an element, a Fact Address, or a Fact is already issued, so a new
+   * record must take another one.
+   */
+  boolean taken(String urn);
+
+  /** How many Facts a Fact Address has, from which a new Fact's sequence number starts. */
+  int factCount(String factAddress);
 }

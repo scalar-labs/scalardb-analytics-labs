@@ -4,6 +4,7 @@
  */
 package com.scalar.db.analytics.labs.semantic.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -21,10 +22,11 @@ import org.jspecify.annotations.Nullable;
  * log").
  *
  * <p>A commit holds one or more log records in order, each at its own {@linkplain LogPosition log
- * position}. Records that create something ({@link Element}, {@link FactAddress}, {@link Fact},
- * {@link InputResource}, {@link InputObservation}) are identified by the URN issued from that
- * position. {@linkplain FactEvent Fact Events} change how one Fact is treated, and each produces a
- * Fact Revision, and a {@link ResolveConflict} records a deciding party's choice in a conflict. Log
+ * position}. Records that create something are identified by a URN: an {@link Element}, a {@link
+ * FactAddress}, or a {@link Fact} by the {@linkplain Named name-based URN} the record holds, and an
+ * {@link InputResource} or an {@link InputObservation} by the URN issued from that position.
+ * {@linkplain FactEvent Fact Events} change how one Fact is treated, and each produces a Fact
+ * Revision, and a {@link ResolveConflict} records a deciding party's choice in a conflict. Log
  * records are never updated or deleted; everything materialized for reading is derived from them.
  *
  * <p>A record built for a commit request may refer to records of the same request by temporary
@@ -50,10 +52,42 @@ import org.jspecify.annotations.Nullable;
 })
 public sealed interface LogRecord {
   /**
+   * A record that creates a record identified by a name-based URN: an element, a Fact Address, or a
+   * Fact. The store issues the URN when it writes the commit and keeps it in the log record, so
+   * replaying the log reads the URNs issued rather than building them again, and a later change to
+   * how new URNs are built leaves earlier ones as they were.
+   */
+  sealed interface Named extends LogRecord {
+    /**
+     * The URN issued for the record created; the store sets it when the commit is written, so a
+     * commit request leaves it absent.
+     */
+    @Nullable String urn();
+
+    /**
+     * The URN issued for the record created.
+     *
+     * @throws IllegalStateException when the record has not been written yet
+     */
+    default String issuedUrn() {
+      var urn = urn();
+      if (urn == null) {
+        throw new IllegalStateException("A " + getClass().getSimpleName() + " not yet written");
+      }
+      return urn;
+    }
+  }
+
+  /**
    * A new element: a node or an edge of the labeled property graph. A proposal that the {@linkplain
    * ElementIdentity identity} finds to be as an existing element is not written.
    */
-  record Element(ElementIdentity identity) implements LogRecord {}
+  record Element(@Nullable String urn, ElementIdentity identity) implements Named {
+    /** A proposed element, for a commit request. */
+    public Element(ElementIdentity identity) {
+      this(null, identity);
+    }
+  }
 
   /**
    * A new Fact Address: what is being judged, independently of any value.
@@ -66,8 +100,28 @@ public sealed interface LogRecord {
    *     which has no identity of its own; absent for other predicates
    */
   record FactAddress(
-      Ref element, String predicate, Scope scope, @Nullable String predicateDefinition)
-      implements LogRecord {}
+      @Nullable String urn,
+      Ref element,
+      String predicate,
+      Scope scope,
+      @Nullable String predicateDefinition)
+      implements Named {
+    /** A proposed Fact Address, for a commit request. */
+    public FactAddress(
+        Ref element, String predicate, Scope scope, @Nullable String predicateDefinition) {
+      this(null, element, predicate, scope, predicateDefinition);
+    }
+
+    /**
+     * Whether the Fact Address is found by its element and predicate: its scope is empty and its
+     * predicate is not free-description. Any other Fact Address is the same as another only when
+     * the proposer points to it.
+     */
+    @JsonIgnore
+    public boolean foundByPredicate() {
+      return scope.isEmpty() && predicateDefinition == null;
+    }
+  }
 
   /**
    * A new Fact: an immutable statement that binds a value to one Fact Address. Different values for
@@ -79,8 +133,13 @@ public sealed interface LogRecord {
    *     at one Fact Address the same; absent for other predicates, whose Facts are the same only
    *     when the proposer points to them
    */
-  record Fact(Ref address, JsonNode value, @Nullable IdentityKey identityKey)
-      implements LogRecord {}
+  record Fact(@Nullable String urn, Ref address, JsonNode value, @Nullable IdentityKey identityKey)
+      implements Named {
+    /** A proposed Fact, for a commit request. */
+    public Fact(Ref address, JsonNode value, @Nullable IdentityKey identityKey) {
+      this(null, address, value, identityKey);
+    }
+  }
 
   /**
    * A new Input Resource: a source of input whose changes are tracked, such as one table's physical

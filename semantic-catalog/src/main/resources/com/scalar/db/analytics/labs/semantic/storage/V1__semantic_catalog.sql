@@ -47,11 +47,14 @@ CREATE INDEX log_records_target_fact_address
     WHERE target_fact_address IS NOT NULL;
 
 -- Edge ends hold each end in its canonical form, a JSON array of the URNs of its elements.
+-- technical_reference is the canonical form of the table or column that identifies a Dataset or a
+-- Field.
 CREATE TABLE semantic_catalog.elements (
     domain text NOT NULL,
     element text NOT NULL,
     kind text NOT NULL,
     parent text,
+    technical_reference text,
     created_commit bigint NOT NULL,
     edge_end_a text,
     edge_end_b text,

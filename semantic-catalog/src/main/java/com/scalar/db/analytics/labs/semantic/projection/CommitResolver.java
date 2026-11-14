@@ -15,12 +15,15 @@ import com.scalar.db.analytics.labs.semantic.model.LogRecord.Basis;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord.FactEvent;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
 import com.scalar.db.analytics.labs.semantic.model.Urns;
+import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.ElementRow;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.UnaryOperator;
 import org.jspecify.annotations.Nullable;
 
@@ -29,18 +32,19 @@ import org.jspecify.annotations.Nullable;
  * {@code SemanticCatalogStore.commit} inside the writing transaction, before the {@link Projector}
  * validates and applies the records.
  *
- * <p>Both what it decides need that transaction. URNs come from log positions, which exist only
- * once the commit is numbered, and whether a proposal is the same as an existing record is judged
- * in the transaction's snapshot. A caller therefore refers to the records it creates in the same
- * request, such as a new Fact and its acceptance, by temporary numbers, and only to written records
- * by URN.
+ * <p>Both what it decides need that transaction. Whether a proposal is the same as an existing
+ * record, and whether a URN is already taken, are judged in the transaction's snapshot, and the
+ * URNs of Input Resources and Input Observations come from log positions, which exist only once the
+ * commit is numbered. A caller therefore refers to the records it creates in the same request, such
+ * as a new Fact and its acceptance, by temporary numbers, and only to written records by URN.
  *
  * <p>Records are resolved in request order. Each record that would create something is first
  * matched against existing records by the identity rules (edges, empty-scope Fact Addresses,
  * closed-range Facts, Input Resources, and Datasets and Fields by technical reference), including
  * records earlier in the same request. A matched record is not written, and references to it lead
- * to the existing record. Every other record gets the next position in the commit, and temporary
- * numbers are replaced by the URNs issued from those positions.
+ * to the existing record. Every other record gets the next position in the commit. A new element,
+ * Fact Address, or Fact is issued a name-based URN, which its log record keeps; it is never decided
+ * from URNs whether two records are the same. Temporary numbers are replaced by the URNs issued.
  *
  * <p>What a temporary number stands for depends on where it is used. It names the record created or
  * matched where a record is expected, the log record where a basis or a policy version is expected,
@@ -56,6 +60,9 @@ public final class CommitResolver {
   private final Map<String, String> localLatestObservations = new HashMap<>();
   private final List<PositionedRecord> written = new ArrayList<>();
   private final Map<Integer, String> urns = new LinkedHashMap<>();
+  private final Set<String> issued = new HashSet<>();
+  private final Map<String, Integer> nextFactNumbers = new HashMap<>();
+  private final Map<String, String> localParents = new HashMap<>();
 
   /**
    * @param records the log records to write, in log order
@@ -121,13 +128,29 @@ public final class CommitResolver {
     var existing = existing(record);
     var index = targets.size();
     if (existing.isPresent()) {
+      requireSameParent(record, existing.get());
       targets.add(new Target(existing.get(), null, null));
       urns.put(index, existing.get());
       return;
     }
     var at = new LogPosition(commit, written.size() + 1);
     var logRecord = Urns.logRecord(domain, at);
-    var created = createdUrn(record, at);
+    String created;
+    switch (record) {
+      case LogRecord.Named named -> {
+        created = issue(named);
+        record = withUrn(named, created);
+        if (named instanceof LogRecord.Element element
+            && element.identity() instanceof ElementIdentity.PhysicalObject technical
+            && technical.parent() != null) {
+          localParents.put(created, technical.parent().urnValue());
+        }
+      }
+      case LogRecord.InputResource ignored -> created = Urns.of(domain, Urns.INPUT_RESOURCE, at);
+      case LogRecord.InputObservation ignored ->
+          created = Urns.of(domain, Urns.INPUT_OBSERVATION, at);
+      default -> created = null;
+    }
     var revision =
         record instanceof FactEvent event ? Urns.factRevision(event.fact().urnValue(), at) : null;
     targets.add(new Target(created, logRecord, revision));
@@ -139,17 +162,116 @@ public final class CommitResolver {
     written.add(new PositionedRecord(at, record));
   }
 
-  private @Nullable String createdUrn(LogRecord record, LogPosition at) {
-    var kind =
+  /**
+   * Requires a proposed Field that matched an existing one to name the same parent Dataset. The
+   * match is found by technical reference alone, and a matched record is not written, so the
+   * projector never checks it against its parent; a proposal under another Dataset would otherwise
+   * silently lead to a Field of another table.
+   */
+  private void requireSameParent(LogRecord record, String existing) {
+    if (record instanceof LogRecord.Element element
+        && element.identity() instanceof ElementIdentity.PhysicalObject technical
+        && technical.parent() != null) {
+      var parent = technical.parent().urnValue();
+      var existingParent =
+          localParents.containsKey(existing)
+              ? localParents.get(existing)
+              : projection.element(existing).map(ElementRow::parent).orElse(null);
+      if (!parent.equals(existingParent)) {
+        throw new IllegalArgumentException(
+            "Field "
+                + existing
+                + " for column "
+                + technical.technicalReference().canonical()
+                + " belongs to Dataset "
+                + existingParent
+                + ", not to "
+                + parent);
+      }
+    }
+  }
+
+  // URNs
+
+  /**
+   * Issues the name-based URN of a new element, Fact Address, or Fact: the URN built from its
+   * names, or, when that is taken in the store or earlier in the request, the first free one with a
+   * sequence number appended. A Fact always has a sequence number. A Fact Address that is not found
+   * by its element and predicate always has one too, so the plain identifier stays with the Fact
+   * Address that is.
+   */
+  private String issue(LogRecord.Named record) {
+    var urn =
         switch (record) {
-          case LogRecord.Element ignored -> Urns.ELEMENT;
-          case LogRecord.FactAddress ignored -> Urns.FACT_ADDRESS;
-          case LogRecord.Fact ignored -> Urns.FACT;
-          case LogRecord.InputResource ignored -> Urns.INPUT_RESOURCE;
-          case LogRecord.InputObservation ignored -> Urns.INPUT_OBSERVATION;
-          default -> null;
+          case LogRecord.Element element -> free(elementUrn(element.identity()), true);
+          case LogRecord.FactAddress address ->
+              free(
+                  Urns.factAddress(address.element().urnValue(), address.predicate()),
+                  address.foundByPredicate());
+          case LogRecord.Fact fact -> {
+            // Facts are never deleted and every one at an address is numbered, so the count of
+            // Facts at the address is where the free numbers start.
+            var address = fact.address().urnValue();
+            var number = nextFactNumbers.computeIfAbsent(address, key -> lookup.factCount(key) + 1);
+            while (taken(Urns.fact(address, number))) {
+              number++;
+            }
+            nextFactNumbers.put(address, number + 1);
+            yield Urns.fact(address, number);
+          }
         };
-    return kind == null ? null : Urns.of(domain, kind, at);
+    issued.add(urn);
+    return urn;
+  }
+
+  private String elementUrn(ElementIdentity identity) {
+    return switch (identity) {
+      case ElementIdentity.Unique named -> Urns.element(domain, named.kind(), named.slug());
+      case ElementIdentity.PhysicalObject technical ->
+          Urns.element(domain, technical.kind(), technical.technicalReference().canonical());
+      case ElementIdentity.Edge edge -> {
+        var from = edge.fromEnd().stream().map(Ref::urnValue).toList();
+        var to = edge.toEnd().stream().map(Ref::urnValue).toList();
+        var swap =
+            !edge.directed()
+                && Projection.canonicalEnd(from).compareTo(Projection.canonicalEnd(to)) > 0;
+        yield Urns.edge(domain, edge.kind(), swap ? to : from, swap ? from : to);
+      }
+    };
+  }
+
+  /**
+   * The URN itself when it is free and may be used plain, or else the first free one with a
+   * sequence number appended.
+   */
+  private String free(String urn, boolean plain) {
+    if (plain && !taken(urn)) {
+      return urn;
+    }
+    var number = 2;
+    while (taken(Urns.numbered(urn, number))) {
+      number++;
+    }
+    return Urns.numbered(urn, number);
+  }
+
+  private boolean taken(String urn) {
+    return issued.contains(urn) || lookup.taken(urn);
+  }
+
+  private static LogRecord withUrn(LogRecord.Named record, String urn) {
+    return switch (record) {
+      case LogRecord.Element element -> new LogRecord.Element(urn, element.identity());
+      case LogRecord.FactAddress address ->
+          new LogRecord.FactAddress(
+              urn,
+              address.element(),
+              address.predicate(),
+              address.scope(),
+              address.predicateDefinition());
+      case LogRecord.Fact fact ->
+          new LogRecord.Fact(urn, fact.address(), fact.value(), fact.identityKey());
+    };
   }
 
   // Identity
@@ -169,7 +291,7 @@ public final class CommitResolver {
             case ElementIdentity.PhysicalObject technical ->
                 lookup.technicalElement(
                     technical.kind(),
-                    IdentityKey.choice(technical.technicalReference()).canonical());
+                    IdentityKey.choice(technical.technicalReference().canonical()).canonical());
             case ElementIdentity.Edge edge ->
                 lookup.edge(edge.kind(), Projection.edgeIdentity(edge));
             case ElementIdentity.Unique ignored -> Optional.empty();
@@ -191,7 +313,11 @@ public final class CommitResolver {
       case LogRecord.Element element ->
           switch (element.identity()) {
             case ElementIdentity.PhysicalObject technical ->
-                Optional.of("technical " + technical.kind() + " " + technical.technicalReference());
+                Optional.of(
+                    "technical "
+                        + technical.kind()
+                        + " "
+                        + technical.technicalReference().canonical());
             case ElementIdentity.Edge edge -> {
               var identity = Projection.edgeIdentity(edge);
               yield Optional.of(
@@ -209,7 +335,7 @@ public final class CommitResolver {
             case ElementIdentity.Unique ignored -> Optional.empty();
           };
       case LogRecord.FactAddress address ->
-          address.scope().isEmpty() && address.predicateDefinition() == null
+          address.foundByPredicate()
               ? Optional.of("address " + address.element().urnValue() + " " + address.predicate())
               : Optional.empty();
       case LogRecord.Fact fact -> {
@@ -236,6 +362,9 @@ public final class CommitResolver {
   // References
 
   private LogRecord resolveRefs(LogRecord record) {
+    if (record instanceof LogRecord.Named named && named.urn() != null) {
+      throw new IllegalArgumentException("The URN of a new record is issued when it is written");
+    }
     UnaryOperator<Ref> toRecord = ref -> resolve(ref, Kind.RECORD);
     return switch (record) {
       case LogRecord.Element element ->
@@ -244,7 +373,6 @@ public final class CommitResolver {
                 case ElementIdentity.Unique pointed -> pointed;
                 case ElementIdentity.PhysicalObject technical ->
                     new ElementIdentity.PhysicalObject(
-                        technical.kind(),
                         technical.parent() == null ? null : toRecord.apply(technical.parent()),
                         technical.technicalReference());
                 case ElementIdentity.Edge edge -> edge.mapRefs(toRecord);

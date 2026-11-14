@@ -4,7 +4,14 @@
  */
 package com.scalar.db.analytics.labs.semantic.model;
 
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Locale;
+import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * The form of URNs: {@code urn:scalardb:analytics:<domain>:<record kind>:<identifier>} (see {@code
@@ -14,12 +21,32 @@ import java.util.regex.Pattern;
  * <p>The domain comes first after the namespace, so a domain identifier is embedded in every URN
  * the domain issues and must keep that form parseable.
  *
- * <p>A record created by a log record is identified by that log record's {@linkplain LogPosition
- * position}, such as {@code urn:scalardb:analytics:sales:fact:c3.1}. Log positions are never
- * reused, so the same URNs are issued again when the log is replayed from empty. The identifier
- * carries none of the record's content. A Fact Revision is identified by its Fact and the position
- * of the Fact Event that produced it, such as {@code
- * urn:scalardb:analytics:sales:fact-revision:c3.1@c5.2}.
+ * <p>Elements, Fact Addresses, and Facts get identifiers built from names, so a person can tell
+ * what a URN names:
+ *
+ * <ul>
+ *   <li>an element's record kind is its element kind, and its identifier is the canonical form of
+ *       its {@linkplain TechnicalReference technical reference} ({@code
+ *       dataset:shop.public.orders}, {@code field:shop.public.orders.amount}), the slug its
+ *       proposer gave ({@code measure:ec-sales}), or for an edge the identifiers of its ends
+ *       ({@code
+ *       identifier-correspondence:shop.public.orders.customer_id,shop.public.customers.id});
+ *   <li>a Fact Address's identifier is its element's kind and identifier and its predicate ({@code
+ *       fact-address:field:shop.public.orders.amount/meaning});
+ *   <li>a Fact's identifier is its Fact Address's identifier and a sequence number ({@code
+ *       fact:field:shop.public.orders.amount/meaning/1}).
+ * </ul>
+ *
+ * <p>Where such an identifier is already taken, a sequence number is {@linkplain #numbered
+ * appended} ({@code measure:ec-sales~2}). Names are {@linkplain #encode(String) percent-encoded},
+ * so a name never contains a separator. The form is a construction choice, not a contract: only the
+ * store builds these URNs, once, when it writes the record that creates them, and the log keeps the
+ * URN it issued.
+ *
+ * <p>Input Resources, Input Observations, and log records are identified by the {@linkplain
+ * LogPosition position} of a log record ({@code input-observation:c3.1}), and a Catalog Snapshot by
+ * its commit number. A Fact Revision is identified by its Fact and the position of the Fact Event
+ * that produced it ({@code fact-revision:field:shop.public.orders.amount/meaning/1@c5.2}).
  */
 public final class Urns {
   /** The namespace of every URN; the product defines no abbreviation of its name. */
@@ -32,7 +59,12 @@ public final class Urns {
    */
   public static final Pattern DOMAIN = Pattern.compile("[a-z0-9][a-z0-9-]{0,62}");
 
-  public static final String ELEMENT = "element";
+  /**
+   * The form of a slug: words of lowercase letters and digits joined by single hyphens, at most 63
+   * characters. It needs no encoding and contains no separator.
+   */
+  public static final Pattern SLUG = Pattern.compile("(?=.{1,63}$)[a-z0-9]+(-[a-z0-9]+)*");
+
   public static final String FACT_ADDRESS = "fact-address";
   public static final String FACT = "fact";
   public static final String FACT_REVISION = "fact-revision";
@@ -40,6 +72,11 @@ public final class Urns {
   public static final String INPUT_OBSERVATION = "input-observation";
   public static final String LOG_RECORD = "log-record";
   public static final String CATALOG_SNAPSHOT = "catalog-snapshot";
+
+  private static final Set<String> POSITIONAL =
+      Set.of(INPUT_RESOURCE, INPUT_OBSERVATION, LOG_RECORD);
+  private static final Set<String> ELEMENT_KINDS =
+      Arrays.stream(ElementKind.values()).map(Urns::recordKind).collect(Collectors.toSet());
 
   private Urns() {}
 
@@ -55,7 +92,111 @@ public final class Urns {
     }
   }
 
+  /**
+   * Checks that a proposer's slug has the {@linkplain #SLUG required form}.
+   *
+   * @throws IllegalArgumentException when it does not
+   */
+  public static void requireSlug(String slug) {
+    if (!SLUG.matcher(slug).matches()) {
+      throw new IllegalArgumentException(
+          "A slug is lowercase words of letters and digits joined by hyphens: " + slug);
+    }
+  }
+
+  /**
+   * Percent-encodes a name for use in an identifier. Every character other than an ASCII letter, a
+   * digit, a hyphen, or an underscore is written as the percent-encoded bytes of its UTF-8 form, so
+   * an encoded name never contains a separator.
+   */
+  public static String encode(String name) {
+    var encoded = new StringBuilder();
+    for (var b : name.getBytes(StandardCharsets.UTF_8)) {
+      var c = (char) (b & 0xff);
+      if ((c >= 'a' && c <= 'z')
+          || (c >= 'A' && c <= 'Z')
+          || (c >= '0' && c <= '9')
+          || c == '-'
+          || c == '_') {
+        encoded.append(c);
+      } else {
+        encoded.append('%').append(String.format(Locale.ROOT, "%02X", (int) c));
+      }
+    }
+    return encoded.toString();
+  }
+
+  /** The record kind of an element kind's URNs, such as {@code business-term}. */
+  public static String recordKind(ElementKind kind) {
+    return kind.name().toLowerCase(Locale.ROOT).replace('_', '-');
+  }
+
+  /** Whether a record kind is that of an element. */
+  public static boolean isElementKind(String recordKind) {
+    return ELEMENT_KINDS.contains(recordKind);
+  }
+
+  /** The URN of an element of a kind, from its name-based identifier. */
+  public static String element(String domain, ElementKind kind, String identifier) {
+    return PREFIX + domain + ":" + recordKind(kind) + ":" + identifier;
+  }
+
+  /**
+   * The URN of an edge, from its kind and the URNs of the elements of its ends. The identifiers of
+   * one end's elements are sorted; the caller orders the ends of an undirected edge.
+   */
+  public static String edge(
+      String domain, ElementKind kind, Collection<String> fromEnd, Collection<String> toEnd) {
+    return element(domain, kind, end(fromEnd) + "," + end(toEnd));
+  }
+
+  private static String end(Collection<String> elements) {
+    return elements.stream()
+        .map(Urns::identifier)
+        .sorted()
+        .distinct()
+        .collect(Collectors.joining("+"));
+  }
+
+  /** The URN of the Fact Address of an element and a predicate. */
+  public static String factAddress(String element, String predicate) {
+    var parsed = parse(element);
+    return PREFIX
+        + parsed.domain()
+        + ":"
+        + FACT_ADDRESS
+        + ":"
+        + parsed.kind()
+        + ":"
+        + parsed.identifier()
+        + "/"
+        + encode(predicate);
+  }
+
+  /** The URN of the Fact with a sequence number at a Fact Address. */
+  public static String fact(String factAddress, int number) {
+    var parsed = parse(factAddress);
+    requireKind(parsed, factAddress, FACT_ADDRESS);
+    return PREFIX + parsed.domain() + ":" + FACT + ":" + parsed.identifier() + "/" + number;
+  }
+
+  /**
+   * A name-based URN with a sequence number appended, for when the URN itself is already taken.
+   *
+   * @param number the sequence number, from 2
+   */
+  public static String numbered(String urn, int number) {
+    if (number < 2) {
+      throw new IllegalArgumentException("Appended sequence numbers start at 2: " + number);
+    }
+    return urn + "~" + number;
+  }
+
+  /** The URN of a record identified by the position of a log record. */
   public static String of(String domain, String kind, LogPosition position) {
+    if (!POSITIONAL.contains(kind)) {
+      throw new IllegalArgumentException("Not identified by a log position: " + kind);
+    }
     return PREFIX + domain + ":" + kind + ":" + position;
   }
 
@@ -95,8 +236,9 @@ public final class Urns {
     return LogPosition.parse(identifier.substring(revisionSeparator(identifier, revision) + 1));
   }
 
+  // Names are encoded, so the last '@' always separates the Fact from the event position.
   private static int revisionSeparator(String identifier, String revision) {
-    var at = identifier.indexOf('@');
+    var at = identifier.lastIndexOf('@');
     if (at < 0) {
       throw new IllegalArgumentException("Not a Fact Revision URN: " + revision);
     }
@@ -109,10 +251,10 @@ public final class Urns {
     }
   }
 
-  /** The log position that issued a position-based URN, such as a Fact or a log record. */
+  /** The log position that issued a position-based URN, such as an Input Observation's. */
   public static LogPosition position(String urn) {
     var parsed = parse(urn);
-    if (parsed.kind().equals(CATALOG_SNAPSHOT) || parsed.kind().equals(FACT_REVISION)) {
+    if (!POSITIONAL.contains(parsed.kind())) {
       throw new IllegalArgumentException("Not identified by one log position: " + urn);
     }
     return LogPosition.parse(parsed.identifier());
@@ -124,6 +266,11 @@ public final class Urns {
 
   public static String domain(String urn) {
     return parse(urn).domain();
+  }
+
+  /** The identifier, the part after the record kind. */
+  public static String identifier(String urn) {
+    return parse(urn).identifier();
   }
 
   private static Parsed parse(String urn) {

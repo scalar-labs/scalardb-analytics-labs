@@ -114,9 +114,8 @@ public final class FactRecord {
   }
 
   /** A Fact just created by its record, before its first acceptance. */
-  public static FactRecord created(String domain, LogPosition at, LogRecord.Fact record) {
-    return new FactRecord(
-        Urns.of(domain, Urns.FACT, at), record.address().urnValue(), record.value());
+  public static FactRecord created(LogRecord.Fact record) {
+    return new FactRecord(record.issuedUrn(), record.address().urnValue(), record.value());
   }
 
   /**
@@ -125,11 +124,11 @@ public final class FactRecord {
    *
    * @param upTo the last log position to apply, inclusive
    */
-  public static FactRecord fold(String domain, List<PositionedRecord> records, LogPosition upTo) {
+  public static FactRecord fold(List<PositionedRecord> records, LogPosition upTo) {
     if (records.isEmpty() || !(records.getFirst().record() instanceof LogRecord.Fact creation)) {
       throw new IllegalArgumentException("A Fact's records start with the record creating it");
     }
-    var record = created(domain, records.getFirst().position(), creation);
+    var record = created(creation);
     for (var positioned : records.subList(1, records.size())) {
       if (positioned.position().compareTo(upTo) > 0) {
         break;

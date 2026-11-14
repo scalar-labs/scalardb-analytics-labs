@@ -264,7 +264,7 @@ public final class CatalogSnapshot {
     if (records.isEmpty()) {
       return Optional.empty();
     }
-    var folded = FactRecord.fold(domain, records, upTo);
+    var folded = FactRecord.fold(records, upTo);
     return folded.state().isPresent() ? Optional.of(folded) : Optional.empty();
   }
 
@@ -343,7 +343,7 @@ public final class CatalogSnapshot {
           .factLogsOf(domain, changed, commit)
           .forEach(
               (fact, log) -> {
-                var folded = FactRecord.fold(domain, log, end);
+                var folded = FactRecord.fold(log, end);
                 if (folded.state().isPresent()) {
                   records.put(fact, folded);
                 }

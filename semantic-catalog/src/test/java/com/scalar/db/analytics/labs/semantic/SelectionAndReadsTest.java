@@ -29,7 +29,7 @@ class SelectionAndReadsTest extends StoreScenarioTest {
   void theSelectionMovesToTheReplacementAndBackWhenTheReplacementIsRetired() {
     var s = scenario();
     var c = s.begin();
-    var orders = c.dataset("shop.orders");
+    var orders = c.dataset("shop.public.orders");
     var meaning = c.address(orders, "meaning");
     var first = c.candidate(meaning, "orders including tax");
     c.confirmByMachine(first);
@@ -69,7 +69,7 @@ class SelectionAndReadsTest extends StoreScenarioTest {
   void independentlyMadeFactsConflictUntilTheDecidingPartyResolvesIt() {
     var s = scenario();
     var c = s.begin();
-    var orders = c.dataset("shop.orders");
+    var orders = c.dataset("shop.public.orders");
     var key = c.address(orders, "key");
     var declared = c.candidate(key, "order_id");
     c.confirmByMachine(declared);
@@ -121,7 +121,7 @@ class SelectionAndReadsTest extends StoreScenarioTest {
   void aResolutionLapsesWhenTheChosenFactIsRetiredAndConfirmedAgain() {
     var s = scenario();
     var c = s.begin();
-    var orders = c.dataset("shop.orders");
+    var orders = c.dataset("shop.public.orders");
     var premise = c.candidate(c.address(orders, "row-kind"), "event");
     c.confirmByMachine(premise);
     var key = c.address(orders, "key");
@@ -159,7 +159,7 @@ class SelectionAndReadsTest extends StoreScenarioTest {
   void twoReplacementsAtOnceLeaveTheReplacedFactSelectedWithItsContent() {
     var s = scenario();
     var c = s.begin();
-    var orders = c.dataset("shop.orders");
+    var orders = c.dataset("shop.public.orders");
     var meaning = c.address(orders, "meaning");
     var original = c.candidate(meaning, "orders");
     c.confirmByMachine(original);
@@ -185,7 +185,7 @@ class SelectionAndReadsTest extends StoreScenarioTest {
   void aBatchReadAtAnEarlierPointShowsFactsAsTheyStoodThen() {
     var s = scenario();
     var c = s.begin();
-    var orders = c.dataset("shop.orders");
+    var orders = c.dataset("shop.public.orders");
     var meaning = c.candidate(c.address(orders, "meaning"), "orders");
     c.confirmByMachine(meaning);
     var unit = c.candidate(c.address(orders, "unit"), "yen");
@@ -218,7 +218,7 @@ class SelectionAndReadsTest extends StoreScenarioTest {
   void factsConfirmedTogetherAtAnAddressWithoutSelectionConflictWithNothingSelected() {
     var s = scenario();
     var c = s.begin();
-    var orders = c.dataset("shop.orders");
+    var orders = c.dataset("shop.public.orders");
     var unit = c.address(orders, "unit");
     var yen = c.candidate(unit, "yen");
     var dollars = c.candidate(unit, "dollars");
@@ -241,7 +241,7 @@ class SelectionAndReadsTest extends StoreScenarioTest {
   void requestsReportCandidatesAwaitingJudgementAndMissingKnowledge() {
     var s = scenario();
     var c = s.begin();
-    var orders = c.dataset("shop.orders");
+    var orders = c.dataset("shop.public.orders");
     var key = c.candidate(c.address(orders, "key"), "order_id");
     var meaning = c.candidate(c.address(orders, "meaning"), "orders");
     c.evaluate(meaning, Transition.CONFIRM, PolicyResult.REQUEST_CONSENT);
@@ -277,7 +277,7 @@ class SelectionAndReadsTest extends StoreScenarioTest {
         .isEqualTo(new Knowledge.MissingKnowledge(List.of(written.urn(rejected))));
     assertThat(s.knowledge(point, element, "uniqueness")).isEmpty();
 
-    var unknown = "urn:scalardb:analytics:" + s.domain + ":element:c99.1";
+    var unknown = "urn:scalardb:analytics:" + s.domain + ":dataset:shop.public.none";
     assertThatThrownBy(() -> s.knowledge(point, unknown, "key"))
         .isInstanceOf(SemanticCatalogException.class)
         .hasMessageContaining("Target not found");
@@ -287,11 +287,11 @@ class SelectionAndReadsTest extends StoreScenarioTest {
   void theFieldsOfADatasetAndTheirKnowledgeAreReadInOneRequest() {
     var s = scenario();
     var c = s.begin();
-    var orders = c.dataset("shop.orders");
+    var orders = c.dataset("shop.public.orders");
     c.confirmByMachine(new Ref.Temp(2));
-    var amount = field(c, orders, "shop.orders.amount", true);
-    var status = field(c, orders, "shop.orders.status", true);
-    var pending = field(c, orders, "shop.orders.note", false);
+    var amount = field(c, orders, "shop.public.orders.amount", true);
+    var status = field(c, orders, "shop.public.orders.status", true);
+    var pending = field(c, orders, "shop.public.orders.note", false);
     var amountMeaning = c.candidate(c.address(amount, "meaning"), "order amount including tax");
     c.confirmByMachine(amountMeaning);
     var written = s.write(c);
@@ -338,12 +338,12 @@ class SelectionAndReadsTest extends StoreScenarioTest {
   void anEdgeIsRequestedByItsKindAndEnds() {
     var s = scenario();
     var c = s.begin();
-    var lines = c.dataset("shop.order_lines");
-    var orders = c.dataset("shop.orders");
-    var lineShop = c.field(lines, "shop.order_lines.shop_id");
-    var lineOrder = c.field(lines, "shop.order_lines.order_no");
-    var shop = c.field(orders, "shop.orders.shop_id");
-    var order = c.field(orders, "shop.orders.order_no");
+    var lines = c.dataset("shop.public.order_lines");
+    var orders = c.dataset("shop.public.orders");
+    var lineShop = c.field(lines, "shop.public.order_lines.shop_id");
+    var lineOrder = c.field(lines, "shop.public.order_lines.order_no");
+    var shop = c.field(orders, "shop.public.orders.shop_id");
+    var order = c.field(orders, "shop.public.orders.order_no");
     var correspondence =
         c.correspondence(
             MatchingCondition.direct(
@@ -386,7 +386,7 @@ class SelectionAndReadsTest extends StoreScenarioTest {
   void aSelectedFactShowsWhenAnInputItDependsOnHasANewerObservation() {
     var s = scenario();
     var c = s.begin();
-    var orders = c.dataset("shop.orders");
+    var orders = c.dataset("shop.public.orders");
     var resource = c.add(LogRecord.InputResource.physicalSchema("shop.orders"));
     var observation =
         c.add(
@@ -420,9 +420,10 @@ class SelectionAndReadsTest extends StoreScenarioTest {
     var field =
         c.add(
             new LogRecord.Element(
-                new ElementIdentity.PhysicalObject(ElementKind.FIELD, dataset, column)));
+                ElementIdentity.PhysicalObject.field(dataset, Scenario.column(column))));
     var existence = c.closedRangeCandidate(c.address(field, Vocabulary.EXISTENCE), "exists");
-    c.closedRangeCandidate(c.address(field, Vocabulary.TECHNICAL_REFERENCE), column);
+    c.closedRangeCandidate(
+        c.address(field, Vocabulary.TECHNICAL_REFERENCE), Scenario.column(column).canonical());
     if (confirmed) {
       c.confirmByMachine(existence);
     }

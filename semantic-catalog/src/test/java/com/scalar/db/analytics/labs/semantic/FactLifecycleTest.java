@@ -27,7 +27,7 @@ class FactLifecycleTest extends StoreScenarioTest {
   void statesAndRevisionsAreReadAsTheyStoodAtEachCommit() {
     var s = scenario();
     var c = s.begin();
-    var orders = c.dataset("shop.orders");
+    var orders = c.dataset("shop.public.orders");
     var key = c.candidate(c.address(orders, "key"), "order_id");
     var written = s.write(c);
     var fact = written.urn(key);
@@ -77,7 +77,7 @@ class FactLifecycleTest extends StoreScenarioTest {
   void consentConfirmsAndRetiresWhenThePolicyAsksForIt() {
     var s = scenario();
     var c = s.begin();
-    var orders = c.dataset("shop.orders");
+    var orders = c.dataset("shop.public.orders");
     var meaning = c.candidate(c.address(orders, "meaning"), "orders placed by customers");
     var request = c.evaluate(meaning, Transition.CONFIRM, PolicyResult.REQUEST_CONSENT);
     var written = s.write(c);
@@ -110,7 +110,7 @@ class FactLifecycleTest extends StoreScenarioTest {
   void factEventsTheStateDoesNotAcceptOrWithoutTheirBasisFailTheCommit() {
     var s = scenario();
     var c = s.begin();
-    var orders = c.dataset("shop.orders");
+    var orders = c.dataset("shop.public.orders");
     var key = c.address(orders, "key");
     var candidate = c.candidate(key, "order_id");
     var written = s.write(c);
@@ -137,7 +137,7 @@ class FactLifecycleTest extends StoreScenarioTest {
 
     // A new element comes with the acceptance of its existence.
     var bareElement = s.begin();
-    bareElement.add(new LogRecord.Element(new ElementIdentity.Unique(ElementKind.CONCEPT)));
+    bareElement.add(new LogRecord.Element(new ElementIdentity.Unique(ElementKind.CONCEPT, "bare")));
     assertRejected(s, bareElement, "acceptance of a Fact of its existence");
 
     // A new Fact is accepted in the commit that creates it.
@@ -166,7 +166,7 @@ class FactLifecycleTest extends StoreScenarioTest {
   void aRetirementProposalAgainstACandidateRejectsIt() {
     var s = scenario();
     var c = s.begin();
-    var orders = c.dataset("shop.orders");
+    var orders = c.dataset("shop.public.orders");
     var candidate = c.candidate(c.address(orders, "key"), "order_id");
     var written = s.write(c);
     var fact = written.ref(candidate);
@@ -182,7 +182,7 @@ class FactLifecycleTest extends StoreScenarioTest {
   void rejectedFactsReturnToCandidateOnlyWithANewDependency() {
     var s = scenario();
     var c = s.begin();
-    var orders = c.dataset("shop.orders");
+    var orders = c.dataset("shop.public.orders");
     var key = c.candidate(c.address(orders, "key"), "order_id");
     c.confirmByMachine(key);
     var rejected = c.candidate(c.address(orders, "meaning"), "orders");
@@ -212,7 +212,7 @@ class FactLifecycleTest extends StoreScenarioTest {
   void confirmationWaitsForPremisesAndRetiringAPremiseRetiresWhatRestsOnIt() {
     var s = scenario();
     var c = s.begin();
-    var orders = c.dataset("shop.orders");
+    var orders = c.dataset("shop.public.orders");
     var key = c.candidate(c.address(orders, "key"), "order_id");
     var rowKind = c.candidate(c.address(orders, "row-kind"), "event");
     var written = s.write(c);
@@ -255,7 +255,7 @@ class FactLifecycleTest extends StoreScenarioTest {
   void aRejectedPremiseCascadesToTheCandidatesThatRestOnIt() {
     var s = scenario();
     var c = s.begin();
-    var orders = c.dataset("shop.orders");
+    var orders = c.dataset("shop.public.orders");
     var key = c.candidate(c.address(orders, "key"), "order_id");
     var written = s.write(c);
     var keyFact = written.ref(key);
@@ -283,7 +283,7 @@ class FactLifecycleTest extends StoreScenarioTest {
   void replacementDependenciesNeitherMakeConfirmationWaitNorCascade() {
     var s = scenario();
     var c = s.begin();
-    var orders = c.dataset("shop.orders");
+    var orders = c.dataset("shop.public.orders");
     var meaning = c.address(orders, "meaning");
     var first = c.candidate(meaning, "orders");
     var written = s.write(c);
@@ -318,7 +318,7 @@ class FactLifecycleTest extends StoreScenarioTest {
   void anAcceptanceReplacesTheDependenciesWhileCascadesFollowTheConfirmation() {
     var s = scenario();
     var c = s.begin();
-    var orders = c.dataset("shop.orders");
+    var orders = c.dataset("shop.public.orders");
     var amount = c.candidate(c.address(orders, "amount-kind"), "numeric");
     var netAmount = c.candidate(c.address(orders, "net-amount-kind"), "numeric");
     c.confirmByMachine(netAmount);
@@ -362,7 +362,7 @@ class FactLifecycleTest extends StoreScenarioTest {
   void judgementsFromAnEarlierJudgementOrBeforePremisesWereConfirmedDoNotCount() {
     var s = scenario();
     var c = s.begin();
-    var orders = c.dataset("shop.orders");
+    var orders = c.dataset("shop.public.orders");
     var key = c.candidate(c.address(orders, "key"), "order_id");
     var firstEvaluation = c.evaluate(key, Transition.CONFIRM, PolicyResult.MACHINE_JUDGEMENT);
     c.add(new LogRecord.Confirm(key, ConfirmationPath.MACHINE_JUDGEMENT, firstEvaluation));
@@ -404,7 +404,7 @@ class FactLifecycleTest extends StoreScenarioTest {
   void dependencyCyclesAndMissingReferencesFailTheCommit() {
     var s = scenario();
     var c = s.begin();
-    var orders = c.dataset("shop.orders");
+    var orders = c.dataset("shop.public.orders");
     var meaning = c.address(orders, "meaning");
     var first = c.candidate(meaning, "orders");
     var written = s.write(c);
@@ -427,13 +427,16 @@ class FactLifecycleTest extends StoreScenarioTest {
     missing.accept(
         written.ref(first),
         new Dependency.OnFact(
-            Ref.urn(prefix + "fact:c99.1"), Ref.urn(prefix + "fact-revision:c99.1@c99.2")));
+            Ref.urn(prefix + "fact:dataset:shop.public.none/existence/1"),
+            Ref.urn(prefix + "fact-revision:dataset:shop.public.none/existence/1@c99.2")));
     assertRejected(s, missing, "Missing reference");
 
     var notARevision = s.begin();
     notARevision.accept(
         written.ref(first),
-        new Dependency.OnFact(Ref.urn(secondFact), Ref.urn(prefix + "fact-revision:c1.1@c1.1")));
+        new Dependency.OnFact(
+            Ref.urn(secondFact),
+            Ref.urn(prefix + "fact-revision:dataset:shop.public.none/existence/1@c1.1")));
     assertRejected(s, notARevision, "Missing reference: no Fact Revision");
 
     assertThat(s.lastCommit()).isEqualTo(before);
@@ -443,7 +446,7 @@ class FactLifecycleTest extends StoreScenarioTest {
   void theStoredFactRecordMustEqualTheFoldOfItsEvents() throws Exception {
     var s = scenario();
     var c = s.begin();
-    var orders = c.dataset("shop.orders");
+    var orders = c.dataset("shop.public.orders");
     var key = c.candidate(c.address(orders, "key"), "order_id");
     c.confirmByMachine(key);
     var fact = s.write(c).urn(key);
@@ -478,7 +481,7 @@ class FactLifecycleTest extends StoreScenarioTest {
   void aDatasetIsFoundOnlyByATechnicalReferenceNeitherRejectedNorRetired() {
     var s = scenario();
     var c = s.begin();
-    var orders = c.dataset("shop.orders");
+    var orders = c.dataset("shop.public.orders");
     var written = s.write(c);
     // The Dataset's records are the element, then the existence and technical-reference
     // Fact Addresses, each followed by its Fact.
@@ -490,7 +493,7 @@ class FactLifecycleTest extends StoreScenarioTest {
     s.write(c);
 
     c = s.begin();
-    var proposed = c.dataset("shop.orders");
+    var proposed = c.dataset("shop.public.orders");
     var reproposed = s.write(c);
     assertThat(reproposed.urn(proposed)).isNotEqualTo(written.urn(orders));
     assertThat(s.state(reproposed.urn(new Ref.Temp(4)))).contains(FactState.CANDIDATE);

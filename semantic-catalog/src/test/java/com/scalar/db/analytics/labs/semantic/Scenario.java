@@ -17,6 +17,7 @@ import com.scalar.db.analytics.labs.semantic.model.LogRecord.Basis;
 import com.scalar.db.analytics.labs.semantic.model.MatchingCondition;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
 import com.scalar.db.analytics.labs.semantic.model.Scope;
+import com.scalar.db.analytics.labs.semantic.model.TechnicalReference;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.AnswerType;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ConfirmationPath;
@@ -105,6 +106,22 @@ final class Scenario {
     return latest(snapshot -> snapshot.latestRevision(fact).orElseThrow());
   }
 
+  /** A table named by its dotted registration, namespace, and table, such as {@code a.b.c}. */
+  static TechnicalReference.Table table(String dotted) {
+    var parts = dotted.split("\\.");
+    if (parts.length != 3) {
+      throw new IllegalArgumentException("Not registration.namespace.table: " + dotted);
+    }
+    return new TechnicalReference.Table(parts[0], parts[1], parts[2]);
+  }
+
+  /** A column named by its dotted table and column, such as {@code a.b.c.d}. */
+  static TechnicalReference.Column column(String dotted) {
+    var split = dotted.lastIndexOf('.');
+    return new TechnicalReference.Column(
+        table(dotted.substring(0, split)), dotted.substring(split + 1));
+  }
+
   /** A dependency on a Fact's latest Fact Revision. */
   Dependency.OnFact on(String fact) {
     return new Dependency.OnFact(Ref.urn(fact), Ref.urn(revision(fact).urn()));
@@ -122,7 +139,11 @@ final class Scenario {
       return request.add(record);
     }
 
-    /** A Dataset with accepted existence and technical-reference Facts. */
+    /**
+     * A Dataset with accepted existence and technical-reference Facts.
+     *
+     * @param table the registration, namespace, and table, such as {@code shop.public.orders}
+     */
     Ref dataset(String table) {
       var dataset = datasetProposal(table);
       accept(new Ref.Temp(dataset.number() + 2));
@@ -135,24 +156,25 @@ final class Scenario {
      * accepting the Facts: a proposal that only finds existing records.
      */
     Ref.Temp datasetProposal(String table) {
+      var reference = table(table);
       var dataset =
-          (Ref.Temp)
-              add(
-                  new LogRecord.Element(
-                      new ElementIdentity.PhysicalObject(ElementKind.DATASET, null, table)));
+          (Ref.Temp) add(new LogRecord.Element(ElementIdentity.PhysicalObject.dataset(reference)));
       closedRangeFact(address(dataset, Vocabulary.EXISTENCE), "exists");
-      closedRangeFact(address(dataset, Vocabulary.TECHNICAL_REFERENCE), table);
+      closedRangeFact(address(dataset, Vocabulary.TECHNICAL_REFERENCE), reference.canonical());
       return dataset;
     }
 
-    /** A Field of a Dataset with accepted existence and technical-reference Facts. */
+    /**
+     * A Field of a Dataset with accepted existence and technical-reference Facts.
+     *
+     * @param column the Dataset's table and the column, such as {@code shop.public.orders.amount}
+     */
     Ref field(Ref dataset, String column) {
+      var reference = column(column);
       var field =
-          add(
-              new LogRecord.Element(
-                  new ElementIdentity.PhysicalObject(ElementKind.FIELD, dataset, column)));
+          add(new LogRecord.Element(ElementIdentity.PhysicalObject.field(dataset, reference)));
       closedRangeCandidate(address(field, Vocabulary.EXISTENCE), "exists");
-      closedRangeCandidate(address(field, Vocabulary.TECHNICAL_REFERENCE), column);
+      closedRangeCandidate(address(field, Vocabulary.TECHNICAL_REFERENCE), reference.canonical());
       return field;
     }
 
@@ -165,10 +187,19 @@ final class Scenario {
     }
 
     /** A concept with an accepted existence Fact. */
-    Ref concept() {
-      var concept = add(new LogRecord.Element(new ElementIdentity.Unique(ElementKind.CONCEPT)));
-      closedRangeCandidate(address(concept, Vocabulary.EXISTENCE), "exists");
-      return concept;
+    Ref concept(String slug) {
+      return node(ElementKind.CONCEPT, slug);
+    }
+
+    /** A Measure with an accepted existence Fact. */
+    Ref measure(String slug) {
+      return node(ElementKind.MEASURE, slug);
+    }
+
+    private Ref node(ElementKind kind, String slug) {
+      var node = add(new LogRecord.Element(new ElementIdentity.Unique(kind, slug)));
+      closedRangeCandidate(address(node, Vocabulary.EXISTENCE), "exists");
+      return node;
     }
 
     Ref address(Ref element, String predicate) {

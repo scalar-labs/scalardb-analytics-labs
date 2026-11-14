@@ -236,14 +236,15 @@ public final class StoreTransaction {
         var edge = element.edge();
         jdbc.sql(
                 "INSERT INTO semantic_catalog.elements (domain, element, kind, parent,"
-                    + " created_commit, edge_end_a, edge_end_b, edge_directed,"
-                    + " edge_identity_key, edge_identifying_part)"
-                    + " VALUES (:domain, :element, :kind, :parent, :created, :a, :b, :directed,"
-                    + " :key, CAST(:part AS jsonb))")
+                    + " technical_reference, created_commit, edge_end_a, edge_end_b,"
+                    + " edge_directed, edge_identity_key, edge_identifying_part)"
+                    + " VALUES (:domain, :element, :kind, :parent, :reference, :created, :a, :b,"
+                    + " :directed, :key, CAST(:part AS jsonb))")
             .param("domain", domain)
             .param("element", element.element())
             .param("kind", element.kind().name())
             .param("parent", element.parent(), Types.VARCHAR)
+            .param("reference", element.technicalReference(), Types.VARCHAR)
             .param("created", element.createdCommit())
             .param("a", edge == null ? null : edge.endA(), Types.VARCHAR)
             .param("b", edge == null ? null : edge.endB(), Types.VARCHAR)
@@ -418,7 +419,8 @@ public final class StoreTransaction {
       highs[i] = sorted ? question.to() : question.from();
     }
     jdbc.sql(
-            "SELECT q.i - 1 AS question, e.element, e.kind, e.parent, e.created_commit,"
+            "SELECT q.i - 1 AS question, e.element, e.kind, e.parent, e.technical_reference,"
+                + " e.created_commit,"
                 + " e.edge_end_a, e.edge_end_b, e.edge_directed, e.edge_identity_key,"
                 + " e.edge_identifying_part::text AS edge_identifying_part"
                 + " FROM unnest(CAST(:kinds AS text[]), CAST(:froms AS text[]),"
@@ -456,7 +458,8 @@ public final class StoreTransaction {
   public List<ElementRow> presentedElements(
       String domain, @Nullable ElementKind kind, @Nullable String parent, long commit) {
     return jdbc.sql(
-            "SELECT e.element, e.kind, e.parent, e.created_commit, e.edge_end_a, e.edge_end_b,"
+            "SELECT e.element, e.kind, e.parent, e.technical_reference, e.created_commit,"
+                + " e.edge_end_a, e.edge_end_b,"
                 + " e.edge_directed, e.edge_identity_key,"
                 + " e.edge_identifying_part::text AS edge_identifying_part"
                 + " FROM semantic_catalog.elements e"
@@ -911,6 +914,34 @@ public final class StoreTransaction {
           .query(String.class)
           .optional();
     }
+
+    @Override
+    public boolean taken(String urn) {
+      var kind = Urns.kind(urn);
+      var sql =
+          switch (kind) {
+            case Urns.FACT_ADDRESS ->
+                "SELECT 1 FROM semantic_catalog.fact_addresses"
+                    + " WHERE domain = ? AND fact_address = ?";
+            case Urns.FACT -> "SELECT 1 FROM semantic_catalog.facts WHERE domain = ? AND fact = ?";
+            default -> {
+              if (!Urns.isElementKind(kind)) {
+                throw new IllegalArgumentException("Not a name-based URN: " + urn);
+              }
+              yield "SELECT 1 FROM semantic_catalog.elements WHERE domain = ? AND element = ?";
+            }
+          };
+      return jdbc.sql(sql).params(domain, urn).query(Integer.class).optional().isPresent();
+    }
+
+    @Override
+    public int factCount(String factAddress) {
+      return jdbc.sql(
+              "SELECT count(*) FROM semantic_catalog.facts WHERE domain = ? AND fact_address = ?")
+          .params(domain, factAddress)
+          .query(Integer.class)
+          .single();
+    }
   }
 
   // Row mapping
@@ -919,7 +950,8 @@ public final class StoreTransaction {
       "SELECT commit_number, ordinal, content::text AS content FROM semantic_catalog.log_records";
 
   private static final String ELEMENTS =
-      "SELECT element, kind, parent, created_commit, edge_end_a, edge_end_b, edge_directed,"
+      "SELECT element, kind, parent, technical_reference, created_commit, edge_end_a, edge_end_b,"
+          + " edge_directed,"
           + " edge_identity_key, edge_identifying_part::text AS edge_identifying_part"
           + " FROM semantic_catalog.elements";
 
@@ -978,6 +1010,7 @@ public final class StoreTransaction {
         rs.getString("element"),
         ElementKind.valueOf(rs.getString("kind")),
         rs.getString("parent"),
+        rs.getString("technical_reference"),
         rs.getLong("created_commit"),
         edge);
   }

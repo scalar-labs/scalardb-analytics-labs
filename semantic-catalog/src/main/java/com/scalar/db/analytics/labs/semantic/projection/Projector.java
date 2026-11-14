@@ -16,6 +16,7 @@ import com.scalar.db.analytics.labs.semantic.model.LogRecord.FactEvent;
 import com.scalar.db.analytics.labs.semantic.model.LogRecordJson;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
 import com.scalar.db.analytics.labs.semantic.model.SemanticCatalogException;
+import com.scalar.db.analytics.labs.semantic.model.TechnicalReference;
 import com.scalar.db.analytics.labs.semantic.model.Urns;
 import com.scalar.db.analytics.labs.semantic.model.UsageFeedback;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
@@ -131,9 +132,9 @@ public final class Projector {
 
   private void applyRecord(LogPosition at, LogRecord record) {
     switch (record) {
-      case LogRecord.Element element -> applyElement(at, element);
-      case LogRecord.FactAddress address -> applyFactAddress(at, address);
-      case LogRecord.Fact fact -> applyFact(at, fact);
+      case LogRecord.Element element -> applyElement(element);
+      case LogRecord.FactAddress address -> applyFactAddress(address);
+      case LogRecord.Fact fact -> applyFact(fact);
       case LogRecord.InputResource resource ->
           projection.addInputResource(
               new InputResourceRow(
@@ -155,32 +156,88 @@ public final class Projector {
     }
   }
 
-  private void applyElement(LogPosition at, LogRecord.Element element) {
-    var urn = Urns.of(domain, Urns.ELEMENT, at);
+  private void applyElement(LogRecord.Element element) {
+    var urn = element.issuedUrn();
+    if (validating) {
+      requireIssued(urn, Urns.recordKind(element.identity().kind()));
+      if (projection.element(urn).isPresent()) {
+        throw reject("Element URN " + urn + " is already taken");
+      }
+    }
     var row =
         switch (element.identity()) {
           case ElementIdentity.Unique pointed ->
-              new ElementRow(urn, pointed.kind(), null, commit, null);
+              new ElementRow(urn, pointed.kind(), null, null, commit, null);
           case ElementIdentity.PhysicalObject technical -> {
             var parent = technical.parent();
-            if (validating && parent != null) {
+            if (validating
+                && parent != null
+                && technical.technicalReference() instanceof TechnicalReference.Column column) {
               var parentRow = requireElement(parent);
               if (parentRow.kind() != ElementKind.DATASET) {
                 throw reject("The parent of a Field is a Dataset, not " + parentRow.kind());
               }
+              if (!column.table().canonical().equals(parentRow.technicalReference())) {
+                throw reject(
+                    "A Field's column "
+                        + column.canonical()
+                        + " belongs to its Dataset's table "
+                        + parentRow.technicalReference());
+              }
             }
             yield new ElementRow(
-                urn, technical.kind(), parent == null ? null : parent.urnValue(), commit, null);
+                urn,
+                technical.kind(),
+                parent == null ? null : parent.urnValue(),
+                technical.technicalReference().canonical(),
+                commit,
+                null);
           }
           case ElementIdentity.Edge edge -> {
             if (validating) {
               validateEnds(edge);
             }
-            yield new ElementRow(urn, edge.kind(), null, commit, Projection.edgeIdentity(edge));
+            yield new ElementRow(
+                urn, edge.kind(), null, null, commit, Projection.edgeIdentity(edge));
           }
         };
     projection.addElement(row);
     newElements.put(urn, element.identity());
+  }
+
+  /**
+   * Requires a technical-reference Fact of a Dataset or Field to name the physical object the
+   * element was created for. A technical reference never moves: a renamed table or column is a new
+   * element, so the element's name-based URN stays true.
+   */
+  private void requireUnmovedTechnicalReference(FactAddressRow address, LogRecord.Fact fact) {
+    if (!address.predicate().equals(Vocabulary.TECHNICAL_REFERENCE)
+        || address.scopeDescription() != null
+        || address.predicateDefinition() != null) {
+      return;
+    }
+    var element = requireElement(Ref.urn(address.element()));
+    var reference = element.technicalReference();
+    if (reference == null) {
+      return;
+    }
+    var key = fact.identityKey();
+    if (key == null || !key.canonical().equals(IdentityKey.choice(reference).canonical())) {
+      throw reject(
+          "A technical reference never moves: "
+              + element.element()
+              + " refers to "
+              + reference
+              + ", not "
+              + (key == null ? "a value without an identity key" : key.canonical()));
+    }
+  }
+
+  /** Requires a URN the commit issued to be of this domain and of the record kind it creates. */
+  private void requireIssued(String urn, String recordKind) {
+    if (!Urns.domain(urn).equals(domain) || !Urns.kind(urn).equals(recordKind)) {
+      throw reject("A " + recordKind + " of domain " + domain + " is issued URN " + urn);
+    }
   }
 
   /**
@@ -231,17 +288,22 @@ public final class Projector {
     return datasets.getFirst();
   }
 
-  private void applyFactAddress(LogPosition at, LogRecord.FactAddress address) {
+  private void applyFactAddress(LogRecord.FactAddress address) {
+    var urn = address.issuedUrn();
     if (validating) {
       requireElement(address.element());
       if (address.predicate().isBlank()) {
         throw reject("A Fact Address names a predicate");
       }
+      requireIssued(urn, Urns.FACT_ADDRESS);
+      if (projection.address(urn).isPresent()) {
+        throw reject("Fact Address URN " + urn + " is already taken");
+      }
     }
     var scope = address.scope();
     var row =
         new FactAddressRow(
-            Urns.of(domain, Urns.FACT_ADDRESS, at),
+            urn,
             address.element().urnValue(),
             address.predicate(),
             scope.description(),
@@ -251,16 +313,20 @@ public final class Projector {
     projection.addAddress(new AddressSlice(row, List.of(), List.of(), List.of()));
   }
 
-  private void applyFact(LogPosition at, LogRecord.Fact fact) {
+  private void applyFact(LogRecord.Fact fact) {
+    var urn = fact.issuedUrn();
     var address = requireAddress(fact.address());
+    if (validating) {
+      requireIssued(urn, Urns.FACT);
+      if (projection.fact(urn).isPresent()) {
+        throw reject("Fact URN " + urn + " is already taken");
+      }
+      requireUnmovedTechnicalReference(address.row(), fact);
+    }
     var key = fact.identityKey();
     var row =
-        new FactRow(
-            Urns.of(domain, Urns.FACT, at),
-            address.row().factAddress(),
-            key == null ? null : key.canonical(),
-            commit);
-    projection.addFact(new FactSlice(row, FactRecord.created(domain, at, fact), List.of()));
+        new FactRow(urn, address.row().factAddress(), key == null ? null : key.canonical(), commit);
+    projection.addFact(new FactSlice(row, FactRecord.created(fact), List.of()));
     address.facts.add(row.fact());
     newFacts.add(row.fact());
   }
@@ -810,7 +876,8 @@ public final class Projector {
       if (entry.getValue() instanceof ElementIdentity.PhysicalObject technical
           && !accepted
               .getOrDefault(element + " " + Vocabulary.TECHNICAL_REFERENCE, Set.of())
-              .contains(IdentityKey.choice(technical.technicalReference()).canonical())) {
+              .contains(
+                  IdentityKey.choice(technical.technicalReference().canonical()).canonical())) {
         throw reject(
             "New "
                 + lower(technical.kind())

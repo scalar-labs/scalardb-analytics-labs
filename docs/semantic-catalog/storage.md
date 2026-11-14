@@ -108,9 +108,11 @@ of the log record that created them:
 | Build task, review presentation record | A number increasing within the domain |
 
 Log positions are unique, never reused, and reproduced exactly when the log is replayed from empty,
-as long as log records are never deleted and the domain is never recreated. Sequence numbers for
-taken identifiers are assigned in log order, so replay reproduces name-based URNs too. Generator output refers
-to records not yet written by temporary numbers.
+as long as log records are never deleted and the domain is never recreated. A name-based URN is
+issued once, inside the serialized write, with sequence numbers for taken identifiers assigned in
+log order, and is kept in the log record that created it. Replay reads these URNs from the log
+instead of building them again, so a later change to how new URNs are built leaves earlier ones as
+they were. Generator output refers to records not yet written by temporary numbers.
 
 ## Tables
 
@@ -142,7 +144,7 @@ it no longer does.
 | `presentable_periods` | Fact, commit confirmed, commit retired | Determining eligible Facts |
 | `address_selections` | Fact Address, selected and eligible Facts per commit range | Reads at a point |
 | `dependencies` | Dependent Fact, the Fact or Input Resource depended on, whether in effect, whether used for confirmation; a row neither in effect nor used for confirmation is deleted | Cascades, impact judgement targets, newer-observation checks |
-| `elements` | Element, kind, parent, and for edges the kind, ends, direction, and identifying part | Edge identity, filtering by parent |
+| `elements` | Element, kind, parent, the technical reference of a Dataset or Field, and for edges the kind, ends, direction, and identifying part | Edge identity, filtering by parent, checking that a Field is a column of its Dataset's table |
 | `fact_addresses` | Fact Address, element, predicate, scope description, scope URNs, predicate definition of a free-description predicate | Finding empty-scope Fact Addresses |
 | `facts` | Fact, Fact Address, identity key | Matching closed-range Facts, finding elements by technical reference |
 | `input_resources` | Input Resource, kind, Physical Catalog table identifier, latest table metadata version received | Lookup by table identifier, ignoring versions already received, and serializing registrations for one table |
