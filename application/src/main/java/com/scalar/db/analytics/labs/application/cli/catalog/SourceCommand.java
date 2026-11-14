@@ -7,6 +7,7 @@ package com.scalar.db.analytics.labs.application.cli.catalog;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.scalar.db.analytics.labs.application.ApplicationFailure;
 import com.scalar.db.analytics.labs.application.cli.CliOutput;
+import com.scalar.db.analytics.labs.application.metadata.TableMetadataRetrieval;
 import com.scalar.db.analytics.labs.physical.DataSourceConnection;
 import com.scalar.db.analytics.labs.physical.DataSourceDescriptor;
 import com.scalar.db.analytics.labs.physical.Secret;
@@ -98,16 +99,34 @@ final class SourceRegisterCommand extends WorkspaceCatalogCommand implements Cal
   public Integer call() throws JsonProcessingException {
     try {
       var connection = connection(readPassword());
-      var source =
-          CatalogOperations.execute(
+      var sourceName = Objects.requireNonNull(name, "name");
+      var registered =
+          CatalogOperations.executeInWorkspace(
               workspaceDirectory(),
               environment,
-              (catalog, catalogName) ->
-                  catalog.registerDataSource(
-                      catalogName, Objects.requireNonNull(name, "name"), connection));
+              (workspace, catalog) -> {
+                var source =
+                    catalog.registerDataSource(workspace.catalogName(), sourceName, connection);
+                // Registration retrieves the registered tables' metadata for the Semantic Catalog.
+                try {
+                  return new Registered(
+                      source, TableMetadataRetrieval.retrieve(workspace, catalog, sourceName));
+                } catch (ApplicationFailure e) {
+                  var message = Objects.requireNonNull(e.getMessage());
+                  throw new ApplicationFailure(
+                      e.code(),
+                      "The data source was registered, but "
+                          + Character.toLowerCase(message.charAt(0))
+                          + message.substring(1));
+                }
+              });
       CliOutput.write(
           commandSpec().commandLine().getOut(),
-          new SourceEnvelope("scalardb-analytics/source", "1", SourceCommand.output(source)));
+          new SourceEnvelope(
+              "scalardb-analytics/source",
+              "1",
+              SourceCommand.output(registered.source()),
+              TableMetadataOutput.of(registered.tableMetadata())));
       return CliOutput.SUCCESS;
     } catch (ApplicationFailure e) {
       return failure(e);
@@ -176,8 +195,14 @@ final class SourceRegisterCommand extends WorkspaceCatalogCommand implements Cal
     private @Nullable String passwordEnv;
   }
 
+  private record Registered(
+      DataSourceDescriptor source, TableMetadataRetrieval.Outcome tableMetadata) {}
+
   private record SourceEnvelope(
-      String schema, String schemaVersion, SourceCommand.SourceOutput source) {}
+      String schema,
+      String schemaVersion,
+      SourceCommand.SourceOutput source,
+      TableMetadataOutput tableMetadata) {}
 }
 
 @Command(name = "list", description = "Lists registered data sources.")

@@ -27,4 +27,17 @@ final class CatalogOperations {
       throw ApplicationFailure.from(e);
     }
   }
+
+  /** As {@link #execute}, for an operation that also needs the workspace's other settings. */
+  static <T> T executeInWorkspace(
+      Path workspaceDirectory,
+      Map<String, String> environment,
+      BiFunction<Workspace, PhysicalCatalog, T> operation) {
+    var workspace = Workspace.load(workspaceDirectory, environment);
+    try (var runtime = workspace.openRuntime()) {
+      return operation.apply(workspace, runtime.physicalCatalog());
+    } catch (PhysicalCatalogException e) {
+      throw ApplicationFailure.from(e);
+    }
+  }
 }

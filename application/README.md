@@ -64,11 +64,18 @@ printf '%s\n' "$CRM_PASSWORD" | scalardb-analytics source register \
 scalardb-analytics source list --workspace ./analytics-workspace
 scalardb-analytics source show --workspace ./analytics-workspace warehouse
 scalardb-analytics metadata list --workspace ./analytics-workspace --source warehouse
+scalardb-analytics metadata retrieve --workspace ./analytics-workspace --source warehouse
 scalardb-analytics query \
   --workspace ./analytics-workspace \
   --time-limit-seconds 30 \
   --sql 'SELECT * FROM warehouse.public.orders LIMIT 10'
 ```
+
+Registering a PostgreSQL source also retrieves the table metadata of its registered tables through
+the PostgreSQL connector and passes it to the Semantic Catalog; the `tableMetadata` member of the
+output says what the Semantic Catalog recorded for each table. MySQL sources have no connector yet,
+so their retrieval is skipped. `metadata retrieve` runs the retrieval again for a registered source.
+See [`../docs/application.md`](../docs/application.md#table-metadata-retrieval).
 
 `query` accepts exactly one of `--sql`, `--file`, or `--stdin`. Successful commands and classified
 operational failures write versioned JSON to stdout and return exit code `0` or `1`, respectively.

@@ -11,6 +11,7 @@ import com.scalar.db.analytics.labs.application.ApplicationFailure;
 import com.scalar.db.analytics.labs.application.ApplicationRuntime;
 import com.scalar.db.analytics.labs.physical.PhysicalCatalogSettings;
 import com.scalar.db.analytics.labs.physical.Secret;
+import com.scalar.db.analytics.labs.semantic.StoreSettings;
 import java.io.IOException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -233,6 +234,34 @@ public final class Workspace {
 
   public ApplicationRuntime openRuntime() {
     return ApplicationRuntime.start(catalogSettings());
+  }
+
+  /**
+   * The settings of the Semantic Catalog's store: the Physical Catalog's store database, in which
+   * the Semantic Catalog keeps its own schema.
+   */
+  public StoreSettings semanticCatalogSettings() {
+    return new StoreSettings(
+        configuration.storeJdbcUrl(), configuration.storeUsername(), storePassword.reveal());
+  }
+
+  /**
+   * The workspace's one Semantic Catalog domain, named after its catalog. A catalog name may hold
+   * characters a domain identifier cannot, so the name is lowercased and every run of other
+   * characters becomes one hyphen.
+   */
+  public String semanticCatalogDomain() {
+    var domain =
+        configuration
+            .catalogName()
+            .toLowerCase(Locale.ROOT)
+            .replaceAll("[^a-z0-9]+", "-")
+            .replaceAll("^-+|-+$", "");
+    if (domain.isEmpty()) {
+      throw new ApplicationFailure(
+          "INVALID_REQUEST", "The catalog name gives no Semantic Catalog domain identifier.");
+    }
+    return domain.length() > 63 ? domain.substring(0, 63).replaceAll("-+$", "") : domain;
   }
 
   private PhysicalCatalogSettings catalogSettings() {

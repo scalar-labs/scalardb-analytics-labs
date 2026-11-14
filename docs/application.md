@@ -19,8 +19,7 @@ The application provides:
 - component initialization, dependency wiring, startup order, and shutdown;
 - the user-facing interfaces for data-source registration, catalog access, Semantic Catalog
   construction and decisions, and query execution;
-- **[Planned]** the retrieval of table metadata and its hand-off to both catalogs, including
-  re-retrieval;
+- the retrieval of table metadata and its hand-off to both catalogs, including re-retrieval;
 - **[Planned]** the capabilities the Semantic Catalog needs from outside it: SQL execution for data
   checks, name resolution, and re-retrieval;
 - **[Planned]** the operations that run Semantic Catalog build tasks and expose their state and
@@ -224,9 +223,6 @@ not an agent the product owns.
 
 ## Table metadata retrieval
 
-**[Planned]** This section describes design that is not implemented yet. Today, registration
-resolves source schemas through the upstream catalog.
-
 The Physical Catalog and the Semantic Catalog share one retrieval of table metadata, the record a
 connector returns for one table.
 [`design/shared-table-metadata-retrieval.md`](design/shared-table-metadata-retrieval.md) records
@@ -234,13 +230,38 @@ why. The **retrieval operation** runs as follows:
 
 1. The application decides the target tables, which are limited to tables registered in the Physical
    Catalog. On data-source registration, they are the tables chosen in that registration.
-2. The Physical Catalog opens the source with the registration's connection settings and credentials
-   and requests table metadata from the connector.
-3. The Physical Catalog creates and stores versions and returns a change notification per table.
+2. **[Planned]** The Physical Catalog opens the source with the registration's connection settings
+   and credentials and requests table metadata from the connector.
+3. **[Planned]** The Physical Catalog creates and stores versions and returns a change notification
+   per table.
 4. For every table except those not retrieved, the application passes the whole table metadata,
    exactly as the connector returned it, with the table's resource identifier and current version,
    to the Semantic Catalog's observation registration. Tables whose version did not change are
    passed too; the Semantic Catalog records nothing for a version no newer than one it already has.
+
+Until the Physical Catalog requests table metadata from the connector itself (it still resolves
+source schemas through the upstream `schema-resolver` at registration), the application runs steps
+2 and 3 in an interim form:
+
+- The application resolves the registration's connection from the Physical Catalog, opens the
+  source through the connector with it, and requests the metadata of every table the Physical
+  Catalog lists for the source. The Physical Catalog stores nothing from this retrieval.
+- The table identifier is built from names: the data source name, the namespace names, and the
+  table name joined with dots, each name double-quoted, with inner double quotes doubled, when it is
+  empty or contains a dot or a double quote. It identifies a table by name, as a resource
+  identifier does.
+- The version is the time the connector read the table's catalog, in microseconds since the epoch,
+  and a table that does not exist gets the time of the retrieval. Every retrieval therefore makes a
+  new version, and an unchanged table adds only a derived record. The content digest is the SHA-256
+  of the canonical JSON of the table metadata and the source metadata.
+- The Semantic Catalog domain is the workspace's catalog name, lowercased, with every run of other
+  characters than letters and digits replaced by one hyphen. The first retrieval creates the domain
+  when `workspace init` has not.
+- Only PostgreSQL sources have a connector. A MySQL source is skipped, and the output says so.
+
+`source register` runs the retrieval operation after the Physical Catalog registration succeeds and
+reports what the Semantic Catalog recorded for each table. If the retrieval fails, the data source
+stays registered and the failure says to run `metadata retrieve` for it.
 
 Credentials stay in the Physical Catalog's registration and never reach the Semantic Catalog. If
 step 4 fails, the application does not resend a stored copy, because the Physical Catalog stores
@@ -250,11 +271,12 @@ delivers whatever version is then current.
 **Re-retrieval** runs the retrieval operation again for registered tables. The application starts it
 when:
 
-1. a query read finds that a column's type differs from the Physical Catalog's. On the connector
+1. **[Planned]** a query read finds that a column's type differs from the Physical Catalog's. On the connector
    path this is a "stale registration" error from the connector's schema check; on the scanner path
    it is a mismatch in DuckDB's type comparison;
-2. a user or administrator requests it for a table; or
-3. the Semantic Catalog requests it.
+2. a user or administrator requests it, which `metadata retrieve --source <name>` does for every
+   registered table of a data source; or
+3. **[Planned]** the Semantic Catalog requests it.
 
 Case 1 starts without waiting for a user, because queries on that table would fail until then. It
 touches only the registered tables that triggered it and only brings their versions in line with the

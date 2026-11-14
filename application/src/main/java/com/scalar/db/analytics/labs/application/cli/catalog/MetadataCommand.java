@@ -7,6 +7,7 @@ package com.scalar.db.analytics.labs.application.cli.catalog;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.scalar.db.analytics.labs.application.ApplicationFailure;
 import com.scalar.db.analytics.labs.application.cli.CliOutput;
+import com.scalar.db.analytics.labs.application.metadata.TableMetadataRetrieval;
 import com.scalar.db.analytics.labs.physical.PhysicalNamespace;
 import com.scalar.db.analytics.labs.physical.PhysicalTable;
 import java.util.List;
@@ -25,6 +26,7 @@ public final class MetadataCommand implements Runnable {
   public static CommandLine create(Map<String, String> environment) {
     var command = new CommandLine(new MetadataCommand());
     command.addSubcommand("list", new MetadataListCommand(environment));
+    command.addSubcommand("retrieve", new MetadataRetrieveCommand(environment));
     return command;
   }
 
@@ -104,4 +106,43 @@ final class MetadataListCommand extends WorkspaceCatalogCommand implements Calla
       List<ColumnOutput> columns) {}
 
   private record ColumnOutput(String name, String type, int ordinalPosition, boolean nullable) {}
+}
+
+@Command(
+    name = "retrieve",
+    description =
+        "Retrieves the table metadata of a data source's registered tables again and passes it to"
+            + " the Semantic Catalog.")
+final class MetadataRetrieveCommand extends WorkspaceCatalogCommand implements Callable<Integer> {
+  @Option(names = "--source", required = true, paramLabel = "NAME")
+  private @Nullable String sourceName;
+
+  MetadataRetrieveCommand(Map<String, String> environment) {
+    super(environment);
+  }
+
+  @Override
+  public Integer call() throws JsonProcessingException {
+    try {
+      var source = Objects.requireNonNull(sourceName, "sourceName");
+      var outcome =
+          CatalogOperations.executeInWorkspace(
+              workspaceDirectory(),
+              environment,
+              (workspace, catalog) -> TableMetadataRetrieval.retrieve(workspace, catalog, source));
+      CliOutput.write(
+          commandSpec().commandLine().getOut(),
+          new RetrievalOutput(
+              "scalardb-analytics/table-metadata-retrieval",
+              "1",
+              source,
+              TableMetadataOutput.of(outcome)));
+      return CliOutput.SUCCESS;
+    } catch (ApplicationFailure e) {
+      return failure(e);
+    }
+  }
+
+  private record RetrievalOutput(
+      String schema, String schemaVersion, String source, TableMetadataOutput tableMetadata) {}
 }

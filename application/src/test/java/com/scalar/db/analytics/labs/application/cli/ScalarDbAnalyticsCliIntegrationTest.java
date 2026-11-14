@@ -6,8 +6,11 @@ package com.scalar.db.analytics.labs.application.cli;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.scalar.db.analytics.labs.application.workspace.Workspace;
+import com.scalar.db.analytics.labs.semantic.SemanticCatalogStore;
+import com.scalar.db.analytics.labs.semantic.StoreSettings;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -19,6 +22,7 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -64,6 +68,8 @@ class ScalarDbAnalyticsCliIntegrationTest {
   private Path workspace;
   private String catalogName;
   private Map<String, String> environment;
+  private Result postgresRegistration;
+  private Result mysqlRegistration;
 
   @BeforeAll
   static void prepareSources() throws SQLException {
@@ -73,6 +79,9 @@ class ScalarDbAnalyticsCliIntegrationTest {
         var statement = connection.createStatement()) {
       statement.execute("CREATE TABLE orders (id INT PRIMARY KEY, customer_id INT, amount INT)");
       statement.execute("INSERT INTO orders VALUES (1, 1, 10), (2, 1, 20), (3, 2, 5)");
+      statement.execute(
+          "CREATE TABLE order_lines (order_id INT REFERENCES orders (id), line INT,"
+              + " PRIMARY KEY (order_id, line))");
     }
     try (var connection =
             DriverManager.getConnection(
@@ -138,6 +147,7 @@ class ScalarDbAnalyticsCliIntegrationTest {
             "--password-env",
             "POSTGRES_PASSWORD");
     assertSuccessful(postgres, "scalardb-analytics/source");
+    postgresRegistration = postgres;
 
     var mysql =
         execute(
@@ -160,6 +170,78 @@ class ScalarDbAnalyticsCliIntegrationTest {
             MYSQL_USER,
             "--password-stdin");
     assertSuccessful(mysql, "scalardb-analytics/source");
+    mysqlRegistration = mysql;
+  }
+
+  @Test
+  void registrationPassesPostgreSqlTableMetadataToTheSemanticCatalog() throws Exception {
+    var output = OBJECT_MAPPER.readTree(postgresRegistration.standardOutput().strip());
+    var tableMetadata = output.get("tableMetadata");
+    assertThat(tableMetadata.get("state").asText()).isEqualTo("retrieved");
+    var tables = new HashMap<String, JsonNode>();
+    tableMetadata
+        .get("tables")
+        .forEach(table -> tables.put(table.get("tableIdentifier").asText(), table));
+    assertThat(tables).containsOnlyKeys("warehouse.public.orders", "warehouse.public.order_lines");
+    var lines = Objects.requireNonNull(tables.get("warehouse.public.order_lines"));
+    assertThat(lines.get("recorded").asText()).isEqualTo("observation");
+
+    var domain = catalogName.replace('_', '-');
+    try (var store =
+        SemanticCatalogStore.open(
+            new StoreSettings(STORE.getJdbcUrl(), STORE.getUsername(), STORE.getPassword()))) {
+      var observation =
+          store.observationContent(domain, lines.get("inputObservation").asText()).orElseThrow();
+      assertThat(observation.get("sourceMetadata").get("connector").asText())
+          .isEqualTo("postgresql");
+      assertThat(observation.get("tableMetadata").get("constraints").toString())
+          .contains("primary-key", "foreign-key", "orders")
+          .doesNotContain("analyticsType");
+      assertThat(
+              store.derivedRecord(
+                  domain, "warehouse.public.order_lines", lines.get("version").asLong()))
+          .hasValueSatisfying(
+              derived -> assertThat(derived.toString()).contains("analyticsTypes", "int"));
+    }
+    assertThat(postgresRegistration.allOutput()).doesNotContain(POSTGRES_PASSWORD);
+  }
+
+  @Test
+  void registrationSkipsMySqlSourcesWithoutAConnector() throws Exception {
+    var output = OBJECT_MAPPER.readTree(mysqlRegistration.standardOutput().strip());
+    assertThat(output.get("tableMetadata").get("state").asText()).isEqualTo("skipped");
+    assertThat(output.get("tableMetadata").get("reason").asText()).contains("MySQL");
+  }
+
+  @Test
+  void reRetrievalOfAnUnchangedSourceRecordsOnlyDerivedRecords() throws Exception {
+    var retrieved =
+        execute(
+            "",
+            "metadata",
+            "retrieve",
+            "--workspace",
+            workspace.toString(),
+            "--source",
+            "warehouse");
+
+    assertSuccessful(retrieved, "scalardb-analytics/table-metadata-retrieval");
+    var tables =
+        OBJECT_MAPPER
+            .readTree(retrieved.standardOutput().strip())
+            .get("tableMetadata")
+            .get("tables");
+    assertThat(tables).hasSize(2);
+    tables.forEach(table -> assertThat(table.get("recorded").asText()).isEqualTo("derived-record"));
+
+    var skipped =
+        execute("", "metadata", "retrieve", "--workspace", workspace.toString(), "--source", "crm");
+    assertSuccessful(skipped, "scalardb-analytics/table-metadata-retrieval");
+
+    var missing =
+        execute(
+            "", "metadata", "retrieve", "--workspace", workspace.toString(), "--source", "absent");
+    assertError(missing, "SOURCE_NOT_FOUND");
   }
 
   @Test

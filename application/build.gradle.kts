@@ -43,7 +43,8 @@ dependencies {
     implementation(project(":physical-catalog"))
     // The connectors distribution: the connector API library, its DuckDB extension, and the ADBC
     // drivers.
-    runtimeOnly(project(":connector"))
+    implementation(project(":connector"))
+    implementation(project(":semantic-catalog"))
     implementation(libs.jackson.databind)
     implementation(libs.picocli)
 
@@ -138,7 +139,7 @@ val generateLicenseOverrides = tasks.register("generateLicenseOverrides") {
 
     doLast {
         val apache = "Apache License, Version 2.0|https://www.apache.org/licenses/LICENSE-2.0"
-        val product = listOf("connector", "duckdb", "physical-catalog", "query-engine").map {
+        val product = listOf("connector", "duckdb", "physical-catalog", "query-engine", "semantic-catalog").map {
             "com.scalar-labs:$it:$productVersion||$apache"
         }
         val upstream = listOf(
