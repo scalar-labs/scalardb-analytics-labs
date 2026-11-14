@@ -42,21 +42,10 @@ final class SchemaMigrator {
   /** Every schema change, in the order they are applied. A change is never edited once released. */
   static final List<Change> CHANGES =
       List.of(
-          new Change(1, "Domains", "com/scalar/db/analytics/labs/semantic/storage/V1__domains.sql"),
           new Change(
-              2,
-              "Log and records",
-              "com/scalar/db/analytics/labs/semantic/storage/V2__log_and_records.sql"),
-          new Change(
-              3,
-              "Fact lifecycle",
-              "com/scalar/db/analytics/labs/semantic/storage/V3__fact_lifecycle.sql"),
-          new Change(
-              4, "Selection", "com/scalar/db/analytics/labs/semantic/storage/V4__selection.sql"),
-          new Change(
-              5,
-              "Correspondences and feedback",
-              "com/scalar/db/analytics/labs/semantic/storage/V5__correspondences_and_feedback.sql"));
+              1,
+              "Semantic Catalog",
+              "com/scalar/db/analytics/labs/semantic/storage/V1__semantic_catalog.sql"));
 
   private static final int SETUP_ATTEMPTS = 5;
 

@@ -1,3 +1,11 @@
+-- The Semantic Catalog store. Every table has the domain as the first column of its primary key.
+
+-- The domains of the Semantic Catalog.
+CREATE TABLE semantic_catalog.domains (
+    domain text PRIMARY KEY,
+    created_at timestamptz NOT NULL
+);
+
 -- The log of each domain, and the records its creating log records materialize.
 
 -- One row per commit. Writers of one domain collide on the primary key, which serializes them.
@@ -11,6 +19,8 @@ CREATE TABLE semantic_catalog.commits (
 );
 
 -- The append-only log. A record's position is its commit number and its order within the commit.
+-- target_fact_address is the Fact Address a conflict resolution targets, so a write finds a Fact
+-- Address's resolutions.
 CREATE TABLE semantic_catalog.log_records (
     domain text NOT NULL,
     commit_number bigint NOT NULL,
@@ -19,6 +29,7 @@ CREATE TABLE semantic_catalog.log_records (
     target_fact text,
     target_input_resource text,
     content jsonb NOT NULL,
+    target_fact_address text,
     PRIMARY KEY (domain, commit_number, ordinal),
     FOREIGN KEY (domain, commit_number) REFERENCES semantic_catalog.commits (domain, commit_number)
 );
@@ -31,6 +42,11 @@ CREATE INDEX log_records_target_input_resource
     ON semantic_catalog.log_records (domain, target_input_resource)
     WHERE target_input_resource IS NOT NULL;
 
+CREATE INDEX log_records_target_fact_address
+    ON semantic_catalog.log_records (domain, target_fact_address)
+    WHERE target_fact_address IS NOT NULL;
+
+-- Edge ends hold each end in its canonical form, a JSON array of the URNs of its elements.
 CREATE TABLE semantic_catalog.elements (
     domain text NOT NULL,
     element text NOT NULL,
@@ -98,12 +114,13 @@ CREATE INDEX facts_by_matching_value
     ON semantic_catalog.facts (domain, identity_key)
     WHERE identity_key IS NOT NULL;
 
+-- Usage feedback is a new Input Resource at each registration, so nothing identifies an Input
+-- Resource by a question.
 CREATE TABLE semantic_catalog.input_resources (
     domain text NOT NULL,
     input_resource text NOT NULL,
     kind text NOT NULL,
     table_identifier text,
-    question text,
     created_commit bigint NOT NULL,
     PRIMARY KEY (domain, input_resource)
 );
@@ -112,6 +129,64 @@ CREATE UNIQUE INDEX input_resources_table
     ON semantic_catalog.input_resources (domain, table_identifier)
     WHERE table_identifier IS NOT NULL;
 
-CREATE UNIQUE INDEX input_resources_question_urn
-    ON semantic_catalog.input_resources (domain, question)
-    WHERE question IS NOT NULL;
+-- The Fact Records, materialized from the Fact Events in the log.
+
+-- The current Fact Record of each Fact, rewritten by every commit that changes it. It always equals
+-- the result of folding the Fact's events, so a write, or a read at a point at or after the latest
+-- event, uses it without folding. A read at an earlier point folds the Fact's events instead.
+CREATE TABLE semantic_catalog.fact_records (
+    domain text NOT NULL,
+    fact text NOT NULL,
+    fact_address text NOT NULL,
+    latest_event_commit bigint NOT NULL,
+    latest_event_ordinal integer NOT NULL,
+    state text NOT NULL,
+    awaiting_consent boolean NOT NULL,
+    open_retirement_proposal text,
+    unknown_answer_pending boolean NOT NULL,
+    record jsonb NOT NULL,
+    PRIMARY KEY (domain, fact)
+);
+
+-- The Facts of a Fact Address with their current records, for candidates and lists.
+CREATE INDEX fact_records_address
+    ON semantic_catalog.fact_records (domain, fact_address);
+
+-- A confirmed Fact is presentable from the commit it was confirmed until the commit it was retired.
+CREATE TABLE semantic_catalog.presentable_periods (
+    domain text NOT NULL,
+    fact text NOT NULL,
+    confirmed_commit bigint NOT NULL,
+    retired_commit bigint,
+    PRIMARY KEY (domain, fact, confirmed_commit)
+);
+
+-- The dependency references of each Fact that are in effect, or were in effect at its latest
+-- confirmation, which cascades follow.
+CREATE TABLE semantic_catalog.dependencies (
+    domain text NOT NULL,
+    dependent_fact text NOT NULL,
+    depended_record text NOT NULL,
+    depended_fact text,
+    depended_input_resource text,
+    in_effect boolean NOT NULL,
+    for_confirmation boolean NOT NULL,
+    PRIMARY KEY (domain, dependent_fact, depended_record)
+);
+
+CREATE INDEX dependencies_depended_fact
+    ON semantic_catalog.dependencies (domain, depended_fact)
+    WHERE depended_fact IS NOT NULL;
+
+-- The selected and eligible Facts of a Fact Address over a commit range: from from_commit until
+-- to_commit, exclusive, or open while to_commit is null. A row is added only when the selection
+-- changes.
+CREATE TABLE semantic_catalog.address_selections (
+    domain text NOT NULL,
+    fact_address text NOT NULL,
+    from_commit bigint NOT NULL,
+    to_commit bigint,
+    selected_fact text,
+    eligible_facts jsonb NOT NULL,
+    PRIMARY KEY (domain, fact_address, from_commit)
+);
