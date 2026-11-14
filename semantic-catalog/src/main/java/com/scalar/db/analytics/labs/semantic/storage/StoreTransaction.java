@@ -4,6 +4,7 @@
  */
 package com.scalar.db.analytics.labs.semantic.storage;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.scalar.db.analytics.labs.semantic.model.BuildTask;
 import com.scalar.db.analytics.labs.semantic.model.LogPosition;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
@@ -42,6 +43,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.springframework.dao.DuplicateKeyException;
@@ -373,6 +375,119 @@ public final class StoreTransaction {
                 + " ORDER BY commit_number, ordinal")
         .params(domain, fact, upToCommit)
         .query(this::positioned)
+        .list();
+  }
+
+  // Table metadata received, partly kept outside the log
+
+  /**
+   * A table's physical-schema Input Resource.
+   *
+   * @param inputResource its URN
+   * @param latestVersion the latest table metadata version received for the table, or empty when
+   *     none was received through table metadata registration
+   */
+  public record TableResource(String inputResource, OptionalLong latestVersion) {}
+
+  /**
+   * The physical-schema Input Resource of a table, locked for the rest of the transaction so that
+   * registrations for one table run one at a time; a concurrent registration that already changed
+   * it fails this transaction, which is then retried.
+   */
+  public Optional<TableResource> lockTableResource(String domain, String tableIdentifier) {
+    return jdbc.sql(
+            "SELECT input_resource, latest_table_metadata_version"
+                + " FROM semantic_catalog.input_resources"
+                + " WHERE domain = ? AND table_identifier = ? FOR UPDATE")
+        .params(domain, tableIdentifier)
+        .query(
+            (rs, n) -> {
+              var version = rs.getLong("latest_table_metadata_version");
+              return new TableResource(
+                  rs.getString("input_resource"),
+                  rs.wasNull() ? OptionalLong.empty() : OptionalLong.of(version));
+            })
+        .optional();
+  }
+
+  /** The latest Input Observation of an Input Resource, with its URN. */
+  public Optional<PositionedRecord> latestObservationRecord(String domain, String inputResource) {
+    return jdbc.sql(
+            LOG_RECORDS
+                + " WHERE domain = ? AND target_input_resource = ?"
+                + " AND kind = 'input-observation'"
+                + " ORDER BY commit_number DESC, ordinal DESC LIMIT 1")
+        .params(domain, inputResource)
+        .query(this::positioned)
+        .optional();
+  }
+
+  /** The log record at a log position. */
+  public Optional<PositionedRecord> logRecordAt(String domain, LogPosition position) {
+    return jdbc.sql(LOG_RECORDS + " WHERE domain = ? AND commit_number = ? AND ordinal = ?")
+        .params(domain, position.commit(), position.ordinal())
+        .query(this::positioned)
+        .optional();
+  }
+
+  /** Records the latest table metadata version received for a physical-schema Input Resource. */
+  public void setLatestTableMetadataVersion(String domain, String inputResource, long version) {
+    jdbc.sql(
+            "UPDATE semantic_catalog.input_resources SET latest_table_metadata_version = ?"
+                + " WHERE domain = ? AND input_resource = ?")
+        .params(version, domain, inputResource)
+        .update();
+  }
+
+  /** Writes the derived record of one table metadata version. */
+  public void insertDerivedRecord(
+      String domain, String tableIdentifier, long version, JsonNode content) {
+    jdbc.sql(
+            "INSERT INTO semantic_catalog.derived_records"
+                + " (domain, table_identifier, table_metadata_version, content)"
+                + " VALUES (:domain, :table, :version, CAST(:content AS jsonb))")
+        .param("domain", domain)
+        .param("table", tableIdentifier)
+        .param("version", version)
+        .param("content", LogRecordJson.writeNode(content))
+        .update();
+  }
+
+  /** The derived record of one table metadata version. */
+  public Optional<JsonNode> derivedRecord(String domain, String tableIdentifier, long version) {
+    return jdbc.sql(
+            "SELECT content::text FROM semantic_catalog.derived_records"
+                + " WHERE domain = ? AND table_identifier = ? AND table_metadata_version = ?")
+        .params(domain, tableIdentifier, version)
+        .query((rs, n) -> LogRecordJson.readNode(rs.getString(1)))
+        .optional();
+  }
+
+  /**
+   * The tables whose latest version received differs from the highest version among their derived
+   * records, each described for the replay check.
+   */
+  public List<String> derivedVersionMismatches(String domain) {
+    return jdbc.sql(
+            "SELECT coalesce(r.table_identifier, d.table_identifier) AS table_identifier,"
+                + " r.latest_table_metadata_version AS latest, d.highest"
+                + " FROM (SELECT table_identifier, latest_table_metadata_version"
+                + " FROM semantic_catalog.input_resources"
+                + " WHERE domain = :domain AND table_identifier IS NOT NULL) r"
+                + " FULL JOIN (SELECT table_identifier, max(table_metadata_version) AS highest"
+                + " FROM semantic_catalog.derived_records WHERE domain = :domain"
+                + " GROUP BY table_identifier) d"
+                + " ON r.table_identifier = d.table_identifier"
+                + " WHERE r.latest_table_metadata_version IS DISTINCT FROM d.highest")
+        .param("domain", domain)
+        .query(
+            (rs, n) ->
+                "table "
+                    + rs.getString("table_identifier")
+                    + ": latest version received "
+                    + rs.getString("latest")
+                    + ", highest derived record "
+                    + rs.getString("highest"))
         .list();
   }
 

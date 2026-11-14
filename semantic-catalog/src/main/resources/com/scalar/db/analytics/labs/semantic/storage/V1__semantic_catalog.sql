@@ -121,13 +121,16 @@ CREATE INDEX facts_by_matching_value
     WHERE identity_key IS NOT NULL;
 
 -- Usage feedback is a new Input Resource at each registration, so nothing identifies an Input
--- Resource by a question.
+-- Resource by a question. latest_table_metadata_version is the newest table metadata version
+-- received for a physical schema, which is not derived from the log: it equals the highest version
+-- among the table's derived records.
 CREATE TABLE semantic_catalog.input_resources (
     domain text NOT NULL,
     input_resource text NOT NULL,
     kind text NOT NULL,
     table_identifier text,
     created_commit bigint NOT NULL,
+    latest_table_metadata_version bigint,
     PRIMARY KEY (domain, input_resource)
 );
 
@@ -222,6 +225,17 @@ CREATE TABLE semantic_catalog.review_presentation_targets (
 
 CREATE INDEX review_presentation_targets_fact
     ON semantic_catalog.review_presentation_targets (domain, fact);
+
+-- The connector-derived part of each table metadata version received: the Analytics types, the
+-- retrieval information, the read time, and the content digest. It is neither an Input Observation
+-- nor a Fact, so it is not in the log.
+CREATE TABLE semantic_catalog.derived_records (
+    domain text NOT NULL REFERENCES semantic_catalog.domains (domain),
+    table_identifier text NOT NULL,
+    table_metadata_version bigint NOT NULL,
+    content jsonb NOT NULL,
+    PRIMARY KEY (domain, table_identifier, table_metadata_version)
+);
 
 -- Build tasks: one run of a Generator, an impact judgement, an evaluation by the policy evaluation
 -- model, or a policy re-evaluation. Running one changes no Fact's state by itself, so it is not in

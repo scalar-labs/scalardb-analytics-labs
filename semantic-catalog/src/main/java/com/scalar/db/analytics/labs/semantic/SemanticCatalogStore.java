@@ -4,6 +4,8 @@
  */
 package com.scalar.db.analytics.labs.semantic;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.scalar.db.analytics.labs.semantic.model.BuildTask;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.LogRecordJson;
@@ -275,6 +277,119 @@ public final class SemanticCatalogStore implements AutoCloseable {
           default -> null;
         };
     return presentation == null ? null : Long.valueOf(presentation);
+  }
+
+  // Registering observations
+
+  /**
+   * Registers one retrieved table's metadata as an observation of the table's physical schema (see
+   * {@code docs/semantic-catalog/public-api.md}, "Registering an observation", and {@code
+   * docs/semantic-catalog/construction.md}, "What starts construction").
+   *
+   * <p>A version no newer than the latest one received for the table records nothing. Otherwise the
+   * connector-derived part becomes the version's derived record, and the source-declared part, with
+   * the connector's source metadata, becomes a new Input Observation of the table's physical-schema
+   * Input Resource when it differs from the latest observation. The Input Resource is created with
+   * the table's first observation. Registrations for one table run one at a time.
+   *
+   * @param author the person or agent behind the call, kept on the commit
+   * @throws SemanticCatalogException when the domain does not exist; nothing is written then
+   */
+  public TableMetadataRegistration registerTableMetadata(
+      String domain, String author, TableMetadataObservation observation) {
+    var table = observation.tableIdentifier();
+    var version = observation.version();
+    var declared = observation.table().sourceDeclared();
+    return store.write(
+        transaction -> {
+          requireDomain(transaction, domain);
+          var existing = transaction.lockTableResource(domain, table);
+          var latest = existing.flatMap(resource -> optional(resource.latestVersion()));
+          if (latest.isPresent() && version <= latest.get()) {
+            return new TableMetadataRegistration.NotNewer(latest.get());
+          }
+          var previous =
+              existing.flatMap(
+                  resource ->
+                      transaction.latestObservationRecord(domain, resource.inputResource()));
+          if (existing.isPresent()
+              && previous.isPresent()
+              && previous.get().record() instanceof LogRecord.InputObservation held
+              && held.content().equals(declared)) {
+            var resource = existing.get().inputResource();
+            recordVersion(transaction, domain, resource, observation);
+            return new TableMetadataRegistration.DerivedRecordOnly(
+                resource, Urns.of(domain, Urns.INPUT_OBSERVATION, previous.get().position()));
+          }
+          var request = CommitRequest.builder("register-observation", author);
+          var resourceRef = request.add(LogRecord.InputResource.physicalSchema(table));
+          var observed = request.add(new LogRecord.InputObservation(resourceRef, null, declared));
+          request.add(
+              new LogRecord.ObservationEvent(
+                  observed,
+                  JsonNodeFactory.instance
+                      .objectNode()
+                      .put("tableIdentifier", table)
+                      .put("tableMetadataVersion", version)));
+          var written = commit(transaction, domain, request.build(), true);
+          var resource = written.urn(resourceRef);
+          recordVersion(transaction, domain, resource, observation);
+          return new TableMetadataRegistration.Observed(
+              resource,
+              written.urn(observed),
+              written.commit().orElseThrow(),
+              existing.isEmpty(),
+              written.buildTasks());
+        });
+  }
+
+  private static void recordVersion(
+      StoreTransaction transaction,
+      String domain,
+      String inputResource,
+      TableMetadataObservation observation) {
+    transaction.insertDerivedRecord(
+        domain, observation.tableIdentifier(), observation.version(), observation.derivedRecord());
+    transaction.setLatestTableMetadataVersion(domain, inputResource, observation.version());
+  }
+
+  private static Optional<Long> optional(OptionalLong value) {
+    return value.isPresent() ? Optional.of(value.getAsLong()) : Optional.empty();
+  }
+
+  /**
+   * The derived record of one table metadata version: the Analytics types, the read time, the
+   * retrieval information, and the content digest the connector derived.
+   *
+   * @throws SemanticCatalogException when the domain does not exist
+   */
+  public Optional<JsonNode> derivedRecord(String domain, String tableIdentifier, long version) {
+    return store.read(
+        transaction -> {
+          requireDomain(transaction, domain);
+          return transaction.derivedRecord(domain, tableIdentifier, version);
+        });
+  }
+
+  /**
+   * The content of an Input Observation, as it was recorded.
+   *
+   * @return the content, or empty when the URN names no Input Observation of the domain
+   * @throws SemanticCatalogException when the domain does not exist
+   */
+  public Optional<JsonNode> observationContent(String domain, String inputObservation) {
+    return store.read(
+        transaction -> {
+          requireDomain(transaction, domain);
+          if (!Urns.kind(inputObservation).equals(Urns.INPUT_OBSERVATION)) {
+            return Optional.empty();
+          }
+          return transaction
+              .logRecordAt(domain, Urns.position(inputObservation))
+              .map(PositionedRecord::record)
+              .filter(LogRecord.InputObservation.class::isInstance)
+              .map(record -> ((LogRecord.InputObservation) record).content());
+        });
   }
 
   // Operations of the deciding party and the semantics owner
@@ -782,13 +897,19 @@ public final class SemanticCatalogStore implements AutoCloseable {
           }
           var replayed = new HashSet<MaterializedRow>(projection.rows().toList());
           var stored = new HashSet<MaterializedRow>(transaction.rows(domain));
+          // The latest version received is the one column not derived from the log; it is
+          // compared against the derived records instead.
+          var unexpected =
+              new ArrayList<>(
+                  stored.stream()
+                      .filter(row -> !replayed.contains(row))
+                      .map(Object::toString)
+                      .toList());
+          unexpected.addAll(transaction.derivedVersionMismatches(domain));
           return new ReplayCheck(
               commit,
               replayed.stream().filter(row -> !stored.contains(row)).map(Object::toString).toList(),
-              stored.stream()
-                  .filter(row -> !replayed.contains(row))
-                  .map(Object::toString)
-                  .toList());
+              unexpected);
         });
   }
 

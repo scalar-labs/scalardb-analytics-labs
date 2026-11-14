@@ -110,13 +110,16 @@ output says so.
 Registering an observation has two forms.
 
 - *Table metadata*, passed by the application for each retrieved table, with the Physical Catalog
-  table identifier and its current table metadata version. The whole metadata is passed exactly as
-  the connector returned it, not the part the Physical Catalog stored. A version no newer than the
-  latest one already received for that table records nothing, so a retrieval that arrives late
-  cannot roll the table back. A new version whose source-declared part is unchanged records only a
-  derived record. Both are successes, and the output says what was recorded. The application passes
-  unchanged tables at every retrieval, so a failure between the Physical Catalog's update and this
-  call is repaired by the next retrieval.
+  table identifier and its current table metadata version. The whole record is passed exactly as
+  the connector returned it, not the part the Physical Catalog stored: the table metadata, whose
+  columns each carry their Analytics type or the reason they have none, the connector's source
+  metadata, the read time, whether the table was read completely or found not to exist, the
+  retrieval information, and the content digest. A version no newer than the latest one already
+  received for that table records nothing, so a retrieval that arrives late cannot roll the table
+  back. A new version whose source-declared part and source metadata are unchanged records only a
+  derived record. Each is a success, and the output says which was recorded, with the Input Resource
+  and Input Observation URNs. The application passes unchanged tables at every retrieval, so a
+  failure between the Physical Catalog's update and this call is repaired by the next retrieval.
 - *Other observations*: documents and usage feedback. The input is the observation kind, the Input
   Resource (an existing document's URN or none for a new one; always none for feedback), and the
   content. Feedback also carries its session purpose and a summary of the session's context, and can
