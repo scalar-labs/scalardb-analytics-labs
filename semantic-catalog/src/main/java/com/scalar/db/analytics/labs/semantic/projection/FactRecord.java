@@ -65,6 +65,7 @@ public final class FactRecord {
   private @Nullable String confirmationBasis;
   private long lastConfirmedOrChecked;
   private @Nullable LogPosition judgementStart;
+  private @Nullable LogPosition latestAcceptance;
   private @Nullable LogPosition latestConfirmation;
 
   /** A policy evaluation of the Fact, at its log position. */
@@ -98,6 +99,7 @@ public final class FactRecord {
       @Nullable String confirmationBasis,
       long lastConfirmedOrChecked,
       LogPosition judgementStart,
+      LogPosition latestAcceptance,
       @Nullable LogPosition latestConfirmation) {
     public Stored {
       dependencies = List.copyOf(dependencies);
@@ -161,6 +163,7 @@ public final class FactRecord {
     record.confirmationBasis = stored.confirmationBasis();
     record.lastConfirmedOrChecked = stored.lastConfirmedOrChecked();
     record.judgementStart = stored.judgementStart();
+    record.latestAcceptance = stored.latestAcceptance();
     record.latestConfirmation = stored.latestConfirmation();
     return record;
   }
@@ -171,7 +174,10 @@ public final class FactRecord {
    * @return empty before the first acceptance, when there is nothing to store
    */
   public Optional<Stored> stored() {
-    if (state == null || latestEvent == null || judgementStart == null) {
+    if (state == null
+        || latestEvent == null
+        || judgementStart == null
+        || latestAcceptance == null) {
       return Optional.empty();
     }
     return Optional.of(
@@ -196,6 +202,7 @@ public final class FactRecord {
             confirmationBasis,
             lastConfirmedOrChecked,
             judgementStart,
+            latestAcceptance,
             latestConfirmation));
   }
 
@@ -218,6 +225,7 @@ public final class FactRecord {
         dependencies = Collections.unmodifiableSet(new LinkedHashSet<>(accept.dependencies()));
         checks = accept.checks();
         provenance = accept.provenance();
+        latestAcceptance = at;
         lastConfirmedOrChecked = at.commit();
       }
       case LogRecord.ProposeRetire ignored -> {
@@ -302,6 +310,11 @@ public final class FactRecord {
     return confirmationDependencies;
   }
 
+  /** The validation result of the latest acceptance. */
+  public List<Check> checks() {
+    return checks;
+  }
+
   /** The Facts the dependency references in effect name. */
   public Set<String> factDependencies() {
     return factsOf(dependencies);
@@ -338,6 +351,14 @@ public final class FactRecord {
    */
   public Optional<LogPosition> judgementStart() {
     return Optional.ofNullable(judgementStart);
+  }
+
+  /**
+   * The log position of the latest acceptance. A policy evaluation made before it no longer stands,
+   * because the acceptance may have brought what lets the policy decide otherwise.
+   */
+  public Optional<LogPosition> latestAcceptance() {
+    return Optional.ofNullable(latestAcceptance);
   }
 
   /** The log position of the latest confirmation. */

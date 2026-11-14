@@ -5,18 +5,35 @@
 package com.scalar.db.analytics.labs.semantic;
 
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
+import com.scalar.db.analytics.labs.semantic.model.LogRecordJson;
+import com.scalar.db.analytics.labs.semantic.model.Ref;
+import com.scalar.db.analytics.labs.semantic.model.Review;
+import com.scalar.db.analytics.labs.semantic.model.ReviewPresentation;
 import com.scalar.db.analytics.labs.semantic.model.SemanticCatalogException;
 import com.scalar.db.analytics.labs.semantic.model.Urns;
+import com.scalar.db.analytics.labs.semantic.model.UsageFeedback;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.AnswerType;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.SessionPurpose;
 import com.scalar.db.analytics.labs.semantic.projection.CommitResolver;
+import com.scalar.db.analytics.labs.semantic.projection.FactRecord;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow;
 import com.scalar.db.analytics.labs.semantic.projection.PositionedRecord;
 import com.scalar.db.analytics.labs.semantic.projection.Projection;
 import com.scalar.db.analytics.labs.semantic.projection.ProjectionSource;
 import com.scalar.db.analytics.labs.semantic.projection.Projector;
+import com.scalar.db.analytics.labs.semantic.projection.TransitionResolver;
 import com.scalar.db.analytics.labs.semantic.storage.JdbcStore;
 import com.scalar.db.analytics.labs.semantic.storage.StoreTransaction;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.Set;
 import java.util.function.Function;
 import org.jspecify.annotations.Nullable;
 import org.springframework.dao.DuplicateKeyException;
@@ -62,7 +79,8 @@ public final class SemanticCatalogStore implements AutoCloseable {
   /**
    * Creates a domain under a caller-supplied domain identifier. A domain is the unit of management
    * that assigns one responsible party to a body of data and its semantics, and every other record
-   * belongs to exactly one domain.
+   * belongs to exactly one domain. Its first commit records the {@linkplain
+   * LogRecord.PolicyVersion#DEFAULT default user policy version}.
    *
    * @param domain the domain identifier, in the form {@link Urns#DOMAIN} requires
    * @throws IllegalArgumentException when the identifier does not have that form
@@ -77,6 +95,9 @@ public final class SemanticCatalogStore implements AutoCloseable {
               throw new SemanticCatalogException("Domain " + domain + " already exists");
             }
             transaction.insertDomain(domain);
+            var initial = CommitRequest.builder("create-domain", "semantic-catalog");
+            initial.add(LogRecord.PolicyVersion.DEFAULT);
+            commit(transaction, domain, initial.build(), true);
             return Boolean.TRUE;
           });
     } catch (DuplicateKeyException e) {
@@ -91,25 +112,35 @@ public final class SemanticCatalogStore implements AutoCloseable {
   }
 
   /**
-   * Writes a request's records to a domain's log as one commit, together with the materialized
-   * records they change (see {@code docs/semantic-catalog/storage.md}, "Writes and reads").
+   * Writes a request's records to a domain's log as one commit, together with the transitions they
+   * cause and the materialized records they change (see {@code docs/semantic-catalog/storage.md},
+   * "Writes and reads", and {@code docs/semantic-catalog/construction.md}, "Commits and cascades").
    *
    * <p>In one transaction it numbers the commit one past the last commit in its snapshot, replaces
    * temporary numbers with URNs, drops proposals that are the same as existing records, validates
-   * and applies the remaining records, and writes the commit, its log records, and the changed
+   * and applies the remaining records, resolves the policy evaluations, confirmations, rejections,
+   * and retirements they cause, and writes the commit, its log records, and the changed
    * materialized rows. When every record is the same as an existing one, nothing is written.
    *
-   * @return the commit written and the URN each temporary number stands for
+   * @return the commit written, the URN each temporary number stands for, and the transitions
    * @throws SemanticCatalogException when the domain does not exist
    * @throws com.scalar.db.analytics.labs.semantic.model.CommitRejectedException when a record fails
    *     validation; nothing is written then
    */
   public CommitResult commit(String domain, CommitRequest request) {
-    return store.write(transaction -> commit(transaction, domain, request));
+    return store.write(transaction -> commit(transaction, domain, request, true));
+  }
+
+  /**
+   * Writes a request's records as one commit exactly as given, without resolving the transitions
+   * they cause, for tests of the log that write judgements by hand.
+   */
+  CommitResult commitAsWritten(String domain, CommitRequest request) {
+    return store.write(transaction -> commit(transaction, domain, request, false));
   }
 
   private static CommitResult commit(
-      StoreTransaction transaction, String domain, CommitRequest request) {
+      StoreTransaction transaction, String domain, CommitRequest request, boolean transitions) {
     requireDomain(transaction, domain);
     var commit = transaction.lastCommit(domain) + 1;
     var projection = new Projection(domain, transaction.projectionSource(domain));
@@ -117,21 +148,35 @@ public final class SemanticCatalogStore implements AutoCloseable {
         CommitResolver.resolve(
             domain, commit, request.records(), projection, transaction.identityLookup(domain));
     if (resolution.records().isEmpty()) {
-      return new CommitResult(OptionalLong.empty(), resolution.urns());
+      return new CommitResult(OptionalLong.empty(), resolution.urns(), Transitions.NONE);
     }
     // Inserted first, so a concurrent writer of the same number collides as early as possible.
     transaction.insertCommit(domain, commit, request.operation(), request.author());
     var projector = Projector.validating(projection);
     projector.begin(commit);
     resolution.records().forEach(projector::apply);
+    var records = new ArrayList<>(resolution.records());
+    var moved = Transitions.NONE;
+    if (transitions) {
+      var outcome = TransitionResolver.resolve(projection, projector, commit, resolution.records());
+      records.addAll(outcome.records());
+      moved =
+          new Transitions(
+              outcome.confirmed(), outcome.rejected(), outcome.retired(), outcome.awaitingModel());
+    }
     projector.end();
-    for (var record : resolution.records()) {
+    for (var record : records) {
       transaction.insertLogRecord(
           domain,
           record,
           targetFact(record),
           targetInputResource(domain, record, projection),
           targetFactAddress(record));
+      var presentation = presentationAnswered(record.record());
+      if (presentation != null) {
+        transaction.addPresentationEvent(
+            domain, presentation, Urns.logRecord(domain, record.position()));
+      }
     }
     for (var row : projection.changedRows()) {
       transaction.writeRow(domain, row);
@@ -139,7 +184,355 @@ public final class SemanticCatalogStore implements AutoCloseable {
     for (var row : projection.removedRows()) {
       transaction.deleteRow(domain, row);
     }
-    return new CommitResult(OptionalLong.of(commit), resolution.urns());
+    return new CommitResult(OptionalLong.of(commit), resolution.urns(), moved);
+  }
+
+  /** The review presentation an answer or a conflict resolution was given in, if any. */
+  private static @Nullable Long presentationAnswered(LogRecord record) {
+    var presentation =
+        switch (record) {
+          case LogRecord.Answer answer -> answer.reviewPresentation();
+          case LogRecord.ResolveConflict resolution -> resolution.reviewPresentation();
+          default -> null;
+        };
+    return presentation == null ? null : Long.valueOf(presentation);
+  }
+
+  // Operations of the deciding party and the semantics owner
+
+  /**
+   * Submits one deciding party's answers in one commit (see {@code
+   * docs/semantic-catalog/public-api.md}, "Submitting answers"). Answers are applied in dependency
+   * order, and independent answers in submission order, so a premise and its dependents can be
+   * consented to at once. A correction registers its wording as usage feedback related to the
+   * answered Fact, in the same commit.
+   *
+   * @throws SemanticCatalogException when the domain, an answered Fact, or a review presentation
+   *     does not exist, or the authority-check reference is missing; nothing is written then
+   */
+  public Answers.Outcomes submitAnswers(String domain, Answers.Submission submission) {
+    if (submission.authorityCheck().isBlank()) {
+      throw new SemanticCatalogException("An answer lacks an authority-check reference");
+    }
+    return store.write(
+        transaction -> {
+          requireDomain(transaction, domain);
+          var answers = submission.answers();
+          var openProposals = openRetirementProposals(transaction, domain, answers);
+          var request = CommitRequest.builder("submit-answers", submission.decidedBy());
+          var answerRefs = new HashMap<Integer, Ref>();
+          var feedbackRefs = new HashMap<Integer, Ref>();
+          for (var index : inDependencyOrder(transaction, domain, answers)) {
+            var answer = answers.get(index);
+            if (answer.reviewPresentation() != null
+                && transaction.presentation(domain, answer.reviewPresentation()).isEmpty()) {
+              throw new SemanticCatalogException(
+                  "Unknown review presentation " + answer.reviewPresentation());
+            }
+            if (answer.type() == AnswerType.CORRECTION) {
+              var resource = request.add(LogRecord.InputResource.usageFeedback());
+              request.add(
+                  LogRecord.InputObservation.of(
+                      resource,
+                      new UsageFeedback(
+                          answer.wording(),
+                          SessionPurpose.CONSTRUCTING_THE_CATALOG,
+                          Objects.requireNonNull(answer.contextSummary()),
+                          List.of(Ref.urn(answer.fact())))));
+              feedbackRefs.put(index, resource);
+            }
+            answerRefs.put(
+                index,
+                request.add(
+                    new LogRecord.Answer(
+                        Ref.urn(answer.fact()),
+                        answer.transition(),
+                        answer.type(),
+                        submission.decidedBy(),
+                        submission.authorityCheck(),
+                        answer.wording(),
+                        answer.reviewPresentation() == null
+                            ? null
+                            : answer.reviewPresentation().toString())));
+          }
+          var result = commit(transaction, domain, request.build(), true);
+          var commit = result.commit().orElseThrow();
+          var outcomes = new ArrayList<Answers.Outcome>();
+          var answered = new HashSet<String>();
+          for (var index = 0; index < answers.size(); index++) {
+            var answer = answers.get(index);
+            answered.add(answer.fact());
+            var answerUrn = result.urn(Objects.requireNonNull(answerRefs.get(index)));
+            var feedback = feedbackRefs.get(index);
+            outcomes.add(
+                new Answers.Outcome(
+                    answer.fact(),
+                    answerUrn,
+                    answerResult(
+                        transaction,
+                        domain,
+                        answer,
+                        answerUrn,
+                        commit,
+                        openProposals.contains(answer.fact())),
+                    feedback == null ? null : result.urn(feedback)));
+          }
+          var moved = result.transitions();
+          return new Answers.Outcomes(
+              Urns.catalogSnapshot(domain, commit),
+              outcomes,
+              new Transitions(
+                  without(moved.confirmed(), answered),
+                  without(moved.rejected(), answered),
+                  without(moved.retired(), answered),
+                  moved.awaitingModel()));
+        });
+  }
+
+  /**
+   * Orders answers so that an answer to a Fact comes after the answers to the Facts it depends on,
+   * keeping submission order otherwise. Dependencies form no cycle, so the order always exists.
+   *
+   * @return the indices of the answers in the order they are applied
+   */
+  private static List<Integer> inDependencyOrder(
+      StoreTransaction transaction, String domain, List<Answers.Answer> answers) {
+    var projection = new Projection(domain, transaction.projectionSource(domain));
+    var answeredFacts = new HashSet<String>();
+    for (var answer : answers) {
+      if (projection.fact(answer.fact()).flatMap(slice -> slice.record().state()).isEmpty()) {
+        throw new SemanticCatalogException("Unknown Fact " + answer.fact());
+      }
+      answeredFacts.add(answer.fact());
+    }
+    var ordered = new ArrayList<Integer>();
+    var placed = new HashSet<String>();
+    var remaining = new ArrayList<Integer>();
+    for (var index = 0; index < answers.size(); index++) {
+      remaining.add(index);
+    }
+    while (!remaining.isEmpty()) {
+      var next =
+          remaining.stream()
+              .filter(
+                  index ->
+                      dependsOnAnswered(projection, answers.get(index).fact(), answeredFacts)
+                          .stream()
+                          .allMatch(placed::contains))
+              .findFirst()
+              .orElseThrow(() -> new IllegalStateException("Answered Facts depend on each other"));
+      remaining.remove(next);
+      ordered.add(next);
+      // A Fact is placed once its last answer is placed.
+      var fact = answers.get(next).fact();
+      if (remaining.stream().noneMatch(index -> answers.get(index).fact().equals(fact))) {
+        placed.add(fact);
+      }
+    }
+    return ordered;
+  }
+
+  /** The answered Facts a Fact depends on, directly or through other Facts. */
+  private static Set<String> dependsOnAnswered(
+      Projection projection, String fact, Set<String> answered) {
+    var found = new HashSet<String>();
+    var visited = new HashSet<String>();
+    var pending = new ArrayDeque<String>();
+    pending.push(fact);
+    while (!pending.isEmpty()) {
+      var next = pending.pop();
+      if (!visited.add(next)) {
+        continue;
+      }
+      for (var dependency :
+          projection.fact(next).map(slice -> slice.record().factDependencies()).orElse(Set.of())) {
+        if (!dependency.equals(fact) && answered.contains(dependency)) {
+          found.add(dependency);
+        }
+        pending.push(dependency);
+      }
+    }
+    return found;
+  }
+
+  /** The answered Facts that have an open retirement proposal before the submission. */
+  private static Set<String> openRetirementProposals(
+      StoreTransaction transaction, String domain, List<Answers.Answer> answers) {
+    var projection = new Projection(domain, transaction.projectionSource(domain));
+    var open = new HashSet<String>();
+    for (var answer : answers) {
+      projection
+          .fact(answer.fact())
+          .filter(slice -> slice.record().openRetirementProposal().isPresent())
+          .ifPresent(slice -> open.add(answer.fact()));
+    }
+    return open;
+  }
+
+  /**
+   * What an answer caused, read from the Fact Record after the commit.
+   *
+   * @param proposalOpen whether the Fact had an open retirement proposal before the submission
+   */
+  private static Answers.Result answerResult(
+      StoreTransaction transaction,
+      String domain,
+      Answers.Answer answer,
+      String answerUrn,
+      long commit,
+      boolean proposalOpen) {
+    var record =
+        transaction
+            .factRecord(domain, answer.fact())
+            .map(
+                row ->
+                    FactRecord.restore(
+                        LogRecordJson.fromStored(row.record(), FactRecord.Stored.class)))
+            .orElseThrow();
+    if (answer.type() == AnswerType.UNKNOWN) {
+      return Answers.Result.UNKNOWN;
+    }
+    var restsOnAnswer =
+        transaction.factRecords(domain, answer.fact(), commit).stream()
+            .filter(positioned -> positioned.position().commit() == commit)
+            .anyMatch(positioned -> restsOn(positioned.record(), answerUrn));
+    return switch (answer.transition()) {
+      case CONFIRM ->
+          switch (answer.type()) {
+            case CONSENT ->
+                restsOnAnswer
+                    ? Answers.Result.CONFIRMED
+                    : record.is(FactState.CANDIDATE)
+                        ? Answers.Result.UNCONFIRMED_DEPENDENCIES
+                        : Answers.Result.ALREADY_JUDGED;
+            case REJECTION, CORRECTION ->
+                restsOnAnswer ? Answers.Result.REJECTED : Answers.Result.ALREADY_JUDGED;
+            case UNKNOWN -> Answers.Result.UNKNOWN;
+          };
+      case RETIRE ->
+          switch (answer.type()) {
+            case CONSENT -> restsOnAnswer ? Answers.Result.RETIRED : Answers.Result.ALREADY_JUDGED;
+            case REJECTION, CORRECTION ->
+                proposalOpen && record.is(FactState.CONFIRMED)
+                    ? Answers.Result.RETIREMENT_DECLINED
+                    : Answers.Result.ALREADY_JUDGED;
+            case UNKNOWN -> Answers.Result.UNKNOWN;
+          };
+    };
+  }
+
+  private static boolean restsOn(LogRecord record, String answerUrn) {
+    return switch (record) {
+      case LogRecord.Confirm confirm -> confirm.basis().urnValue().equals(answerUrn);
+      case LogRecord.Reject rejection ->
+          rejection.basis() instanceof LogRecord.Basis.Event event
+              && event.logRecord().urnValue().equals(answerUrn);
+      case LogRecord.Retire retirement ->
+          retirement.basis() instanceof LogRecord.Basis.Event event
+              && event.logRecord().urnValue().equals(answerUrn);
+      default -> false;
+    };
+  }
+
+  private static List<String> without(List<String> facts, Set<String> excluded) {
+    return facts.stream().filter(fact -> !excluded.contains(fact)).toList();
+  }
+
+  /**
+   * Resolves a conflict at a Fact Address by choosing one of its eligible Facts (see {@code
+   * docs/semantic-catalog/public-api.md}, "Resolving a conflict").
+   *
+   * @return the commit written
+   * @throws com.scalar.db.analytics.labs.semantic.model.CommitRejectedException when the chosen and
+   *     passed-over Facts are not exactly the eligible Facts at the previous commit
+   * @throws SemanticCatalogException when the authority-check reference is missing or the review
+   *     presentation does not exist
+   */
+  public CommitResult resolveConflict(String domain, ConflictResolution resolution) {
+    if (resolution.authorityCheck().isBlank()) {
+      throw new SemanticCatalogException(
+          "A conflict resolution lacks an authority-check reference");
+    }
+    return store.write(
+        transaction -> {
+          requireDomain(transaction, domain);
+          if (resolution.reviewPresentation() != null
+              && transaction.presentation(domain, resolution.reviewPresentation()).isEmpty()) {
+            throw new SemanticCatalogException(
+                "Unknown review presentation " + resolution.reviewPresentation());
+          }
+          var request = CommitRequest.builder("resolve-conflict", resolution.decidedBy());
+          request.add(
+              new LogRecord.ResolveConflict(
+                  Ref.urn(resolution.factAddress()),
+                  Ref.urn(resolution.chosen()),
+                  resolution.passedOver().stream().map(Ref::urn).toList(),
+                  resolution.decidedBy(),
+                  resolution.authorityCheck(),
+                  resolution.wording(),
+                  resolution.reviewPresentation() == null
+                      ? null
+                      : resolution.reviewPresentation().toString()));
+          return commit(transaction, domain, request.build(), true);
+        });
+  }
+
+  /**
+   * Sets a new user policy version (see {@code docs/semantic-catalog/public-api.md}, "Setting a
+   * user policy version"). Evaluations from then on name it.
+   *
+   * @return the URN of the version's log record
+   */
+  public String setPolicyVersion(String domain, LogRecord.PolicyVersion version) {
+    var request = CommitRequest.builder("set-policy-version", version.setBy());
+    var ref = request.add(version);
+    return commit(domain, request.build()).urn(ref);
+  }
+
+  /**
+   * Registers a review presentation, outside the log (see {@code
+   * docs/semantic-catalog/public-api.md}, "Registering a review presentation"). Answers and
+   * conflict resolutions given in it reference the number it returns.
+   *
+   * @throws SemanticCatalogException when the domain or a target Fact does not exist
+   */
+  public long registerReviewPresentation(String domain, ReviewPresentation presentation) {
+    return store.write(
+        transaction -> {
+          requireDomain(transaction, domain);
+          var projection = new Projection(domain, transaction.projectionSource(domain));
+          for (var target : presentation.targets()) {
+            var address = projection.factAddress(target.fact());
+            if (address.isEmpty() || !address.get().equals(target.factAddress())) {
+              throw new SemanticCatalogException(
+                  "Unknown Fact " + target.fact() + " at " + target.factAddress());
+            }
+          }
+          return transaction.insertPresentation(
+              domain,
+              new ReviewPresentation(
+                  presentation.kind(),
+                  presentation.targets(),
+                  presentation.recipient(),
+                  presentation.presentedAt(),
+                  presentation.context(),
+                  List.of()));
+        });
+  }
+
+  /**
+   * Checks a proposed user policy version against the latest point: which evaluable candidates
+   * inline evaluation would adopt, and which the policy evaluation model would decide (see {@code
+   * docs/semantic-catalog/public-api.md}, "Checking a user policy version"). A commit between this
+   * read and setting the version can change the actual outcome.
+   */
+  public Review.PolicyCheck checkPolicyVersion(String domain, LogRecord.PolicyVersion proposed) {
+    return read(domain, Point.LATEST, snapshot -> snapshot.policyCheck(proposed));
+  }
+
+  /** A review presentation by the number its registration returned. */
+  public Optional<ReviewPresentation> reviewPresentation(String domain, long presentation) {
+    return store.read(transaction -> transaction.presentation(domain, presentation));
   }
 
   private static @Nullable String targetFact(PositionedRecord positioned) {

@@ -156,8 +156,8 @@ referenced side has unreferenced rows yields `subset` by machine judgement under
 Under the default policy, existence, technical references, value kinds, enforced constraints, and
 correspondences from enforced foreign keys are adopted inline. Uniqueness from an unenforced
 declaration is adopted inline once the uniqueness check supports the same Fact. Keys and
-correspondences from unenforced declarations go to the judging model, because the absence of
-duplicates does not show that a set is a business identifier.
+correspondences from unenforced declarations go to the policy evaluation model, because the absence
+of duplicates does not show that a set is a business identifier.
 
 ## Data checks
 
@@ -188,7 +188,7 @@ less than a whole table:
 | Result | Example | Rests on | Under `auto` |
 | --- | --- | --- | --- |
 | Loosens what the data may hold | A Field set repeats; some values on one side have no match | A counterexample, which a sample shows as surely as a whole table as long as the other side is looked up whole | Adopted inline |
-| Restricts what the data may hold | A Field set does not repeat; every value on one side has a match | No counterexample found | Adopted inline only when a declaration also supports it; otherwise the judging model decides, with the range read in view |
+| Restricts what the data may hold | A Field set does not repeat; every value on one side has a match | No counterexample found | Adopted inline only when a declaration also supports it; otherwise the policy evaluation model decides, with the range read in view |
 
 [`construction.md`](construction.md#choosing-the-confirmation-path) gives the rule and its reason.
 
@@ -217,7 +217,8 @@ element it passes names and types, confirmed Facts, relevant document parts, fee
 data statistics, and asks for predicate values with what supports them. An item that cites a
 registered document is `document`, with a quotation the Generator verifies against the document;
 anything else is `inference`, with the basis the model stated. Neither is deterministic, so no
-meaning-inference candidate is adopted inline; under `auto` the judging model decides each.
+meaning-inference candidate is adopted inline; under `auto` the policy evaluation model decides
+each.
 
 | Generator | Triggered by |
 | --- | --- |
@@ -252,7 +253,7 @@ business definition cannot be checked against data and is judged as a separate c
 Currency, code meanings, tax treatment, and the posting date of sales rarely have support in data or
 declarations. Without documents, meaning inference can offer only `inference`, and the deciding
 party's judgement becomes the main source: a tax treatment that only a column name suggests is a
-signal too weak for the judging model to adopt alone.
+signal too weak for the policy evaluation model to adopt alone.
 
 Correction interpretation gives the model the feedback's content and context and the related Facts'
 content, and asks for a revised value or applicability scope for the same element and predicate. Its
@@ -275,9 +276,9 @@ input the confirmation of what an earlier one produces. When the e-commerce data
    meaning inference.
 3. If the table metadata does not say whether the primary key is enforced, the uniqueness check
    supports the declared uniqueness with `data-check` and it is adopted inline, while the key goes
-   to the judging model.
-4. Row and Field meaning candidates go to the judging model, which adopts them or sends them to
-   the deciding party.
+   to the policy evaluation model.
+4. Row and Field meaning candidates go to the policy evaluation model, which adopts them or sends
+   them to the deciding party.
 
 Registering the POS database repeats this, after which identifier correspondence inference proposes
 the customer-to-member correspondence. Declaring confirmed existence as input avoids producing
@@ -347,7 +348,7 @@ and a technical reference never moves; a renamed table likewise becomes a new Da
 
 ## Reaching a language model
 
-Meaning inference, impact judgement, the duplicate check, and the judging model (see
+Meaning inference, impact judgement, the duplicate check, and the policy evaluation model (see
 [`construction.md`](construction.md#choosing-the-confirmation-path)) call a language model through
 an **adapter**, the only part of the Semantic Catalog that knows how a model is reached. A Generator
 passes a prompt and receives the model's answer; it never depends on a particular provider, so the
@@ -371,9 +372,9 @@ An unavailable model fails the build task, which can be resumed.
 
 ## Input passed to external models
 
-Meaning inference, impact judgement, the duplicate check, and the judging model may send input to
-an external model through the adapter. Usage feedback and data values reach a model only as far as
-the domain's settings allow:
+Meaning inference, impact judgement, the duplicate check, and the policy evaluation model may send
+input to an external model through the adapter. Usage feedback and data values reach a model only as
+far as the domain's settings allow:
 
 | Input | Content | Default |
 | --- | --- | --- |

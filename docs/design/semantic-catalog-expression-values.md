@@ -13,9 +13,9 @@ names a missing column.
 
 ## Rationale
 
-These values are written by language-model Generators, judged by the judging model and the deciding
-party, and used by a Query Agent composing SQL. A SQL expression is what all three read and write
-well, and the product's Query Engine runs it as written. An engine-neutral structure such as
+These values are written by language-model Generators, judged by the policy evaluation model and the
+deciding party, and used by a Query Agent composing SQL. A SQL expression is what all three read and
+write well, and the product's Query Engine runs it as written. An engine-neutral structure such as
 Substrait would let any engine consume the value, but neither a person nor a model can read or write
 it reliably, and the product has one Query Engine.
 

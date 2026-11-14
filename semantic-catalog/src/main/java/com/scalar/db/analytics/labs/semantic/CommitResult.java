@@ -16,8 +16,10 @@ import java.util.OptionalLong;
  * @param urns the URN each temporary number of the request now stands for, by temporary number: the
  *     URN issued for a written record, the URN of the existing record a proposal was the same as,
  *     or, for a record that creates nothing, the URN of its log record
+ * @param transitions what policy evaluation and cascades moved in the same commit
  */
-public record CommitResult(OptionalLong commit, Map<Integer, String> urns) {
+public record CommitResult(
+    OptionalLong commit, Map<Integer, String> urns, Transitions transitions) {
   public CommitResult {
     urns = Map.copyOf(urns);
   }

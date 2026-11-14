@@ -12,6 +12,7 @@ import com.scalar.db.analytics.labs.semantic.model.Vocabulary.AnswerType;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ConfirmationPath;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.InputKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.PolicyResult;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Preset;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.RetirementReason;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Transition;
 import java.util.List;
@@ -198,11 +199,22 @@ public sealed interface LogRecord {
 
   /**
    * A user policy version. It is in the log so that every policy evaluation names the version in
-   * effect, and the log decides the order of version changes and evaluations.
+   * effect, and the log decides the order of version changes and evaluations. A domain starts with
+   * {@link #DEFAULT}.
    *
-   * @param content the version, which policy evaluation interprets and the store does not
+   * @param preset when machine judgement adopts
+   * @param countsDeclaredUnenforced whether {@code declared-unenforced} counts as a deterministic
+   *     validation method
+   * @param setBy the semantics owner who set the version
+   * @param reason why the version was set
    */
-  record PolicyVersion(JsonNode content) implements LogRecord {}
+  record PolicyVersion(Preset preset, boolean countsDeclaredUnenforced, String setBy, String reason)
+      implements LogRecord {
+    /** The version a new domain starts with: {@code auto}, not counting unenforced declarations. */
+    public static final PolicyVersion DEFAULT =
+        new PolicyVersion(
+            Preset.AUTO, false, "semantic-catalog", "The default policy of a new domain");
+  }
 
   /**
    * A Fact Event: an event, with its reason, that changes how one Fact is treated (see {@code
@@ -271,6 +283,7 @@ public sealed interface LogRecord {
    * @param policyVersion the log record of the user policy version evaluated
    * @param transition what is evaluated: confirming a candidate, or retiring a Fact with an open
    *     retirement proposal
+   * @param evaluator how the evaluation was made: inline, or by the policy evaluation model
    * @param decidedBy the evaluating party
    */
   record EvaluatePolicy(
@@ -278,9 +291,38 @@ public sealed interface LogRecord {
       Ref policyVersion,
       Transition transition,
       PolicyResult result,
+      Evaluator evaluator,
       String decidedBy,
       String reason)
-      implements FactEvent {}
+      implements FactEvent {
+    public EvaluatePolicy {
+      if (evaluator instanceof Evaluator.Model model
+          && model.reviewMaterial() != null
+          && result != PolicyResult.REQUEST_CONSENT) {
+        throw new IllegalArgumentException(
+            "Review material comes only with an evaluation that requests consent");
+      }
+    }
+  }
+
+  /** How a policy evaluation was made. */
+  @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "by")
+  @JsonSubTypes({
+    @JsonSubTypes.Type(value = Evaluator.Inline.class, name = "inline"),
+    @JsonSubTypes.Type(value = Evaluator.Model.class, name = "model")
+  })
+  sealed interface Evaluator {
+    /** Inline evaluation, on deterministic signals and without a model. */
+    record Inline() implements Evaluator {}
+
+    /**
+     * The policy evaluation model, which weighs the signals of a candidate as a whole.
+     *
+     * @param version the model and the prompt, recorded as a Generator's version is
+     * @param reviewMaterial the material it built for the deciding party when it requested consent
+     */
+    record Model(JsonNode version, @Nullable JsonNode reviewMaterial) implements Evaluator {}
+  }
 
   /**
    * A human answer. The answer and the transition it causes are separate events.

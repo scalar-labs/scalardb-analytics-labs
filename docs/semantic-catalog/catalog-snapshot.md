@@ -116,15 +116,15 @@ unrestricted, and the Query Agent decides which to use in light of the question'
 user when unsure.
 
 For each returned Fact the Query Agent can see its state; its checks as signals, with their bases
-and the content of what they reference; the deciding party when a person consented; the
-confirmation path, inline machine judgement, the judging model, or consent, and the user policy
+and the content of what they reference; the deciding party when a person consented; the confirmation
+path, inline machine judgement, the policy evaluation model, or consent, and the user policy
 version; the applicability scope and dependencies, with rejected or retired Facts among its inputs
-and their answers; and whether new candidates exist. It can
-also see when the Fact was last confirmed or checked: the commit of its latest confirmation or
-additional acceptance. An unchanged re-check records nothing, so this value can make knowledge look
-older than it is, never newer. It also sees whether any input the Fact depends on has an observation
-newer than the one depended on, up to the commit read. Confirmed means adopted, not proven, and
-nothing is presented as more certain than its signals and confirmation path show.
+and their answers; and whether new candidates exist. It can also see when the Fact was last
+confirmed or checked: the commit of its latest confirmation or additional acceptance. An unchanged
+re-check records nothing, so this value can make knowledge look older than it is, never newer. It
+also sees whether any input the Fact depends on has an observation newer than the one depended on,
+up to the commit read. Confirmed means adopted, not proven, and nothing is presented as more certain
+than its signals and confirmation path show.
 
 The Query Agent may compose and run a query with **unconfirmed knowledge**, meaning candidates,
 answers from a user who is not a deciding party, or its own assumptions, only when the user

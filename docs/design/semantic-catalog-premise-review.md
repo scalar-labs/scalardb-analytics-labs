@@ -1,7 +1,5 @@
 # When is a candidate whose premises are unconfirmed evaluated and presented?
 
-**[Planned]** This decision is accepted but not implemented yet.
-
 ## Current answer
 
 As soon as each premise dependency is either confirmed or itself a candidate awaiting consent. The
@@ -22,8 +20,9 @@ is lost. Presenting the premise and what rests on it together, with the cascade 
 most of that waste, because the deciding party judges the premise first and sees what a rejection
 takes with it. Extra rounds, in contrast, are a direct cost to the deciding party.
 
-Evaluation happens ahead of confirmation because the judging model is a language model: whether a
-dependent needs consent cannot be computed cheaply at read time, so it is decided once and recorded.
+Evaluation happens ahead of confirmation because the policy evaluation model is a language model:
+whether a dependent needs consent cannot be computed cheaply at read time, so it is decided once and
+recorded.
 
 ## Consequences
 

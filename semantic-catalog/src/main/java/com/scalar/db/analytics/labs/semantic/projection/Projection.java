@@ -7,9 +7,11 @@ package com.scalar.db.analytics.labs.semantic.projection;
 import com.scalar.db.analytics.labs.semantic.model.Dependency;
 import com.scalar.db.analytics.labs.semantic.model.ElementIdentity;
 import com.scalar.db.analytics.labs.semantic.model.LogPosition;
+import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord.FactEvent;
 import com.scalar.db.analytics.labs.semantic.model.LogRecordJson;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
+import com.scalar.db.analytics.labs.semantic.model.Urns;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.AddressSelectionRow;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.DependencyRow;
@@ -33,6 +35,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The materialized records of one domain held in memory: all of them after a replay from empty, or,
@@ -53,6 +56,7 @@ public final class Projection {
   private final Map<String, String> observationResources = new HashMap<>();
   private final Map<String, String> latestObservations = new HashMap<>();
   private final Set<String> policyVersions = new HashSet<>();
+  private @Nullable PolicyInForce policyInForce;
   private final Map<RowKey, MaterializedRow> loaded = new HashMap<>();
 
   /** A projection of a domain that loads what it does not hold from a source. */
@@ -401,8 +405,37 @@ public final class Projection {
     latestObservations.put(inputResource, observation);
   }
 
-  void addPolicyVersion(String logRecord) {
+  void addPolicyVersion(String logRecord, LogRecord.PolicyVersion version) {
     policyVersions.add(logRecord);
+    policyInForce = new PolicyInForce(logRecord, version);
+  }
+
+  /**
+   * A user policy version and its log record.
+   *
+   * @param logRecord the URN of the log record of the version
+   */
+  public record PolicyInForce(String logRecord, LogRecord.PolicyVersion version) {}
+
+  /**
+   * The user policy version in force after the records applied so far: the latest one applied, or
+   * the latest one in the store.
+   *
+   * @return empty only for a domain whose log holds no policy version yet
+   */
+  public Optional<PolicyInForce> policyInForce() {
+    if (policyInForce == null) {
+      policyInForce =
+          source
+              .latestPolicyVersion()
+              .map(
+                  positioned ->
+                      new PolicyInForce(
+                          Urns.logRecord(domain, positioned.position()),
+                          (LogRecord.PolicyVersion) positioned.record()))
+              .orElse(null);
+    }
+    return Optional.ofNullable(policyInForce);
   }
 
   private void remember(Stream<? extends MaterializedRow> rows) {

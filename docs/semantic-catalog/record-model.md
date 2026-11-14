@@ -269,7 +269,7 @@ other.
 | --- | --- | --- |
 | `accept` | One Fact | Inputs read, dependency references, validation result, provenance (Generator, version, build task) |
 | `propose-retire` | One Fact | Reason (element no longer exists, source declaration no longer exists, or confirmation was wrong), inputs read, validation result, provenance |
-| `evaluate-policy` | One Fact | Policy version, what is evaluated (confirmation or retirement), result (machine judgement or request consent), deciding party, reason; for a judgement by the judging model, its version and, when it requests consent, the review material it built |
+| `evaluate-policy` | One Fact | Policy version, what is evaluated (confirmation or retirement), result (machine judgement or request consent), how it was made (inline evaluation or the policy evaluation model), deciding party, reason; for a judgement by the policy evaluation model, its version and, when it requests consent, the review material it built |
 | `answer` | One Fact | What is answered, answer type (consent, rejection, correction, unknown), deciding party, authority-check reference, wording, review presentation |
 | `confirm` | One Fact | Path (machine judgement or human consent) and the policy evaluation or answer it rests on |
 | `reject` | One Fact | The answer it rests on, or the rejection or retirement of a Fact it depends on |
@@ -311,12 +311,16 @@ Transitions need the events they rest on:
 
 A retirement proposal ends with retirement, rejection, or a rejection or correction answer. An
 unknown answer does not end it, but the proposal is not presented again until a new dependency
-reference arrives. An answer to a candidate whose premise dependencies are not all confirmed is
-recorded without a transition; the candidate is judged again, from policy evaluation, once they are.
+reference arrives. A consent to a candidate whose premise dependencies are not all confirmed is
+recorded without a transition and takes effect in the commit that confirms the last of them, as an
+adoption pending its premises does; a rejected or retired premise instead rejects the candidate by
+cascade.
 
 A candidate's **current judgement** starts with the acceptance that made it a candidate, the first
 one or one that returned it from `rejected` or `retired`. Policy evaluations and answers made
-earlier belong to an earlier judgement, and none of them can be the basis of a transition. A
+earlier belong to an earlier judgement, and none of them can be the basis of a transition. An
+additional acceptance does not start a new judgement, but the policy is evaluated again after it,
+and a consent given before it no longer stands, because it may bring what changes the judgement. A
 candidate is evaluated for confirmation once every premise dependency is `confirmed` or is a
 candidate whose latest evaluation requested consent, so a candidate and the premises it waits on can
 reach the deciding party together. The confirmation itself still waits until every premise is
@@ -344,9 +348,11 @@ A **validation result** records the checks made on a candidate. A check is a sig
 holds its validation method, the validation items it examined, a result of supported, refuted, or
 undecidable, a reference to the input it was checked against (an Input Observation or a Fact
 Revision), and its basis. A `document` check quotes the relevant source text. A `data-check`
-references a data observation, which records when it was read and whether it read the whole table
-or a sample. An `inference` check records the basis the model stated, because otherwise nothing
-about an inference survives for the deciding party to judge; it may have no reference.
+references a data observation, which records when it was read and whether it read the whole table or
+a sample, and states whether its result rests on a counterexample found or on none found, because
+data can refute a rule but not establish one. An `inference` check records the basis the model
+stated, because otherwise nothing about an inference survives for the deciding party to judge; it
+may have no reference.
 
 Even checks that all support a value show only that the evidence points to it. Data shows what held
 when it was read, usually in a sample; a declaration shows what the source states now; a document or

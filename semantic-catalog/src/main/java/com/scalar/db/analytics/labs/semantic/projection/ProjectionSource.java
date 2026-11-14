@@ -64,6 +64,11 @@ public interface ProjectionSource {
         }
 
         @Override
+        public Optional<PositionedRecord> latestPolicyVersion() {
+          return Optional.empty();
+        }
+
+        @Override
         public Optional<String> factAddress(String fact) {
           return Optional.empty();
         }
@@ -132,6 +137,9 @@ public interface ProjectionSource {
 
   /** Whether a log record is a user policy version. */
   boolean isPolicyVersion(String logRecord);
+
+  /** The latest user policy version in the log, the one in force. */
+  Optional<PositionedRecord> latestPolicyVersion();
 
   /** The Fact Address of a Fact, without loading its records. */
   Optional<String> factAddress(String fact);

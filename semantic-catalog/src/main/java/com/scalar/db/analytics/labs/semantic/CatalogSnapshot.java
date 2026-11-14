@@ -9,18 +9,24 @@ import com.scalar.db.analytics.labs.semantic.model.FactRevision;
 import com.scalar.db.analytics.labs.semantic.model.Knowledge;
 import com.scalar.db.analytics.labs.semantic.model.KnowledgeRequest;
 import com.scalar.db.analytics.labs.semantic.model.LogPosition;
+import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.LogRecordJson;
+import com.scalar.db.analytics.labs.semantic.model.Review;
 import com.scalar.db.analytics.labs.semantic.model.SemanticCatalogException;
 import com.scalar.db.analytics.labs.semantic.model.Urns;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Transition;
+import com.scalar.db.analytics.labs.semantic.policy.PolicyEvaluator;
 import com.scalar.db.analytics.labs.semantic.projection.FactRecord;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.AddressSelectionRow;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.ElementRow;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.FactAddressRow;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.FactRecordRow;
+import com.scalar.db.analytics.labs.semantic.projection.PositionedRecord;
 import com.scalar.db.analytics.labs.semantic.projection.Projection;
 import com.scalar.db.analytics.labs.semantic.storage.StoreTransaction;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -29,6 +35,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
@@ -187,6 +194,315 @@ public final class CatalogSnapshot {
           });
     }
     return targets;
+  }
+
+  // Review
+
+  /**
+   * The review list at this commit (see {@code docs/semantic-catalog/public-api.md}, "Retrieving
+   * the review list"): candidates and open retirement proposals whose latest evaluation requested
+   * consent, and conflicting Fact Addresses, grouped per table with the domain-wide items in a
+   * group of their own. Items answered unknown with no new dependency reference since are left out.
+   *
+   * @return the groups, tables in the order of their canonical form and the domain-wide group last;
+   *     a group's items ordered by the commit at which the need for judgement arose
+   */
+  public List<Review.Group> reviewList(Review.Query query) {
+    if (commit == 0) {
+      return List.of();
+    }
+    var reader = new Reader();
+    var asked = transaction.factsAskedForConsent(domain, commit);
+    reader.keep(transaction.factRecordsOf(domain, asked));
+    var waiting =
+        asked.stream()
+            .filter(
+                fact -> {
+                  var record = reader.records.get(fact);
+                  return record != null
+                      && record.awaitingConsent()
+                      && !record.unknownAnswerPending();
+                })
+            .toList();
+    var conflicts = transaction.conflictsAt(domain, commit);
+    var addressUrns = new LinkedHashSet<String>();
+    waiting.forEach(fact -> addressUrns.add(reader.addressOf(fact)));
+    conflicts.forEach(conflict -> addressUrns.add(conflict.factAddress()));
+    reader.loadAddresses(addressUrns);
+    var addresses = new HashMap<String, FactAddressRow>();
+    for (var row : transaction.addressesAt(domain, addressUrns, commit)) {
+      addresses.put(row.factAddress(), row);
+    }
+    var tables = new Tables(addresses.values().stream().map(FactAddressRow::element).toList());
+    var logs = transaction.factLogsOf(domain, waiting, commit);
+    var presented = new LinkedHashSet<>(waiting);
+    conflicts.forEach(conflict -> presented.addAll(conflict.eligibleFacts()));
+    var presentations = transaction.presentationsOf(domain, presented);
+    var waitingSet = Set.copyOf(waiting);
+
+    var items = new ArrayList<Review.Item>();
+    for (var fact : waiting) {
+      var record = reader.requireRecord(fact);
+      var address = Objects.requireNonNull(addresses.get(reader.addressOf(fact)));
+      var target = tables.target(address);
+      var earlier = presentations.getOrDefault(fact, List.of());
+      var log = logs.getOrDefault(fact, List.of());
+      if (record.is(FactState.CANDIDATE)) {
+        var evaluation = evaluation(log, record, Transition.CONFIRM);
+        var premises = new ArrayList<Knowledge.RevisionContent>();
+        var premiseItems = new ArrayList<String>();
+        for (var premise : reader.premisesOf(fact)) {
+          if (reader.records.containsKey(premise)) {
+            premises.add(reader.content(premise));
+            if (waitingSet.contains(premise)) {
+              premiseItems.add(premise);
+            }
+          }
+        }
+        var selection = reader.selections.get(address.factAddress());
+        var selected = selection == null ? null : selection.selectedFact();
+        items.add(
+            new Review.Candidate(
+                target,
+                reader.content(fact),
+                evaluation,
+                premises,
+                premiseItems,
+                reader.cascade(fact, FactState.CANDIDATE),
+                selected != null && !selected.equals(fact) ? selected : null,
+                Urns.position(evaluation.logRecord()).commit(),
+                earlier));
+      } else {
+        var evaluation = evaluation(log, record, Transition.RETIRE);
+        var proposalAt = record.openRetirementProposal().orElseThrow();
+        var proposal =
+            (LogRecord.ProposeRetire)
+                log.stream()
+                    .filter(positioned -> positioned.position().equals(proposalAt))
+                    .findFirst()
+                    .orElseThrow()
+                    .record();
+        items.add(
+            new Review.Retirement(
+                target,
+                reader.content(fact),
+                Urns.logRecord(domain, proposalAt),
+                proposal,
+                evaluation,
+                reader.cascade(fact, FactState.CONFIRMED),
+                Urns.position(evaluation.logRecord()).commit(),
+                earlier));
+      }
+    }
+    for (var conflict : conflicts) {
+      var address = Objects.requireNonNull(addresses.get(conflict.factAddress()));
+      var earlier = new ArrayList<Long>();
+      for (var fact : conflict.eligibleFacts()) {
+        earlier.addAll(presentations.getOrDefault(fact, List.of()));
+      }
+      var selected = conflict.selectedFact();
+      items.add(
+          new Review.Conflict(
+              tables.target(address),
+              conflict.eligibleFacts().stream().map(reader::content).toList(),
+              selected == null ? null : reader.content(selected),
+              conflict.fromCommit(),
+              earlier.stream().distinct().sorted().toList()));
+    }
+    return group(items, tables, query);
+  }
+
+  /** The latest evaluation of a transition, read from the Fact's log. */
+  private Review.Evaluation evaluation(
+      List<PositionedRecord> log, FactRecord record, Transition transition) {
+    var at = record.latestEvaluation(transition).orElseThrow().at();
+    var evaluation =
+        log.stream()
+            .filter(positioned -> positioned.position().equals(at))
+            .findFirst()
+            .orElseThrow(() -> new IllegalStateException("No evaluation at " + at));
+    return new Review.Evaluation(
+        Urns.logRecord(domain, at), (LogRecord.EvaluatePolicy) evaluation.record());
+  }
+
+  private static List<Review.Group> group(
+      List<Review.Item> items, Tables tables, Review.Query query) {
+    var byTable = new java.util.TreeMap<String, List<Review.Item>>();
+    var domainWide = new ArrayList<Review.Item>();
+    for (var item : items) {
+      var target = item.target();
+      if ((query.kind() != null && item.kind() != query.kind())
+          || (query.element() != null && !query.element().equals(target.element()))
+          || (query.factAddress() != null && !query.factAddress().equals(target.factAddress()))) {
+        continue;
+      }
+      var itemTables = tables.of(target.element());
+      if (itemTables.isEmpty()) {
+        if (query.position().root()) {
+          domainWide.add(item);
+        }
+        continue;
+      }
+      for (var table : itemTables) {
+        if (query.position().contains(table)) {
+          byTable.computeIfAbsent(table, key -> new ArrayList<>()).add(item);
+        }
+      }
+    }
+    var order =
+        java.util.Comparator.comparingLong(Review.Item::needArose)
+            .thenComparing(item -> item.target().factAddress());
+    var groups = new ArrayList<Review.Group>();
+    byTable.forEach(
+        (table, list) -> groups.add(new Review.Group(table, list.stream().sorted(order).toList())));
+    if (!domainWide.isEmpty()) {
+      groups.add(new Review.Group(null, domainWide.stream().sorted(order).toList()));
+    }
+    return groups;
+  }
+
+  /**
+   * The tables each element belongs to for review: a Dataset's own, a Field's Dataset's, and those
+   * at the ends of an identifier correspondence. Other elements belong to the domain as a whole.
+   */
+  private final class Tables {
+    private final Map<String, ElementRow> elements = new HashMap<>();
+
+    Tables(Collection<String> targets) {
+      load(targets);
+      var more = new LinkedHashSet<String>();
+      for (var row : List.copyOf(elements.values())) {
+        if (row.parent() != null) {
+          more.add(row.parent());
+        }
+        if (row.edge() != null && row.kind() == ElementKind.IDENTIFIER_CORRESPONDENCE) {
+          more.addAll(LogRecordJson.readStrings(row.edge().endA()));
+          more.addAll(LogRecordJson.readStrings(row.edge().endB()));
+        }
+      }
+      load(more);
+      var parents = new LinkedHashSet<String>();
+      for (var row : List.copyOf(elements.values())) {
+        if (row.parent() != null) {
+          parents.add(row.parent());
+        }
+      }
+      load(parents);
+    }
+
+    private void load(Collection<String> urns) {
+      var missing = urns.stream().filter(urn -> !elements.containsKey(urn)).toList();
+      for (var row : transaction.elementsAt(domain, missing, commit)) {
+        elements.put(row.element(), row);
+      }
+    }
+
+    List<String> of(String element) {
+      var row = elements.get(element);
+      if (row == null) {
+        return List.of();
+      }
+      return switch (row.kind()) {
+        case DATASET, FIELD -> tableOf(element).stream().toList();
+        case IDENTIFIER_CORRESPONDENCE -> {
+          var ends = new LinkedHashSet<String>();
+          var edge = row.edge();
+          if (edge != null) {
+            for (var end : List.of(edge.endA(), edge.endB())) {
+              for (var field : LogRecordJson.readStrings(end)) {
+                tableOf(field).ifPresent(ends::add);
+              }
+            }
+          }
+          yield List.copyOf(ends);
+        }
+        default -> List.of();
+      };
+    }
+
+    private Optional<String> tableOf(String element) {
+      var row = elements.get(element);
+      if (row == null) {
+        return Optional.empty();
+      }
+      if (row.kind() == ElementKind.DATASET) {
+        return Optional.ofNullable(row.technicalReference());
+      }
+      return row.parent() == null ? Optional.empty() : tableOf(row.parent());
+    }
+
+    Review.Target target(FactAddressRow address) {
+      var row = elements.get(address.element());
+      if (row == null) {
+        throw new IllegalStateException("Element " + address.element() + " is not loaded");
+      }
+      return new Review.Target(
+          address.element(),
+          row.kind(),
+          row.technicalReference(),
+          address.factAddress(),
+          address.predicate(),
+          address.scopeDescription(),
+          address.scopeEntities());
+    }
+  }
+
+  /**
+   * What a proposed user policy version would do to the evaluable candidates at this commit, which
+   * must be the latest (see {@code docs/semantic-catalog/public-api.md}, "Checking a user policy
+   * version").
+   */
+  Review.PolicyCheck policyCheck(LogRecord.PolicyVersion proposed) {
+    var current =
+        transaction
+            .projectionSource(domain)
+            .latestPolicyVersion()
+            .orElseThrow(() -> new IllegalStateException("Domain " + domain + " has no policy"));
+    var reader = new Reader();
+    var candidates = transaction.candidateRecords(domain);
+    reader.keep(candidates);
+    var premises = new LinkedHashSet<String>();
+    candidates.forEach(row -> premises.addAll(reader.requireRecord(row.fact()).factDependencies()));
+    premises.removeAll(reader.records.keySet());
+    reader.keep(transaction.factRecordsOf(domain, premises));
+    var addresses = candidates.stream().map(FactRecordRow::factAddress).distinct().toList();
+    for (var selection : transaction.selectionsAt(domain, addresses, commit)) {
+      reader.selections.put(selection.factAddress(), selection);
+    }
+    var adoptedInline = new ArrayList<String>();
+    var toModel = new ArrayList<String>();
+    for (var row : candidates) {
+      var fact = row.fact();
+      var evaluable =
+          reader.premisesOf(fact).stream()
+              .allMatch(
+                  premise -> {
+                    var record = reader.records.get(premise);
+                    return record != null
+                        && (record.is(FactState.CONFIRMED)
+                            || (record.is(FactState.CANDIDATE) && record.awaitingConsent()));
+                  });
+      if (!evaluable) {
+        continue;
+      }
+      var selection = reader.selections.get(row.factAddress());
+      var anotherSelected =
+          selection != null
+              && selection.selectedFact() != null
+              && !selection.selectedFact().equals(fact);
+      switch (PolicyEvaluator.evaluateConfirmation(
+          proposed, reader.requireRecord(fact).checks(), anotherSelected)) {
+        case PolicyEvaluator.Decision.Adopt ignored -> adoptedInline.add(fact);
+        case PolicyEvaluator.Decision.Undecided ignored -> toModel.add(fact);
+        case PolicyEvaluator.Decision.RequestConsent ignored -> {}
+      }
+    }
+    return new Review.PolicyCheck(
+        urn(),
+        Urns.logRecord(domain, current.position()),
+        (LogRecord.PolicyVersion) current.record(),
+        adoptedInline,
+        toModel);
   }
 
   // Fact Records and Fact Revisions
@@ -463,6 +779,65 @@ public final class CatalogSnapshot {
       }
       latestObservations.putAll(transaction.latestObservationsAt(domain, resources, commit));
       loadedResources.addAll(resources);
+    }
+
+    /** The Fact Address of a loaded Fact. */
+    String addressOf(String fact) {
+      var address = addressOfFact.get(fact);
+      if (address == null) {
+        throw new IllegalStateException("Fact " + fact + " is not loaded at commit " + commit);
+      }
+      return address;
+    }
+
+    /** The premise dependencies of a loaded Fact: the Facts it depends on at other addresses. */
+    List<String> premisesOf(String fact) {
+      var address = addressOfFact.get(fact);
+      return requireRecord(fact).factDependencies().stream()
+          .filter(
+              dependency -> {
+                var at = addressOfFact.get(dependency);
+                return at != null && !at.equals(address);
+              })
+          .toList();
+    }
+
+    /**
+     * The Facts in a state that a rejection or retirement of a Fact would move with it, directly or
+     * through others: the candidates resting on it, or the confirmed Facts confirmed resting on it.
+     */
+    List<String> cascade(String fact, FactState state) {
+      var source = transaction.projectionSource(domain);
+      var found = new LinkedHashSet<String>();
+      var pending = new ArrayDeque<String>();
+      pending.add(fact);
+      while (!pending.isEmpty()) {
+        var next = pending.poll();
+        var dependents =
+            List.copyOf(
+                state == FactState.CONFIRMED
+                    ? source.confirmedDependents(next)
+                    : source.dependents(next));
+        keep(
+            transaction.factRecordsOf(
+                domain, dependents.stream().filter(d -> !records.containsKey(d)).toList()));
+        for (var dependent : dependents) {
+          var record = records.get(dependent);
+          if (record == null || !record.is(state) || found.contains(dependent)) {
+            continue;
+          }
+          var dependencies =
+              state == FactState.CONFIRMED
+                  ? record.confirmationFactDependencies()
+                  : record.factDependencies();
+          var address = addressOfFact.get(dependent);
+          if (dependencies.contains(next) && !addressOf(next).equals(address)) {
+            found.add(dependent);
+            pending.add(dependent);
+          }
+        }
+      }
+      return List.copyOf(found);
     }
 
     private FactRecord requireRecord(String fact) {

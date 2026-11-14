@@ -6,8 +6,8 @@ package com.scalar.db.analytics.labs.semantic;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Preset;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
@@ -50,8 +50,7 @@ class ConcurrentWritersTest {
 
   private static CommitRequest policyVersion() {
     var request = CommitRequest.builder("set-policy", "owner");
-    request.add(
-        new LogRecord.PolicyVersion(JsonNodeFactory.instance.objectNode().put("preset", "manual")));
+    request.add(new LogRecord.PolicyVersion(Preset.MANUAL, false, "owner", "test"));
     return request.build();
   }
 

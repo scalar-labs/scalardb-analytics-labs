@@ -17,10 +17,10 @@ Catalog treats as opaque.
 
 The application calls these operations: registering an observation, submitting answers, resolving a
 conflict, setting a user policy version, running build tasks, resuming a build task, and registering
-a review presentation. Recording a Generator's results, evaluation by the judging model, and policy
-re-evaluation run only inside a build task and are not exposed. The Semantic Catalog owns Generator
-output and the versions that produced it, and policy evaluation is its own judgement with nothing
-for the application to supply.
+a review presentation. Recording a Generator's results, evaluation by the policy evaluation model,
+and policy re-evaluation run only inside a build task and are not exposed. The Semantic Catalog owns
+Generator output and the versions that produced it, and policy evaluation is its own judgement with
+nothing for the application to supply.
 
 Running build tasks is separate from the operations that create them, because the application
 decides when they run. Every operation returns the build tasks it created or added a trigger to.
@@ -74,8 +74,8 @@ operation.
   result, its reference, and its basis. Validation items that no supporting check examined are
   listed as information; no range is reported that would call the rest of the value confirmed.
 - Provenance: Generator, version, and build task.
-- Confirmation path: inline machine judgement, the judging model with its version, or human
-  consent; the event it rests on; and the policy version.
+- Confirmation path: inline machine judgement, the policy evaluation model with its version, or
+  human consent; the event it rests on; and the policy version.
 - The deciding party when a person consented, the commit at which the Fact was last confirmed or
   checked, and whether references are masked.
 
@@ -156,8 +156,8 @@ accepted. It first returns every task left `running` to `created`, since a stopp
 nothing, then runs `created` tasks one at a time, including those created while it runs. It reports
 each task as it finishes, `succeeded` or `failed`, with its result, the missing inputs when there
 was no candidate, or the reason for failure. It returns when no `created` task remains or, if the
-caller asked to keep waiting, when the caller stops it. A Generator run, an evaluation by the
-judging model, or a re-evaluation records its result in one commit. An impact judgement creates
+caller asked to keep waiting, when the caller stops it. A Generator run, an evaluation by the policy
+evaluation model, or a re-evaluation records its result in one commit. An impact judgement creates
 build tasks for the Generators of the Facts it selects. Resuming a build task returns a `failed`
 task to `created`, to run on the latest state.
 
@@ -265,9 +265,9 @@ kind, triggers, Generator and version, input versions, evaluation version, and r
 ### Checking a user policy version
 
 Checking a user policy version evaluates a proposed setting at the latest point and returns the
-current version, the number and URNs of candidates that would be adopted inline, those that would
-go to the judging model, whose decisions are known only by running it, and the point evaluated. A
-commit between this read and setting the version can change the actual outcome.
+current version, the number and URNs of candidates that would be adopted inline, those that would go
+to the policy evaluation model, whose decisions are known only by running it, and the point
+evaluated. A commit between this read and setting the version can change the actual outcome.
 
 ## One question, end to end
 

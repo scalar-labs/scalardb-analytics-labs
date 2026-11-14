@@ -9,6 +9,7 @@ import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord.FactEvent;
 import com.scalar.db.analytics.labs.semantic.model.LogRecordJson;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
+import com.scalar.db.analytics.labs.semantic.model.ReviewPresentation;
 import com.scalar.db.analytics.labs.semantic.model.Urns;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
@@ -361,6 +362,140 @@ public final class StoreTransaction {
                 + " ORDER BY commit_number, ordinal")
         .params(domain, fact, upToCommit)
         .query(this::positioned)
+        .list();
+  }
+
+  // Review presentations, kept outside the log
+
+  /**
+   * Records a review presentation under the number one past the domain's last one in this snapshot.
+   * Overlapping registrations collide on the primary key and retry.
+   *
+   * @return the number of the presentation
+   */
+  public long insertPresentation(String domain, ReviewPresentation presentation) {
+    var number =
+        jdbc.sql(
+                    "SELECT coalesce(max(presentation), 0) FROM semantic_catalog.review_presentations"
+                        + " WHERE domain = ?")
+                .params(domain)
+                .query(Long.class)
+                .single()
+            + 1;
+    try {
+      jdbc.sql(
+              "INSERT INTO semantic_catalog.review_presentations (domain, presentation, content)"
+                  + " VALUES (?, ?, CAST(? AS jsonb))")
+          .params(domain, number, LogRecordJson.writeNode(LogRecordJson.toStored(presentation)))
+          .update();
+    } catch (DuplicateKeyException e) {
+      throw new CommitNumberTaken(domain, number, e);
+    }
+    for (var fact :
+        presentation.targets().stream().map(ReviewPresentation.Target::fact).distinct().toList()) {
+      jdbc.sql(
+              "INSERT INTO semantic_catalog.review_presentation_targets"
+                  + " (domain, presentation, fact) VALUES (?, ?, ?)")
+          .params(domain, number, fact)
+          .update();
+    }
+    return number;
+  }
+
+  /** A review presentation by number. */
+  public Optional<ReviewPresentation> presentation(String domain, long presentation) {
+    return jdbc.sql(
+            "SELECT content::text FROM semantic_catalog.review_presentations"
+                + " WHERE domain = ? AND presentation = ?")
+        .params(domain, presentation)
+        .query(String.class)
+        .optional()
+        .map(
+            json ->
+                LogRecordJson.fromStored(LogRecordJson.readNode(json), ReviewPresentation.class));
+  }
+
+  /** Adds an event an answer or a conflict resolution recorded to its review presentation. */
+  public void addPresentationEvent(String domain, long presentation, String logRecord) {
+    jdbc.sql(
+            "UPDATE semantic_catalog.review_presentations"
+                + " SET content = jsonb_set(content, '{resultingEvents}',"
+                + " (content -> 'resultingEvents') || to_jsonb(CAST(? AS text)))"
+                + " WHERE domain = ? AND presentation = ?")
+        .params(logRecord, domain, presentation)
+        .update();
+  }
+
+  /** The numbers of the review presentations of each of some Facts, oldest first. */
+  public Map<String, List<Long>> presentationsOf(String domain, Collection<String> facts) {
+    var presentations = new HashMap<String, List<Long>>();
+    if (facts.isEmpty()) {
+      return presentations;
+    }
+    jdbc.sql(
+            "SELECT fact, presentation FROM semantic_catalog.review_presentation_targets"
+                + " WHERE domain = :domain AND fact = ANY(CAST(:facts AS text[]))"
+                + " ORDER BY presentation")
+        .param("domain", domain)
+        .param("facts", array(facts))
+        .query(
+            (rs, row) ->
+                presentations
+                    .computeIfAbsent(rs.getString("fact"), key -> new ArrayList<>())
+                    .add(rs.getLong("presentation")))
+        .list();
+    return presentations;
+  }
+
+  // Reads for review
+
+  /**
+   * The Facts with a policy evaluation that requested consent at or before a commit: every Fact
+   * that may await consent at that commit.
+   */
+  public List<String> factsAskedForConsent(String domain, long commit) {
+    return jdbc.sql(
+            "SELECT DISTINCT target_fact FROM semantic_catalog.log_records"
+                + " WHERE domain = ? AND kind = 'evaluate-policy' AND commit_number <= ?"
+                + " AND content ->> 'result' = 'REQUEST_CONSENT' ORDER BY target_fact")
+        .params(domain, commit)
+        .query(StoreTransaction::firstString)
+        .list();
+  }
+
+  /** The Fact Addresses in conflict at a commit, with their selections. */
+  public List<AddressSelectionRow> conflictsAt(String domain, long commit) {
+    return jdbc.sql(
+            SELECTIONS
+                + " WHERE domain = ? AND from_commit <= ? AND (to_commit IS NULL OR to_commit > ?)"
+                + " AND jsonb_array_length(eligible_facts) > 1 ORDER BY fact_address")
+        .params(domain, commit, commit)
+        .query(this::selection)
+        .list();
+  }
+
+  /** The current Fact Records of every candidate. */
+  public List<FactRecordRow> candidateRecords(String domain) {
+    return jdbc.sql(RECORDS + " WHERE domain = ? AND state = 'CANDIDATE' ORDER BY fact")
+        .params(domain)
+        .query(this::record)
+        .list();
+  }
+
+  /** The Fact Addresses among some, as they are at a commit. */
+  public List<FactAddressRow> addressesAt(
+      String domain, Collection<String> factAddresses, long commit) {
+    if (factAddresses.isEmpty()) {
+      return List.of();
+    }
+    return jdbc.sql(
+            ADDRESSES
+                + " WHERE domain = :domain AND fact_address = ANY(CAST(:addresses AS text[]))"
+                + " AND created_commit <= :commit")
+        .param("domain", domain)
+        .param("addresses", array(factAddresses))
+        .param("commit", commit)
+        .query(this::address)
         .list();
   }
 
@@ -753,6 +888,17 @@ public final class StoreTransaction {
               .query(Long.class)
               .single()
           > 0;
+    }
+
+    @Override
+    public Optional<PositionedRecord> latestPolicyVersion() {
+      return jdbc.sql(
+              LOG_RECORDS
+                  + " WHERE domain = ? AND kind = 'policy-version'"
+                  + " ORDER BY commit_number DESC, ordinal DESC LIMIT 1")
+          .params(domain)
+          .query(StoreTransaction.this::positioned)
+          .optional();
     }
 
     @Override

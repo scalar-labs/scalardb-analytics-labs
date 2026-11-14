@@ -74,8 +74,8 @@ A **Generator** produces candidates, with validation results, from physical sche
 documents, existing knowledge, and feedback. A Generator goes no further than producing candidates.
 Each run is tracked as a **build task**. The **user policy** that the semantics owner sets decides
 whether an accepted candidate is confirmed by **machine judgement**, inline on deterministic signals
-or by a separate judging model that weighs fuzzy ones, or needs the deciding party's consent. A
-confirmed Fact is adopted knowledge, not proven knowledge. See
+or by a separate policy evaluation model that weighs fuzzy ones, or needs the deciding party's
+consent. A confirmed Fact is adopted knowledge, not proven knowledge. See
 [`semantic-catalog/construction.md`](semantic-catalog/construction.md) and
 [`semantic-catalog/generators.md`](semantic-catalog/generators.md).
 
@@ -137,7 +137,7 @@ register observation ---> build tasks ---> Generators (outside the writer)
                                                  |
         user policy evaluation (once dependencies are confirmed or awaiting consent)
                            |                                  |
-         machine judgement: inline or judging model   review by deciding party
+         machine judgement: inline or the model   review by deciding party
                            |                                  |
                            +-------------> confirmed <--------+
                                                |
@@ -155,8 +155,9 @@ register observation ---> build tasks ---> Generators (outside the writer)
    duplicate check, in one commit per run.
 3. Once every Fact a candidate depends on is confirmed or awaiting consent, the user policy decides
    its path. Candidates that deterministic signals cover are adopted in the same commit; under
-   `auto` the judging model decides the others in its own build task, adopting them or preparing
-   review material for the deciding party, who consents, rejects, corrects, or answers unknown.
+   `auto` the policy evaluation model decides the others in its own build task, adopting them or
+   preparing review material for the deciding party, who consents, rejects, corrects, or answers
+   unknown.
 4. Each confirmation produces new build tasks for the Generators that build on it. For example,
    confirming that a Dataset exists starts key, uniqueness, row-meaning, and field-meaning
    Generators.

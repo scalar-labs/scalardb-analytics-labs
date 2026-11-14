@@ -4,11 +4,12 @@
 
 ## Current answer
 
-Under `auto`, a language model kept separate from the Generators, the judging model, weighs the
-candidate's signals as a whole and either adopts it or sends it to the deciding party with review
-material it builds. Candidates that deterministic signals cover are adopted inline without it. A
-refuted candidate, or one that would confirm a second Fact where one is selected, always goes to a
-person. The judging model runs as its own build task, and its reason and version are recorded.
+Under `auto`, a language model kept separate from the Generators, the policy evaluation model,
+weighs the candidate's signals as a whole and either adopts it or sends it to the deciding party
+with review material it builds. Candidates that deterministic signals cover are adopted inline
+without it. A refuted candidate, or one that would confirm a second Fact where one is selected,
+always goes to a person. The policy evaluation model runs as its own build task, and its reason and
+version are recorded.
 
 ## Rationale
 
@@ -36,8 +37,9 @@ judgement.
 
 ## Consequences
 
-- Every Fact the judging model adopts shows that path, its version (model and prompt), and its
-  reason, so consumers know how it was adopted, and Facts adopted by an earlier model can be found.
+- Every Fact the policy evaluation model adopts shows that path, its version (model and prompt), and
+  its reason, so consumers know how it was adopted, and Facts adopted by an earlier model can be
+  found.
 - Review has two queues: candidates awaiting evaluation, as build tasks, and candidates sent to a
   person, as the review list.
 - How far an organization delegates judgement to the machine is fixed by the preset for now.

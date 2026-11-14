@@ -424,6 +424,7 @@ public final class CommitResolver {
               resolve(evaluation.policyVersion(), Kind.LOG_RECORD),
               evaluation.transition(),
               evaluation.result(),
+              evaluation.evaluator(),
               evaluation.decidedBy(),
               evaluation.reason());
       case LogRecord.Answer answer ->
@@ -481,6 +482,7 @@ public final class CommitResolver {
                     check.method(),
                     check.items(),
                     check.result(),
+                    check.finding(),
                     check.reference() == null ? null : resolve(check.reference(), Kind.CHECKED),
                     check.details()))
         .toList();

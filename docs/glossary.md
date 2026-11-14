@@ -86,7 +86,7 @@ The glossary keeps names and definitions consistent and does not override the do
 | confirmed knowledge | — | — | A Fact that has completed the judgement its user policy requires. Whether it is presented to consumers is determined by semantic presentability. | [`architecture.md`](architecture.md) |
 | unconfirmed knowledge | — | — | Accepted candidates, answers from a user who is not a deciding party, and assumptions made by the Query Agent. Usable for composing a query only when the user explicitly asks, and the result states which knowledge was unconfirmed. | [`semantic-catalog.md`](semantic-catalog.md) |
 | user policy | `LogRecord.PolicyVersion` | — | The rule that decides, when an accepted candidate becomes confirmed knowledge, whether machine judgement alone confirms it or the consent of the semantics owner or a delegate is required. The domain's semantics owner sets it, and each change is recorded as a new version. | [`architecture.md`](architecture.md) |
-| machine judgement | — | — | Adoption without requesting human consent: inline on deterministic signals, or by the judging model weighing the signals as a whole. | [`architecture.md`](architecture.md) |
+| machine judgement | — | — | Adoption without requesting human consent: inline on deterministic signals, or by the policy evaluation model weighing the signals as a whole. | [`architecture.md`](architecture.md) |
 | human consent | — | — | The path of confirming by requesting and obtaining the consent of the semantics owner or a delegate. | [`semantic-catalog/record-model.md`](semantic-catalog/record-model.md) |
 
 ## Connectors and types

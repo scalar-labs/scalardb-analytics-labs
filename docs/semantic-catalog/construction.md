@@ -1,7 +1,5 @@
 # Semantic Catalog construction
 
-**[Planned]** This document describes accepted design that is not implemented yet.
-
 Construction turns inputs into confirmed knowledge. An input arrives, Generators produce candidates,
 the Semantic Catalog accepts them, the user policy chooses a confirmation path, and the deciding
 party judges what the policy sends to a person. Each step only appends to the log. This document
@@ -10,6 +8,8 @@ explains that cycle and the records each step writes. The records themselves are
 [`generators.md`](generators.md).
 
 ## What starts construction
+
+**[Planned]** This section describes design that is not implemented yet.
 
 Construction starts from new or changed input, not from questions:
 
@@ -34,9 +34,11 @@ registering an observation records a new Input Observation.
 
 ## Build tasks
 
-A **build task** tracks one Generator run, one impact judgement, one evaluation by the judging model
-(see [Choosing the confirmation path](#choosing-the-confirmation-path)), or one re-evaluation after
-a user policy change, with its trigger, inputs, and result.
+**[Planned]** This section describes design that is not implemented yet.
+
+A **build task** tracks one Generator run, one impact judgement, one evaluation by the policy
+evaluation model (see [Choosing the confirmation path](#choosing-the-confirmation-path)), or one
+re-evaluation after a user policy change, with its trigger, inputs, and result.
 
 | State | Meaning | Next |
 | --- | --- | --- |
@@ -73,13 +75,13 @@ Exclusivity makes that reset safe, because no other process can be running them.
 
 ## Acceptance and the duplicate check
 
-A Generator returns **raw candidates**, each with its target, value, inputs read, dependency
-references, and checks. Raw candidates are temporary and never recorded. New elements and candidates
-in one output refer to each other by temporary numbers, replaced by issued URNs at acceptance.
-Validating its own output is the Generator's responsibility; output naming a missing column or an
-invalid predicate is remade or discarded before it reaches the Semantic Catalog. When no useful clue
-exists, the Generator records that no candidate was produced and which inputs were missing, rather
-than guessing.
+**[Planned]** A Generator returns **raw candidates**, each with its target, value, inputs read,
+dependency references, and checks. Raw candidates are temporary and never recorded. New elements and
+candidates in one output refer to each other by temporary numbers, replaced by issued URNs at
+acceptance. Validating its own output is the Generator's responsibility; output naming a missing
+column or an invalid predicate is remade or discarded before it reaches the Semantic Catalog. When
+no useful clue exists, the Generator records that no candidate was produced and which inputs were
+missing, rather than guessing.
 
 Every output goes through the **duplicate check** before acceptance, because the same claim piling
 up as candidates would make the deciding party judge it twice. A match becomes an additional
@@ -90,16 +92,17 @@ acceptance of the existing Fact instead of a new Fact.
   match is still recorded as an additional acceptance, because the added check may be what lets the
   policy confirm the Fact, as when a data check adds `data-check` to uniqueness taken from an
   unenforced declaration.
-- Otherwise a model compares the output with the confirmed and `candidate` Facts of the same element
-  (of the same predicate, or of all free-description predicates) inside the build task, before the
-  write. This also catches applicability scopes that differ only in wording. Matches are kept in the
-  build task result with the original value, so a false match, which would keep a claim from the
-  deciding party, can be found later. Concurrent Generators can still produce the same claim twice
-  this way; the deciding party then judges both. A proposal of a new element skips the check because
-  there is nothing yet to compare with.
+- **[Planned]** Otherwise a model compares the output with the confirmed and `candidate` Facts of
+  the same element (of the same predicate, or of all free-description predicates) inside the build
+  task, before the write. This also catches applicability scopes that differ only in wording.
+  Matches are kept in the build task result with the original value, so a false match, which would
+  keep a claim from the deciding party, can be found later. Concurrent Generators can still produce
+  the same claim twice this way; the deciding party then judges both. A proposal of a new element
+  skips the check because there is nothing yet to compare with.
 
-Every Generator receives the rejected and retired Facts of its target Fact Address with their
-answers, and points to a past Fact instead of creating a new one when it judges the claim the same.
+**[Planned]** Every Generator receives the rejected and retired Facts of its target Fact Address
+with their answers, and points to a past Fact instead of creating a new one when it judges the claim
+the same.
 
 An additional acceptance never depends on its own Fact. Its effect depends on the Fact's state:
 
@@ -115,29 +118,29 @@ Revision records nothing and succeeds, so resuming a failed build task does not 
 
 At acceptance the Semantic Catalog checks only what a Generator running outside the serialized write
 cannot know: that dependencies form no cycle among Facts, that every referenced record exists, and
-that every Input Observation a check references is also a dependency. It also parses expression
-values and adds the Fields they reference as premise dependencies (see
-[`record-model.md`](record-model.md#elements-and-predicates)), and makes the slug of a new element
-unique (see [`record-model.md`](record-model.md#identity-and-urns)). If any check fails, nothing is
+that every Input Observation a check references is also a dependency. It also makes the slug of a
+new element unique (see [`record-model.md`](record-model.md#identity-and-urns)). **[Planned]** It
+also parses expression values and adds the Fields they reference as premise dependencies (see
+[`record-model.md`](record-model.md#elements-and-predicates)). If any check fails, nothing is
 written and the task fails with the reason.
 
 ## Choosing the confirmation path
 
-A candidate whose premise is rejected or retired can never be confirmed, so it is rejected, and its
-Generator is run again with that outcome as input (see
+A candidate whose premise is rejected or retired can never be confirmed, so it is rejected (see
 [`record-model.md`](record-model.md#validation-results-and-dependencies) for premise and replacement
-dependencies). Otherwise a candidate is evaluated once each premise dependency is confirmed or is a
-candidate awaiting consent, and its confirmation waits until every premise is confirmed. A new
-Measure's existence and its aggregation rule therefore reach the deciding party together, instead of
-the aggregation rule appearing only in a later round after the existence is consented to.
+dependencies). **[Planned]** Its Generator is run again with that outcome as input. Otherwise a
+candidate is evaluated once each premise dependency is confirmed or is a candidate awaiting consent,
+and its confirmation waits until every premise is confirmed. A new Measure's existence and its
+aggregation rule therefore reach the deciding party together, instead of the aggregation rule
+appearing only in a later round after the existence is consented to.
 [`../design/semantic-catalog-premise-review.md`](../design/semantic-catalog-premise-review.md)
 records why.
 
-The **user policy** decides whether machine judgement adopts the candidate or the deciding party
-must consent. Retirement proposals are decided the same way. A user policy version holds a preset
-and whether `declared-unenforced` counts as a deterministic validation method, with the semantics
-owner who set it and their reason. A new domain starts with `auto`, not counting
-`declared-unenforced`;
+The **user policy** decides, by **policy evaluation**, whether machine judgement adopts the
+candidate or the deciding party must consent. Retirement proposals are decided the same way. A
+user policy version holds a preset and whether `declared-unenforced` counts as a deterministic
+validation method, with the semantics owner who set it and their reason. A new domain starts with
+`auto`, not counting `declared-unenforced`;
 [`../design/semantic-catalog-default-user-policy.md`](../design/semantic-catalog-default-user-policy.md)
 records why. **[Planned]** A later design models and quantifies the policy, so that an organization
 can configure how far it delegates judgement to the machine; those quantities will themselves be a
@@ -146,12 +149,15 @@ model's fuzzy assessments.
 | Preset | Machine judgement |
 | --- | --- |
 | `full-auto` | Always adopts |
-| `auto` | Adopts inline on deterministic signals; otherwise the judging model decides |
+| `auto` | Adopts inline on deterministic signals; otherwise the policy evaluation model decides |
 | `manual` | Never adopts |
 
 Generators propose with models, so deciding whether to accept what they propose is a fuzzy
-judgement too: no fixed test over validation items says when a value holds. Under `auto`, machine
-judgement takes one of two paths.
+judgement too: no fixed test over validation items says when a value holds. Under `auto`, policy
+evaluation takes one of two paths. **Inline evaluation**, on deterministic signals and without a
+model, runs in the commit that makes the candidate evaluable; it adopts the candidate inline,
+requests consent for a refuted candidate or a second Fact, and leaves every other candidate to the
+policy evaluation model.
 
 **Inline adoption.** A candidate is adopted at once, without a model, when all of these hold:
 
@@ -167,25 +173,25 @@ judgement takes one of two paths.
 
 These conditions do not claim that a value is true. They mark where deterministic signals bear on
 the whole value, which covers most of a catalog's structure, such as existence, technical
-references, and enforced constraints, so the judging model is not called for it. Condition 2 holds
-because data can refute a rule but not establish one. A sample, or even a whole table, in which each
-member has bought once shows purchase rows whose member IDs do not repeat; adopting that would let a
-Query Agent omit fan-out handling and double-count once a member buys again. The opposite value
-rests on a counterexample, and erring there only makes a query more cautious. A declaration supplies
-the intent that data cannot, so an unenforced unique constraint with no duplicates found is still
-adopted inline. A column that disappeared from the physical schema is supported by
-`declared-enforced`, so retiring its Field is adopted inline.
+references, and enforced constraints, so the policy evaluation model is not called for it. Condition
+2 holds because data can refute a rule but not establish one. A sample, or even a whole table, in
+which each member has bought once shows purchase rows whose member IDs do not repeat; adopting that
+would let a Query Agent omit fan-out handling and double-count once a member buys again. The
+opposite value rests on a counterexample, and erring there only makes a query more cautious. A
+declaration supplies the intent that data cannot, so an unenforced unique constraint with no
+duplicates found is still adopted inline. A column that disappeared from the physical schema is
+supported by `declared-enforced`, so retiring its Field is adopted inline.
 
-**The judging model.** Every other candidate under `auto` is evaluated by a language model kept
-separate from the Generators, so producing and accepting candidates stay apart. It reads the same
-material a review item shows: the value with its inputs read, checks, and dependencies, their
-content expanded. It weighs these signals as a whole, then either adopts the candidate or sends it to the
-deciding party with review material it builds (see [Review](#review)). Its reason is recorded on
-`evaluate-policy`, with its version, the model and the prompt, as a Generator's version is recorded.
-A candidate that a check refutes, or that would confirm a second Fact where one is selected, always
-goes to the deciding party. An evaluation by the judging model runs as its own build task, because
-it calls a model and must not hold up the operation that made the candidate evaluable, such as an
-answer submission.
+**[Planned]** **The policy evaluation model.** Every other candidate under `auto` is evaluated by a
+language model kept separate from the Generators, so producing and accepting candidates stay apart.
+It reads the same material a review item shows: the value with its inputs read, checks, and
+dependencies, their content expanded. It weighs these signals as a whole, then either adopts the
+candidate or sends it to the deciding party with review material it builds (see [Review](#review)).
+Its reason is recorded on `evaluate-policy`, with its version, the model and the prompt, as a
+Generator's version is recorded. A candidate that a check refutes, or that would confirm a second
+Fact where one is selected, always goes to the deciding party. An evaluation by the policy
+evaluation model runs as its own build task, because it calls a model and must not hold up the
+operation that made the candidate evaluable, such as an answer submission.
 [`../design/semantic-catalog-machine-judgement.md`](../design/semantic-catalog-machine-judgement.md)
 records why the judgement is fuzzy and why a separate model makes it.
 
@@ -195,12 +201,12 @@ as whether a sales amount includes tax, reaches the deciding party. Under `full-
 candidate made from the selected Fact replaces it, and one made without it becomes a conflict for a
 person to resolve.
 
-The policy is evaluated, and an `evaluate-policy` event recorded, when a candidate becomes
-evaluable (or at acceptance if it already is), when an evaluable candidate gets an additional
-acceptance, when a confirmed Fact receives a retirement proposal, and when the policy version
-changes. An evaluation that adopts a candidate whose premises are not all confirmed yet takes effect
-in the commit that confirms the last of them, without evaluating again; a premise that is rejected
-or retired instead rejects the candidate by cascade. A version change creates a build task that
+The policy is evaluated, and an `evaluate-policy` event recorded, when a candidate becomes evaluable
+(or at acceptance if it already is), when an evaluable candidate gets an additional acceptance, when
+a confirmed Fact receives a retirement proposal, and when the policy version changes. An evaluation
+that adopts a candidate whose premises are not all confirmed yet takes effect in the commit that
+confirms the last of them, without evaluating again; a premise that is rejected or retired instead
+rejects the candidate by cascade. **[Planned]** A version change creates a build task that
 re-evaluates every evaluable `candidate`, because otherwise loosening the policy would not relieve
 the candidates already waiting. Loosening can therefore confirm many candidates at once without a
 person, so before applying a version the application can read which candidates it would confirm.
@@ -214,27 +220,28 @@ used knowing so.
 
 The following each write one commit, so a half-written state is never a readable point:
 
-- One Generator run: the data observations it read, all acceptances and retirement proposals from
-  it, the inline evaluations of those that can be evaluated, and the confirmations and retirements
-  they adopt.
-- One evaluation by the judging model: its `evaluate-policy`, any data observations it read, and
-  the confirmation or retirement it adopts.
+- **[Planned]** One Generator run: the data observations it read, all acceptances and retirement
+  proposals from it, the inline evaluations of those that can be evaluated, and the confirmations
+  and retirements they adopt.
+- **[Planned]** One evaluation by the policy evaluation model: its `evaluate-policy`, any data
+  observations it read, and the confirmation or retirement it adopts.
 - One submission of answers with the transitions they cause. Answers apply in dependency order, and
-  independent answers in submission order. An answer applied before the Fact it depends on would
-  cause no transition and the deciding party would be asked again. The order always exists because
-  dependencies have no cycles. Grouping also means candidates consented to together never have their
-  selection decided by record order.
+  independent answers in submission order, so the log records a premise's answer before its
+  dependents'. The order always exists because dependencies have no cycles. A consent to a candidate
+  whose premise awaits consent takes effect once the premise is confirmed, so consenting to a
+  premise and its dependents at once confirms them all in the one commit. Grouping also means
+  candidates consented to together never have their selection decided by record order.
 - One conflict resolution.
-- One user policy version. The re-evaluation it triggers runs later as a build task, whose
-  evaluations and confirmations form one commit.
+- One user policy version. **[Planned]** The re-evaluation it triggers runs later as a build task,
+  whose evaluations and confirmations form one commit.
 
 In any commit where a Fact becomes `confirmed`, `rejected`, or `retired`, the dependent Facts move
 next in the same commit:
 
 - A `candidate` whose premise dependencies are now all confirmed is confirmed if its evaluation
-  already adopted it.
-- A `candidate` that has just become evaluable is evaluated inline, or gets an evaluation build task
-  for the judging model.
+  already adopted it or the deciding party already consented.
+- A `candidate` that has just become evaluable is evaluated inline. **[Planned]** One that inline
+  evaluation leaves undecided gets an evaluation build task for the policy evaluation model.
 - A `candidate` whose premise is rejected or retired is rejected.
 - A `confirmed` Fact whose premise is retired is retired.
 
@@ -244,14 +251,16 @@ evaluable, in the same commit.
 Replacement dependencies do not cascade. A Fact that replaced a now-retired Fact stays as it is, and
 a Fact whose replacement is retired becomes eligible again under the selection rules.
 
-Facts rejected or retired by cascade record that cause, and their Generators remake them as build
-tasks.
+Facts rejected or retired by cascade record that cause. **[Planned]** Their Generators remake them
+as build tasks.
 
 ## Review
 
-Review is split in two. Deciding what needs a person and preparing it happen asynchronously,
-inside build tasks; an interactive review session, an agent working with the semantics owner or a
-Web UI, only fetches what is prepared, presents it, and sends the answers.
+Review is split in two. Deciding what needs a person happens in construction, not in the review
+session: inline evaluation decides in the commit that makes a candidate evaluable. **[Planned]** The
+policy evaluation model decides, and prepares review material, inside build tasks. An interactive
+review session, an agent working with the semantics owner or a Web UI, only fetches what is
+prepared, presents it, and sends the answers.
 
 A **review item** is what the review list returns for one candidate or retirement proposal needing
 consent, or one conflict. The Semantic Catalog decides what it contains; the interface that
@@ -260,30 +269,31 @@ UI. A review item carries:
 
 - **What is claimed:** the target, with exact table and column names from its technical-reference
   Facts, the predicate, the value, and the applicability scope.
-- **The records behind it, with their content expanded:** inputs read, including rejected or
-  retired Facts at the same Fact Address with their answers; checks, with the quotation, the query
-  and its result and range read, or the model's stated basis; and dependencies, including the
-  feedback a correction left. Pointing to them by URN alone would make the deciding party look each
-  one up.
-- **What consent changes:** the selected Fact it would replace, the premise items it rests on, and
-  the items a rejection would cascade to.
-- **Review material,** when the judging model sent it to a person: what is to be decided, why it
-  was not adopted and what remains uncertain, the evidence for and against, and a suggested answer
-  with its reasons. The judging model may sample values through the application's SQL execution
-  within its build task's limits to build it, and it sorts the items of each table into those likely
-  to follow the suggestion and those that need judgement. The material is kept with the
-  evaluation.
+- **[Planned]** **The records behind it, with their content expanded:** inputs read, including
+  rejected or retired Facts at the same Fact Address with their answers; checks, with the quotation,
+  the query and its result and range read, or the model's stated basis; and dependencies, including
+  the feedback a correction left. Pointing to them by URN alone would make the deciding party look
+  each one up.
+- **What consent changes:** the selected Fact it would replace, the premise items it rests on with
+  their content, and the items a rejection would cascade to.
+- **[Planned]** **Review material,** when the policy evaluation model sent it to a person: what is
+  to be decided, why it was not adopted and what remains uncertain, the evidence for and against,
+  and a suggested answer with its reasons. The policy evaluation model may sample values through the
+  application's SQL execution within its build task's limits to build it, and it sorts the items of
+  each table into those likely to follow the suggestion and those that need judgement. The material
+  is kept with the evaluation.
 
-The material is selected for judgement rather than dumped from the stored context: too little makes
-the deciding party investigate alone, too much makes them search for what matters, and anything
-left out stays reachable for those allowed to see it. When material is in place, a consent-or-reject
-choice is preferred to writing an answer from scratch, but those two options are not forced when
-they cannot express the judgement. Several Facts can be presented together, while each judgement is
-still recorded per Fact. Building it in the judging model rather than in each interface means the
-same judgement shows the same material whatever interface presents it, and the reading that decided
-not to adopt a candidate is the one the deciding party sees. Presentation priority weighs how far a
-judgement unblocks further construction against its impact on data use, how far a mistake would
-spread, and the load on the deciding party, never the count of follow-on candidates alone.
+**[Planned]** The material is selected for judgement rather than dumped from the stored context: too
+little makes the deciding party investigate alone, too much makes them search for what matters, and
+anything left out stays reachable for those allowed to see it. When material is in place, a
+consent-or-reject choice is preferred to writing an answer from scratch, but those two options are
+not forced when they cannot express the judgement. Several Facts can be presented together, while
+each judgement is still recorded per Fact. Building it in the policy evaluation model rather than in
+each interface means the same judgement shows the same material whatever interface presents it, and
+the reading that decided not to adopt a candidate is the one the deciding party sees. Presentation
+priority weighs how far a judgement unblocks further construction against its impact on data use,
+how far a mistake would spread, and the load on the deciding party, never the count of follow-on
+candidates alone.
 
 What was presented, to whom, and when is kept as a **review presentation record**, outside the log,
 because presenting changes no Fact's state. It holds the presentation kind, the target Facts and
@@ -304,24 +314,25 @@ exceptions, or certainty into fixed fields such as confidence scores.
 
 A corrected candidate is rejected because it will never be confirmed with its original value and
 scope. Keeping it would make the deciding party judge one point twice. The same commit registers the
-correction's wording as usage feedback related to that candidate. Correction interpretation then
-produces the corrected candidate, which is evaluated like any other. The correction's wording is
-among its inputs read, so the judging model and, if it is sent to a person, the deciding party see
-what was actually said, and a misread correction shows as a mismatch with it. When the answer to
-"every e-commerce customer is a POS member" is "correct, except for corporate members", the original
-candidate is rejected and a new candidate scoped to exclude corporate members follows.
+correction's wording as usage feedback related to that candidate.
+
+**[Planned]** Correction interpretation then produces the corrected candidate, which is evaluated
+like any other. The correction's wording is among its inputs read, so the policy evaluation model
+and, if it is sent to a person, the deciding party see what was actually said, and a misread
+correction shows as a mismatch with it. When the answer to "every e-commerce customer is a POS
+member" is "correct, except for corporate members", the original candidate is rejected and a new
+candidate scoped to exclude corporate members follows.
 
 Every answer and conflict resolution carries the deciding party and a reference to an authority
 check, an opaque value issued by whoever checked, which the Semantic Catalog records without
 interpreting and only requires to be present. The Semantic Catalog therefore does not itself verify
 that the person answering is the deciding party; the separation between producing candidates and
-confirming them holds as far as the issuing party checks authority. The application issues the
-reference after checking that the authenticated caller is a semantics owner of the domain (delegates
-are not designed yet), and a
-Query Agent calls as its own registered principal, which is never a semantics owner, so an agent
-cannot confirm what it relays (see [`../application.md`](../application.md#callers-and-authority)).
-An answer to a Fact already confirmed or rejected by another path after presentation is recorded
-without a transition.
+confirming them holds as far as the issuing party checks authority. **[Planned]** The application
+issues the reference after checking that the authenticated caller is a semantics owner of the domain
+(delegates are not designed yet), and a Query Agent calls as its own registered principal, which is
+never a semantics owner, so an agent cannot confirm what it relays (see
+[`../application.md`](../application.md#callers-and-authority)). An answer to a Fact already
+confirmed or rejected by another path after presentation is recorded without a transition.
 
 ## Operations that add records
 
@@ -330,18 +341,18 @@ No operation sets the selected Fact directly. Selection changes only as the rule
 
 | Operation | Writes in one commit | Not accepted when | Creates build tasks for |
 | --- | --- | --- | --- |
-| Register an observation | Input Observation and Observation Event | Content equals the previous observation, which records nothing; a physical schema whose source-declared part is unchanged records only a derived record | Generators that read that input kind; an impact judgement for a new physical schema or document observation |
-| Record a Generator's results (inside a build task) | Data observations, acceptances, retirement proposals, inline evaluations, machine-judgement transitions, cascades | A dependency cycle, a missing referenced record, a check reference that is not a dependency, or an expression value that does not parse; the task fails | Evaluations by the judging model; Generators that read the newly confirmed predicates |
-| Record a judging-model evaluation (inside a build task) | Evaluation with its reason and review material, data observations it read, machine-judgement transitions, cascades | The candidate is no longer evaluable, which records nothing | Generators that read the newly confirmed predicates |
-| Submit answers | Answers, resulting transitions, cascades, and feedback for each correction | An answer lacks an authority-check reference | Generators of rejected, corrected, retired, and cascaded Facts; Generators that read the feedback; Generators that read newly confirmed predicates |
-| Resolve a conflict | `resolve-conflict` | The chosen and passed-over Facts were not the eligible Facts at the previous commit, or no authority-check reference | Generators of Facts depending on Facts no longer selected |
-| Set a user policy version | Policy version | None | A policy re-evaluation |
-| Re-evaluate the policy (inside a build task) | Evaluations, machine-judgement confirmations, cascades | None | Generators that read newly confirmed predicates |
-| Resume a build task | Nothing in the log | The task is not `failed` | None; the task reruns on the latest state |
+| **[Planned]** Register an observation | Input Observation and Observation Event | Content equals the previous observation, which records nothing; a physical schema whose source-declared part is unchanged records only a derived record | Generators that read that input kind; an impact judgement for a new physical schema or document observation |
+| **[Planned]** Record a Generator's results (inside a build task) | Data observations, acceptances, retirement proposals, inline evaluations, machine-judgement transitions, cascades | A dependency cycle, a missing referenced record, a check reference that is not a dependency, or an expression value that does not parse; the task fails | Evaluations by the policy evaluation model; Generators that read the newly confirmed predicates |
+| **[Planned]** Record an evaluation by the policy evaluation model (inside a build task) | Evaluation with its reason and review material, data observations it read, machine-judgement transitions, cascades | The candidate is no longer evaluable, which records nothing | Generators that read the newly confirmed predicates |
+| Submit answers | Answers, resulting transitions, cascades, and feedback for each correction | An answer lacks an authority-check reference | **[Planned]** Generators of rejected, corrected, retired, and cascaded Facts; Generators that read the feedback; Generators that read newly confirmed predicates |
+| Resolve a conflict | `resolve-conflict` | The chosen and passed-over Facts were not the eligible Facts at the previous commit, or no authority-check reference | **[Planned]** Generators of Facts depending on Facts no longer selected |
+| Set a user policy version | Policy version | None | **[Planned]** A policy re-evaluation |
+| **[Planned]** Re-evaluate the policy (inside a build task) | Evaluations, machine-judgement confirmations, cascades | None | Generators that read newly confirmed predicates |
+| **[Planned]** Resume a build task | Nothing in the log | The task is not `failed` | None; the task reruns on the latest state |
 
-Whenever replacement, a conflict resolution, or a retirement changes the selected Fact, build tasks
-are created for the Generators of Facts that depended on the Fact no longer selected, so knowledge
-built on it is remade on the new premise.
+**[Planned]** Whenever replacement, a conflict resolution, or a retirement changes the selected
+Fact, build tasks are created for the Generators of Facts that depended on the Fact no longer
+selected, so knowledge built on it is remade on the new premise.
 
 Build tasks, review presentation records, derived records, and public API call identifiers are kept
 outside the log because they change no Fact's state, and none is part of a Catalog Snapshot.
@@ -351,6 +362,8 @@ presentation, a build task finishing without candidates, and a resume. A stopped
 never leaves outside records disagreeing with commits.
 
 ## Following input changes
+
+**[Planned]** This section describes design that is not implemented yet.
 
 When a physical schema or document gets a new observation, an **impact judgement** build task
 compares the old and new observations against the Facts that depend on that Input Resource and
@@ -371,10 +384,13 @@ correspondences and Measures built on the old Field (see
 [`generators.md`](generators.md#column-changes)). Their Generators then propose them again on the
 new premise, reading the retired Facts as inputs read, and the new Field's own predicates come from
 its Generators as for any new column. Knowledge carries over through ordinary evaluation, which the
-judging model can adopt, rather than by moving a technical reference. A table rename appears as
-"does not exist" for the old name, and the new name becomes a new Dataset once it is registered.
+policy evaluation model can adopt, rather than by moving a technical reference. A table rename
+appears as "does not exist" for the old name, and the new name becomes a new Dataset once it is
+registered.
 
 ## Usage feedback
+
+**[Planned]** This section describes design that is not implemented yet.
 
 Almost everything a user tells the catalog outside review arrives through an LLM session: the Query
 Agent meets missing knowledge while composing a query, the user explains what a column means, or a

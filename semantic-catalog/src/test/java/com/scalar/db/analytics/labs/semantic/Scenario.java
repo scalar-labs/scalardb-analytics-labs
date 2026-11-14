@@ -12,12 +12,14 @@ import com.scalar.db.analytics.labs.semantic.model.FactRevision;
 import com.scalar.db.analytics.labs.semantic.model.IdentityKey;
 import com.scalar.db.analytics.labs.semantic.model.Knowledge;
 import com.scalar.db.analytics.labs.semantic.model.KnowledgeRequest;
+import com.scalar.db.analytics.labs.semantic.model.LogPosition;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord.Basis;
 import com.scalar.db.analytics.labs.semantic.model.MatchingCondition;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
 import com.scalar.db.analytics.labs.semantic.model.Scope;
 import com.scalar.db.analytics.labs.semantic.model.TechnicalReference;
+import com.scalar.db.analytics.labs.semantic.model.Urns;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.AnswerType;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ConfirmationPath;
@@ -32,6 +34,8 @@ import java.util.function.Function;
 
 /**
  * One domain under test, with shorthands for the records a caller such as judgement would write.
+ * Commits are written exactly as built, without the transitions the store resolves, so tests of the
+ * log write judgements by hand.
  */
 final class Scenario {
   static final JsonNode NOTHING = JsonNodeFactory.instance.objectNode();
@@ -44,12 +48,8 @@ final class Scenario {
     this.store = store;
     this.domain = TestStore.newDomain();
     store.createDomain(domain);
-    var request = CommitRequest.builder("set-policy", "owner");
-    var version =
-        request.add(
-            new LogRecord.PolicyVersion(
-                JsonNodeFactory.instance.objectNode().put("preset", "auto")));
-    this.policy = store.commit(domain, request.build()).ref(version);
+    // Creating the domain records the default policy version as the first record of commit 1.
+    this.policy = Ref.urn(Urns.logRecord(domain, new LogPosition(1, 1)));
   }
 
   /** Starts building one commit. */
@@ -58,6 +58,11 @@ final class Scenario {
   }
 
   CommitResult write(Commit commit) {
+    return store.commitAsWritten(domain, commit.request.build());
+  }
+
+  /** Writes a commit with the transitions its records cause, as every caller but these tests do. */
+  CommitResult judge(Commit commit) {
     return store.commit(domain, commit.request.build());
   }
 
@@ -232,7 +237,15 @@ final class Scenario {
     }
 
     Ref evaluate(Ref fact, Transition transition, PolicyResult result) {
-      return add(new LogRecord.EvaluatePolicy(fact, policy, transition, result, "policy", "test"));
+      return add(
+          new LogRecord.EvaluatePolicy(
+              fact,
+              policy,
+              transition,
+              result,
+              new LogRecord.Evaluator.Inline(),
+              "policy",
+              "test"));
     }
 
     /** A policy evaluation choosing machine judgement, and the confirmation resting on it. */

@@ -149,8 +149,8 @@ public final class Projector {
           throw missing("Input Observation", event.observation());
         }
       }
-      case LogRecord.PolicyVersion ignored ->
-          projection.addPolicyVersion(Urns.logRecord(domain, at));
+      case LogRecord.PolicyVersion version ->
+          projection.addPolicyVersion(Urns.logRecord(domain, at), version);
       case FactEvent event -> applyFactEvent(at, event);
       case LogRecord.ResolveConflict resolution -> applyResolution(resolution);
     }
@@ -466,7 +466,7 @@ public final class Projector {
           if (!record.is(FactState.CANDIDATE)) {
             throw reject("Only a candidate is evaluated for confirmation");
           }
-          requirePremisesConfirmed(slice);
+          requireEvaluable(slice);
         }
         if (evaluation.transition() == Transition.RETIRE
             && record.openRetirementProposal().isEmpty()) {
@@ -493,6 +493,26 @@ public final class Projector {
                 + " has premise dependency "
                 + premise
                 + ", which is not confirmed");
+      }
+    }
+  }
+
+  /**
+   * Requires a candidate to be evaluable: every premise dependency is confirmed or is a candidate
+   * whose latest evaluation requested consent, so a candidate and the premises it waits on can
+   * reach the deciding party together.
+   */
+  private void requireEvaluable(FactSlice slice) {
+    for (var premise : premises(slice, slice.record().factDependencies())) {
+      var premiseRecord = requireFact(Ref.urn(premise)).record();
+      if (!premiseRecord.is(FactState.CONFIRMED)
+          && !(premiseRecord.is(FactState.CANDIDATE) && premiseRecord.awaitingConsent())) {
+        throw reject(
+            "Fact "
+                + slice.row().fact()
+                + " has premise dependency "
+                + premise
+                + ", which is neither confirmed nor awaiting consent");
       }
     }
   }
@@ -533,9 +553,10 @@ public final class Projector {
 
   /**
    * Requires a judgement to belong to the candidate's current judgement: made after the acceptance
-   * that made it a candidate, and after every premise dependency was last confirmed. An answer
-   * given while a premise was not confirmed is recorded without a transition, and the candidate is
-   * judged again once its premises are confirmed.
+   * that made it a candidate, and after the current judgement of every premise dependency began. A
+   * judgement made while a premise awaited consent therefore stands once the premise is confirmed,
+   * while a premise that has since returned to {@code candidate} starts a new judgement and makes
+   * its dependents' earlier judgements stale.
    */
   private void requireCurrentJudgement(FactSlice slice, LogPosition basisAt) {
     var record = slice.record();
@@ -548,21 +569,17 @@ public final class Projector {
     }
     for (var premise : premises(slice, record.factDependencies())) {
       var premiseRecord = requireFact(Ref.urn(premise)).record();
-      var confirmedBefore =
-          premiseRecord.is(FactState.CONFIRMED)
-              && premiseRecord
-                  .latestConfirmation()
-                  .map(confirmed -> basisAt.compareTo(confirmed) > 0)
-                  .orElse(false);
-      if (!confirmedBefore) {
+      var madeAfter =
+          premiseRecord.judgementStart().map(start -> basisAt.compareTo(start) > 0).orElse(false);
+      if (!madeAfter) {
         throw reject(
             "Basis "
                 + Urns.logRecord(domain, basisAt)
-                + " was made before Fact "
+                + " was made before the current judgement of Fact "
                 + premise
                 + ", a premise dependency of "
                 + slice.row().fact()
-                + ", was confirmed");
+                + ", began");
       }
     }
   }

@@ -219,12 +219,21 @@ class FactLifecycleTest extends StoreScenarioTest {
     var keyFact = written.urn(key);
 
     // Uniqueness at another Fact Address has the key as its premise, so until the key is
-    // confirmed it is neither evaluated for confirmation nor confirmed.
+    // confirmed or awaits consent it is not evaluated for confirmation, and until the key is
+    // confirmed it is not confirmed.
     var early = s.begin();
     var waiting =
         early.candidate(early.address(written.ref(orders), "uniqueness"), "unique", s.on(keyFact));
     early.evaluate(waiting, Transition.CONFIRM, PolicyResult.MACHINE_JUDGEMENT);
-    assertRejected(s, early, "which is not confirmed");
+    assertRejected(s, early, "which is neither confirmed nor awaiting consent");
+
+    var asked = s.begin();
+    asked.evaluate(Ref.urn(keyFact), Transition.CONFIRM, PolicyResult.REQUEST_CONSENT);
+    var pending =
+        asked.candidate(asked.address(written.ref(orders), "uniqueness"), "unique", s.on(keyFact));
+    var adopted = asked.evaluate(pending, Transition.CONFIRM, PolicyResult.MACHINE_JUDGEMENT);
+    asked.add(new LogRecord.Confirm(pending, ConfirmationPath.MACHINE_JUDGEMENT, adopted));
+    assertRejected(s, asked, "which is not confirmed");
 
     c = s.begin();
     c.confirmByMachine(Ref.urn(keyFact));
@@ -359,7 +368,7 @@ class FactLifecycleTest extends StoreScenarioTest {
   }
 
   @Test
-  void judgementsFromAnEarlierJudgementOrBeforePremisesWereConfirmedDoNotCount() {
+  void judgementsFromAnEarlierJudgementOfTheFactOrOfAPremiseDoNotCount() {
     var s = scenario();
     var c = s.begin();
     var orders = c.dataset("shop.public.orders");
@@ -385,8 +394,9 @@ class FactLifecycleTest extends StoreScenarioTest {
             keyFact, ConfirmationPath.MACHINE_JUDGEMENT, written.ref(firstEvaluation)));
     assertRejected(s, reused, "belongs to an earlier judgement");
 
-    // A consent given while a premise was a candidate does not confirm once it is confirmed.
+    // A consent given while a premise awaits consent confirms once the premise is confirmed.
     c = s.begin();
+    c.evaluate(written.ref(premise), Transition.CONFIRM, PolicyResult.REQUEST_CONSENT);
     var dependent =
         c.candidate(
             c.address(written.ref(orders), "row-grain"), "order line", s.on(written.urn(premise)));
@@ -397,7 +407,33 @@ class FactLifecycleTest extends StoreScenarioTest {
     late.add(
         new LogRecord.Confirm(
             early.ref(dependent), ConfirmationPath.HUMAN_CONSENT, early.ref(consent)));
-    assertRejected(s, late, "was made before Fact");
+    s.write(late);
+    assertThat(s.state(early.urn(dependent))).contains(FactState.CONFIRMED);
+
+    // One given before the premise's current judgement began does not.
+    c = s.begin();
+    var restated =
+        c.candidate(
+            c.address(written.ref(orders), "row-inclusion"),
+            "returns excluded",
+            s.on(written.urn(premise)));
+    var staleConsent = c.answer(restated, Transition.CONFIRM, AnswerType.CONSENT);
+    var stale = s.write(c);
+    c = s.begin();
+    c.retireByMachine(written.ref(premise));
+    c.add(
+        new LogRecord.Retire(
+            early.ref(dependent), new Basis.Cascade(Ref.urn(written.urn(premise)))));
+    s.write(c);
+    c = s.begin();
+    c.accept(written.ref(premise), s.on(written.urn(meaning)));
+    c.confirmByMachine(written.ref(premise));
+    s.write(c);
+    var reconfirmed = s.begin();
+    reconfirmed.add(
+        new LogRecord.Confirm(
+            stale.ref(restated), ConfirmationPath.HUMAN_CONSENT, stale.ref(staleConsent)));
+    assertRejected(s, reconfirmed, "was made before the current judgement of Fact");
   }
 
   @Test

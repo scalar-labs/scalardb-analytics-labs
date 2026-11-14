@@ -193,3 +193,29 @@ CREATE TABLE semantic_catalog.address_selections (
     eligible_facts jsonb NOT NULL,
     PRIMARY KEY (domain, fact_address, from_commit)
 );
+
+-- Records kept outside the log.
+
+-- What was presented in review, to whom, and when. Presenting changes no Fact's state, so it is not
+-- in the log. presentation is a number increasing within the domain; content holds the kind, the
+-- target Facts with their Fact Addresses, the recipient, the time, a reference to the context
+-- shown, and the resulting events, which the commits of answers and conflict resolutions add.
+CREATE TABLE semantic_catalog.review_presentations (
+    domain text NOT NULL REFERENCES semantic_catalog.domains (domain),
+    presentation bigint NOT NULL,
+    content jsonb NOT NULL,
+    PRIMARY KEY (domain, presentation)
+);
+
+-- The Facts each review presentation targets, to find a Fact's earlier presentations.
+CREATE TABLE semantic_catalog.review_presentation_targets (
+    domain text NOT NULL,
+    presentation bigint NOT NULL,
+    fact text NOT NULL,
+    PRIMARY KEY (domain, presentation, fact),
+    FOREIGN KEY (domain, presentation)
+        REFERENCES semantic_catalog.review_presentations (domain, presentation)
+);
+
+CREATE INDEX review_presentation_targets_fact
+    ON semantic_catalog.review_presentation_targets (domain, fact);

@@ -6,6 +6,7 @@ package com.scalar.db.analytics.labs.semantic.model;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.CheckResult;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.DataFinding;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ValidationMethod;
 import org.jspecify.annotations.Nullable;
 
@@ -14,7 +15,9 @@ import org.jspecify.annotations.Nullable;
  * results and dependencies"). A validation result is the list of checks an {@code accept} or a
  * {@code propose-retire} holds; a Fact Revision shows that of the latest acceptance.
  *
- * @param items the validation items the check covered, whose shape the predicate defines
+ * @param items the validation items the check covered: a JSON array of items, or one item
+ * @param finding for a data check, and only for one, whether its result rests on a counterexample
+ *     found or on no counterexample found
  * @param reference the Input Observation or Fact Revision the check was made against; absent for an
  *     inference check that has none. An Input Observation an acceptance's check references must
  *     also be among the acceptance's dependencies.
@@ -24,5 +27,13 @@ public record Check(
     ValidationMethod method,
     JsonNode items,
     CheckResult result,
+    @Nullable DataFinding finding,
     @Nullable Ref reference,
-    JsonNode details) {}
+    JsonNode details) {
+  public Check {
+    if ((method == ValidationMethod.DATA_CHECK) != (finding != null)) {
+      throw new IllegalArgumentException(
+          "A data check, and only a data check, states whether it found a counterexample");
+    }
+  }
+}

@@ -129,6 +129,35 @@ public final class Vocabulary {
     REQUEST_CONSENT
   }
 
+  /**
+   * The part of a user policy version that decides when machine judgement adopts a candidate or a
+   * retirement (see {@code docs/semantic-catalog/construction.md}, "Choosing the confirmation
+   * path").
+   */
+  public enum Preset {
+    /** Machine judgement always adopts. */
+    FULL_AUTO,
+    /**
+     * Inline evaluation adopts what deterministic signals cover; the policy evaluation model
+     * decides the rest, except that a refuted candidate or a second Fact always goes to a person.
+     */
+    AUTO,
+    /** Machine judgement never adopts. */
+    MANUAL
+  }
+
+  /**
+   * What a data check's result rests on. Data can refute a rule but not establish one, so a support
+   * resting on no counterexample found does not on its own let inline evaluation adopt a value (see
+   * {@code docs/semantic-catalog/generators.md}, "What data establishes").
+   */
+  public enum DataFinding {
+    /** The check found a counterexample, such as a repeating Field set or an unmatched value. */
+    COUNTEREXAMPLE_FOUND,
+    /** The check found no counterexample in what it read. */
+    NO_COUNTEREXAMPLE_FOUND
+  }
+
   /** The type of a human answer. */
   public enum AnswerType {
     CONSENT,

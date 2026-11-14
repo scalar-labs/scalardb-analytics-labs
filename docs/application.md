@@ -200,7 +200,7 @@ planning, or SQL-generation prompt.
   consent to them accepted together, and items that need judgement one by one. It records each
   presentation, submits the owner's answers, and presents again anything shown but unanswered. It
   is done when nothing awaits review and no build task is created or running. It neither gathers
-  its own evidence nor triages; the judging model did both when it built the material (see
+  its own evidence nor triages; the policy evaluation model did both when it built the material (see
   [`semantic-catalog/construction.md`](semantic-catalog/construction.md#review)).
 - **Answering a question.** The agent fixes one Catalog Snapshot for the question and reads along
   the hierarchy, recursively from the root while the catalog is small. On knowledge awaiting
