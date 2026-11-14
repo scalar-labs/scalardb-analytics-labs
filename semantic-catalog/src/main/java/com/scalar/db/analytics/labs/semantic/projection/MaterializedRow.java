@@ -151,7 +151,8 @@ public sealed interface MaterializedRow {
    * kept as columns of the current Fact Record.
    *
    * @param awaitingConsent whether the latest policy evaluation requested consent that no answer
-   *     has given yet
+   *     has given yet, under whichever user policy version it names; reads check the version in
+   *     force
    * @param openRetirementProposal the log record of the open retirement proposal against a
    *     confirmed Fact
    * @param unknownAnswerPending whether an unknown answer was given and no new dependency reference

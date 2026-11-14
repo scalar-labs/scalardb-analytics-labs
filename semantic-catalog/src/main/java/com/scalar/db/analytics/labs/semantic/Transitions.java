@@ -8,7 +8,8 @@ import java.util.List;
 
 /**
  * The Facts one commit moved by policy evaluation and cascades, beyond what its request wrote, and
- * the candidates it left for the policy evaluation model. Callers create build tasks from them.
+ * the candidates it left for the policy evaluation model, for which the same transaction creates
+ * evaluation build tasks.
  *
  * @param confirmed the Facts confirmed
  * @param rejected the Facts rejected

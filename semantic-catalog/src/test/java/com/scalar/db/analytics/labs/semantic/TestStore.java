@@ -29,6 +29,15 @@ final class TestStore {
     return new StoreSettings(url(database), POSTGRES.getUsername(), POSTGRES.getPassword(), 8);
   }
 
+  /** The shared database with a connection pool of a given size. */
+  static StoreSettings settingsWithPool(int maximumPoolSize) {
+    return new StoreSettings(
+        url(POSTGRES.getDatabaseName()),
+        POSTGRES.getUsername(),
+        POSTGRES.getPassword(),
+        maximumPoolSize);
+  }
+
   /** Creates an empty database on the same server. */
   static String newDatabase() throws SQLException {
     var name = "store_" + NAMES.incrementAndGet();

@@ -34,8 +34,6 @@ registering an observation records a new Input Observation.
 
 ## Build tasks
 
-**[Planned]** This section describes design that is not implemented yet.
-
 A **build task** tracks one Generator run, one impact judgement, one evaluation by the policy
 evaluation model (see [Choosing the confirmation path](#choosing-the-confirmation-path)), or one
 re-evaluation after a user policy change, with its trigger, inputs, and result.
@@ -45,26 +43,30 @@ re-evaluation after a user policy change, with its trigger, inputs, and result.
 | `created` | Not yet run | `running` |
 | `running` | Being run | `succeeded`, `failed`; `created` when a later run finds it abandoned |
 | `succeeded` | Result recorded, including the result that there was no candidate | None |
-| `failed` | Failed, with its reason | `running`, by resuming |
+| `failed` | Failed, with its reason | `created`, by resuming |
 
-A build task records its kind, its triggers (log records), the Generator and
-version and the versions of inputs read, the policy version for a re-evaluation, and the observation
-judged with the Facts selected for re-examination for an impact judgement. Its result holds the
-commits it wrote, the missing inputs when there was no candidate, and any duplicate-check matches
-with the original values.
+A build task records its kind, its triggers (log records), the Fact an evaluation evaluates, the
+Generator and version and the versions of inputs read, and the observation judged with the Facts
+selected for re-examination for an impact judgement. Its result holds the commits it wrote, the
+model version of an evaluation, the policy version a re-evaluation ran under, the missing inputs
+when there was no candidate, and any duplicate-check matches with the original values.
+**[Planned]** Generator runs and impact judgements are not implemented yet; evaluations by the
+policy evaluation model and policy re-evaluations are.
 
-No Generator suspends to wait. An answer or new input creates a new build task. A Generator lacking
-input records that there was no candidate and which inputs were missing, and succeeds. An
-unavailable model fails the task, and resuming retries with the same input. Whether construction is
+**[Planned]** No Generator suspends to wait. An answer or new input creates a new build task.
+**[Planned]** A Generator lacking input records that there was no candidate and which inputs were
+missing, and succeeds. An unavailable model fails the task, and resuming runs it again on the latest
+state. Whether construction is
 in progress, blocked, or awaiting judgement is derived: in progress means some task is `created` or
 `running`, blocked means some task is `failed`, and awaiting judgement means the review list is
 non-empty.
 
-When a new trigger arrives for a Generator that already has a `created` task of the same kind, the
-trigger is added to that task instead of creating another, so several reports of one change do not
-repeat a run. A task that has started running takes no more triggers, because the run has not read
-the new input. Each new observation gets its own impact judgement. Every acceptance references the
-build task it came from.
+When a new trigger arrives for work that already has a `created` task of the same kind, such as a
+Generator, the Fact an evaluation evaluates, or the domain's re-evaluation, the trigger is added to
+that task instead of creating another, so several reports of one change do not repeat a run. A task
+that has started running takes no more triggers, because the run has not read the new input.
+**[Planned]** Each new observation gets its own impact judgement. **[Planned]** Every acceptance
+references the build task it came from.
 
 The application decides when build tasks run. Running them is a separate public API operation from
 the operations that create them (see [`public-api.md`](public-api.md)). Only one process runs a
@@ -182,7 +184,7 @@ declaration supplies the intent that data cannot, so an unenforced unique constr
 duplicates found is still adopted inline. A column that disappeared from the physical schema is
 supported by `declared-enforced`, so retiring its Field is adopted inline.
 
-**[Planned]** **The policy evaluation model.** Every other candidate under `auto` is evaluated by a
+**The policy evaluation model.** Every other candidate under `auto` is evaluated by a
 language model kept separate from the Generators, so producing and accepting candidates stay apart.
 It reads the same material a review item shows: the value with its inputs read, checks, and
 dependencies, their content expanded. It weighs these signals as a whole, then either adopts the
@@ -190,8 +192,15 @@ candidate or sends it to the deciding party with review material it builds (see 
 Its reason is recorded on `evaluate-policy`, with its version, the model and the prompt, as a
 Generator's version is recorded. A candidate that a check refutes, or that would confirm a second
 Fact where one is selected, always goes to the deciding party. An evaluation by the policy
-evaluation model runs as its own build task, because it calls a model and must not hold up the
-operation that made the candidate evaluable, such as an answer submission.
+evaluation model runs as its own build task, one per Fact, because it calls a model and must not
+hold up the operation that made the candidate evaluable, such as an answer submission.
+
+The model runs outside any transaction, so its result is reconciled with the state when it is
+recorded. If the Fact no longer waits for it, because it was judged, answered, or is no longer
+evaluable, nothing is recorded. If inline evaluation now decides it, that inline evaluation is
+recorded instead. If the Fact's latest acceptance, its open retirement proposal, the policy version in force, or the
+Fact selected at its Fact Address changed while the model ran, the evaluation was made on stale material; nothing
+is recorded and a new evaluation task takes its place.
 [`../design/semantic-catalog-machine-judgement.md`](../design/semantic-catalog-machine-judgement.md)
 records why the judgement is fuzzy and why a separate model makes it.
 
@@ -206,9 +215,18 @@ The policy is evaluated, and an `evaluate-policy` event recorded, when a candida
 a confirmed Fact receives a retirement proposal, and when the policy version changes. An evaluation
 that adopts a candidate whose premises are not all confirmed yet takes effect in the commit that
 confirms the last of them, without evaluating again; a premise that is rejected or retired instead
-rejects the candidate by cascade. **[Planned]** A version change creates a build task that
-re-evaluates every evaluable `candidate`, because otherwise loosening the policy would not relieve
-the candidates already waiting. Loosening can therefore confirm many candidates at once without a
+rejects the candidate by cascade.
+
+Setting a user policy version sends every judgement not yet carried out back to policy evaluation,
+because otherwise loosening the policy would not relieve the candidates already waiting and
+tightening it would let an earlier adoption still take effect. An evaluation stands only under the
+version it names. Once another version is set, a candidate awaiting consent or adopted pending its
+premises awaits policy evaluation again, and so does an open retirement proposal awaiting consent.
+The candidates resting on such a candidate are not evaluable until it is evaluated again. Answers
+are not policy evaluations and stand across versions, so a consent pending its premises still takes
+effect. The version change creates a build task that evaluates all of these inline under the
+version in force, in one commit; under `auto`, those it leaves undecided get evaluation tasks for
+the policy evaluation model. Loosening can therefore confirm many candidates at once without a
 person, so before applying a version the application can read which candidates it would confirm.
 Confirmed Facts are not re-evaluated.
 
@@ -223,8 +241,8 @@ The following each write one commit, so a half-written state is never a readable
 - **[Planned]** One Generator run: the data observations it read, all acceptances and retirement
   proposals from it, the inline evaluations of those that can be evaluated, and the confirmations
   and retirements they adopt.
-- **[Planned]** One evaluation by the policy evaluation model: its `evaluate-policy`, any data
-  observations it read, and the confirmation or retirement it adopts.
+- One evaluation by the policy evaluation model: its `evaluate-policy`, the confirmation or
+  retirement it adopts, and the transitions they cause. **[Planned]** Any data observations it read.
 - One submission of answers with the transitions they cause. Answers apply in dependency order, and
   independent answers in submission order, so the log records a premise's answer before its
   dependents'. The order always exists because dependencies have no cycles. A consent to a candidate
@@ -232,16 +250,18 @@ The following each write one commit, so a half-written state is never a readable
   premise and its dependents at once confirms them all in the one commit. Grouping also means
   candidates consented to together never have their selection decided by record order.
 - One conflict resolution.
-- One user policy version. **[Planned]** The re-evaluation it triggers runs later as a build task,
-  whose evaluations and confirmations form one commit.
+- One user policy version. The re-evaluation it triggers runs later as a build task, whose
+  evaluations and confirmations form one commit, written only when inline evaluation decided
+  something.
 
 In any commit where a Fact becomes `confirmed`, `rejected`, or `retired`, the dependent Facts move
 next in the same commit:
 
 - A `candidate` whose premise dependencies are now all confirmed is confirmed if its evaluation
   already adopted it or the deciding party already consented.
-- A `candidate` that has just become evaluable is evaluated inline. **[Planned]** One that inline
-  evaluation leaves undecided gets an evaluation build task for the policy evaluation model.
+- A `candidate` that has just become evaluable is evaluated inline. One that inline evaluation
+  leaves undecided gets an evaluation build task for the policy evaluation model, in the same
+  transaction.
 - A `candidate` whose premise is rejected or retired is rejected.
 - A `confirmed` Fact whose premise is retired is retired.
 
@@ -257,8 +277,8 @@ as build tasks.
 ## Review
 
 Review is split in two. Deciding what needs a person happens in construction, not in the review
-session: inline evaluation decides in the commit that makes a candidate evaluable. **[Planned]** The
-policy evaluation model decides, and prepares review material, inside build tasks. An interactive
+session: inline evaluation decides in the commit that makes a candidate evaluable. The policy
+evaluation model decides, and prepares review material, inside build tasks. An interactive
 review session, an agent working with the semantics owner or a Web UI, only fetches what is
 prepared, presents it, and sends the answers.
 
@@ -343,12 +363,12 @@ No operation sets the selected Fact directly. Selection changes only as the rule
 | --- | --- | --- | --- |
 | **[Planned]** Register an observation | Input Observation and Observation Event | Content equals the previous observation, which records nothing; a physical schema whose source-declared part is unchanged records only a derived record | Generators that read that input kind; an impact judgement for a new physical schema or document observation |
 | **[Planned]** Record a Generator's results (inside a build task) | Data observations, acceptances, retirement proposals, inline evaluations, machine-judgement transitions, cascades | A dependency cycle, a missing referenced record, a check reference that is not a dependency, or an expression value that does not parse; the task fails | Evaluations by the policy evaluation model; Generators that read the newly confirmed predicates |
-| **[Planned]** Record an evaluation by the policy evaluation model (inside a build task) | Evaluation with its reason and review material, data observations it read, machine-judgement transitions, cascades | The candidate is no longer evaluable, which records nothing | Generators that read the newly confirmed predicates |
-| Submit answers | Answers, resulting transitions, cascades, and feedback for each correction | An answer lacks an authority-check reference | **[Planned]** Generators of rejected, corrected, retired, and cascaded Facts; Generators that read the feedback; Generators that read newly confirmed predicates |
+| Record an evaluation by the policy evaluation model (inside a build task) | Evaluation with its reason and review material, machine-judgement transitions, cascades; **[Planned]** data observations it read | The Fact no longer waits for the model, which records nothing; inline evaluation now decides it, which records that inline evaluation instead; or the material it read changed, which creates a new evaluation task | Evaluations of dependents left undecided; **[Planned]** Generators that read the newly confirmed predicates |
+| Submit answers | Answers, resulting transitions, cascades, and feedback for each correction | An answer lacks an authority-check reference | Evaluations left undecided; **[Planned]** Generators of rejected, corrected, retired, and cascaded Facts; Generators that read the feedback; Generators that read newly confirmed predicates |
 | Resolve a conflict | `resolve-conflict` | The chosen and passed-over Facts were not the eligible Facts at the previous commit, or no authority-check reference | **[Planned]** Generators of Facts depending on Facts no longer selected |
-| Set a user policy version | Policy version | None | **[Planned]** A policy re-evaluation |
-| **[Planned]** Re-evaluate the policy (inside a build task) | Evaluations, machine-judgement confirmations, cascades | None | Generators that read newly confirmed predicates |
-| **[Planned]** Resume a build task | Nothing in the log | The task is not `failed` | None; the task reruns on the latest state |
+| Set a user policy version | Policy version | None | A policy re-evaluation |
+| Re-evaluate the policy (inside a build task) | Evaluations, machine-judgement confirmations, cascades | None | Evaluations left undecided; **[Planned]** Generators that read newly confirmed predicates |
+| Resume a build task | Nothing in the log | The task is not `failed` | None; the task reruns on the latest state |
 
 **[Planned]** Whenever replacement, a conflict resolution, or a retirement changes the selected
 Fact, build tasks are created for the Generators of Facts that depended on the Fact no longer

@@ -58,13 +58,24 @@ the table's `input_resources` row. A derived-record-only registration judges aga
 observation of that table, so this update makes it collide with any concurrent registration for the
 same table, and the retry judges against the observation that won.
 
-Running a build task never holds a transaction while a Generator runs:
+A process running a domain's build tasks first takes the domain's **builder semaphore**, a
+PostgreSQL session-level advisory lock held on a connection of its own for the whole run. Its key
+is an integer the `domains` row issues, so no two domains share one. The semaphore has to live
+exactly as long as the running process, because the reset below treats every task left `running` as
+abandoned. The server releases a session-level lock when its connection ends, so a stopped process
+never leaves it behind, and holding it keeps no transaction open. A second process that cannot take
+it is refused at once, while answers, reads, and other writes proceed. A lock file would exclude
+only processes on one host, while the store may be reached from several; a runner row with a lease
+outlives a stopped process until the lease expires; and a row lock needs a transaction open for the
+whole run, which holds back vacuum in watching mode.
+
+Running a build task never holds a transaction while a Generator or a model runs:
 
 1. **Claim.** Change the task from `created` to `running` and commit. Of two processes claiming one
    task, the later fails on the row update. Adding a trigger updates the same row, so a claimed task
    takes no more triggers.
-2. **Run.** Run the Generator, the model-based duplicate check, or the impact judgement outside any
-   transaction. A model call takes seconds to tens of seconds, and an open transaction would collide
+2. **Run.** Run the Generator, the model-based duplicate check, the impact judgement, or the
+   policy evaluation model outside any transaction. A model call takes seconds to tens of seconds, and an open transaction would collide
    with answers committed meanwhile and force the whole run to restart.
 3. **Record.** Record the output by the write procedure above, set the task to `succeeded` or
    `failed`, and commit. On a `commits` collision only this step is retried, keeping the run's
@@ -124,7 +135,7 @@ The log:
 
 | Table | Primary key | Holds |
 | --- | --- | --- |
-| `domains` | Domain | Creation time |
+| `domains` | Domain | Creation time, builder semaphore key |
 | `commits` | Domain, commit number | Time, kind of operation, author (the person or agent behind the call) |
 | `log_records` | Domain, commit number, order | Record kind, target Fact, target Input Resource, target Fact Address of a conflict resolution, content |
 
@@ -169,13 +180,13 @@ Records kept outside the log:
 
 | Table | Key | Holds |
 | --- | --- | --- |
-| `build_tasks` | Domain, build task | Kind, state, creation order, content (triggers, Generator and version, observation judged, result, failure reason) |
+| `build_tasks` | Domain, build task | Kind, state, the Fact an evaluation evaluates, content (work, triggers, Generator and version, observation judged, result, failure reason) |
 | `review_presentations` | Domain, review presentation | Creation order, content |
 | `review_presentation_targets` | Domain, review presentation, Fact | Nothing more |
 | `derived_records` | Domain, Physical Catalog table identifier, table metadata version | Analytics types, retrieval information, content digest |
 | `call_records` | Domain, call identifier | Operation kind, input, output, time recorded |
 
-`build_tasks` is indexed on state and kind for build task reads. `review_presentation_targets` finds
+`build_tasks` is indexed on state, kind, and evaluated Fact, for build task reads and for finding the `created` task a new trigger joins. `review_presentation_targets` finds
 earlier presentations per Fact for the review list. `call_records` keeps the input itself and
 compares it directly to detect a reused identifier with different input.
 

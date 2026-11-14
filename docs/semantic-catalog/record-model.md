@@ -304,9 +304,10 @@ path shows which kind of decision adopted it.
 Transitions need the events they rest on:
 
 - `confirm` requires every premise dependency to be `confirmed`, and either a latest policy
-  evaluation that chose machine judgement or a consent answer.
-- `retire` requires an open retirement proposal with a machine-judgement evaluation or a consent
-  answer, or the retirement of a premise dependency.
+  evaluation that chose machine judgement under the user policy version in force or a consent
+  answer.
+- `retire` requires an open retirement proposal with a machine-judgement evaluation under the
+  version in force or a consent answer, or the retirement of a premise dependency.
 - A retirement proposal against a `candidate` rejects it instead.
 
 A retirement proposal ends with retirement, rejection, or a rejection or correction answer. An
@@ -322,13 +323,16 @@ earlier belong to an earlier judgement, and none of them can be the basis of a t
 additional acceptance does not start a new judgement, but the policy is evaluated again after it,
 and a consent given before it no longer stands, because it may bring what changes the judgement. A
 candidate is evaluated for confirmation once every premise dependency is `confirmed` or is a
-candidate whose latest evaluation requested consent, so a candidate and the premises it waits on can
+candidate whose latest evaluation requested consent under the version in force, so a candidate and the premises it waits on can
 reach the deciding party together. The confirmation itself still waits until every premise is
 `confirmed`. A confirmation, and a rejection resting on an answer, rest only on an evaluation or
 answer of the current judgement made after the current judgement of every premise dependency began;
 a premise that has since returned to `candidate` starts a new judgement of its own, and its
 dependents are evaluated again. A rejection resting on a retirement proposal needs a proposal made
-within the current judgement.
+within the current judgement. A policy evaluation, unlike an answer, stands only while the user
+policy version it names is in force; setting another version sends the candidates and retirement
+proposals it judged back to policy evaluation (see
+[`construction.md`](construction.md#choosing-the-confirmation-path)).
 
 Retirement covers both an element that no longer exists and a confirmation that was wrong; the
 reason and validation result say which. "No longer exists" is a change in treatment, not a value.

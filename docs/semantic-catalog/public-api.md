@@ -151,8 +151,8 @@ build task. Beforehand, the application shows the semantics owner what the check
 
 ### Running build tasks and resuming a failed one
 
-Running build tasks takes the domain's exclusive run: while one call holds it, another is not
-accepted. It first returns every task left `running` to `created`, since a stopped run wrote
+Running build tasks takes the domain's builder semaphore (see
+[`storage.md`](storage.md#writes-and-reads)): while one call holds it, another is not accepted. It first returns every task left `running` to `created`, since a stopped run wrote
 nothing, then runs `created` tasks one at a time, including those created while it runs. It reports
 each task as it finishes, `succeeded` or `failed`, with its result, the missing inputs when there
 was no candidate, or the reason for failure. It returns when no `created` task remains or, if the

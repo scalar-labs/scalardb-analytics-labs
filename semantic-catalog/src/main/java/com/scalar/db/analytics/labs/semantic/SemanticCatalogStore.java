@@ -4,6 +4,7 @@
  */
 package com.scalar.db.analytics.labs.semantic;
 
+import com.scalar.db.analytics.labs.semantic.model.BuildTask;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.LogRecordJson;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
@@ -139,7 +140,7 @@ public final class SemanticCatalogStore implements AutoCloseable {
     return store.write(transaction -> commit(transaction, domain, request, false));
   }
 
-  private static CommitResult commit(
+  static CommitResult commit(
       StoreTransaction transaction, String domain, CommitRequest request, boolean transitions) {
     requireDomain(transaction, domain);
     var commit = transaction.lastCommit(domain) + 1;
@@ -148,7 +149,7 @@ public final class SemanticCatalogStore implements AutoCloseable {
         CommitResolver.resolve(
             domain, commit, request.records(), projection, transaction.identityLookup(domain));
     if (resolution.records().isEmpty()) {
-      return new CommitResult(OptionalLong.empty(), resolution.urns(), Transitions.NONE);
+      return new CommitResult(OptionalLong.empty(), resolution.urns(), Transitions.NONE, List.of());
     }
     // Inserted first, so a concurrent writer of the same number collides as early as possible.
     transaction.insertCommit(domain, commit, request.operation(), request.author());
@@ -156,15 +157,55 @@ public final class SemanticCatalogStore implements AutoCloseable {
     projector.begin(commit);
     resolution.records().forEach(projector::apply);
     var records = new ArrayList<>(resolution.records());
-    var moved = Transitions.NONE;
-    if (transitions) {
-      var outcome = TransitionResolver.resolve(projection, projector, commit, resolution.records());
-      records.addAll(outcome.records());
-      moved =
-          new Transitions(
-              outcome.confirmed(), outcome.rejected(), outcome.retired(), outcome.awaitingModel());
-    }
+    var outcome =
+        transitions
+            ? TransitionResolver.resolve(projection, projector, commit, resolution.records())
+            : TransitionResolver.Outcome.NONE;
+    records.addAll(outcome.records());
     projector.end();
+    return finish(transaction, domain, commit, projection, records, outcome, resolution.urns(), "");
+  }
+
+  /**
+   * Ends a commit: writes its records and changed rows, and creates the build tasks its transitions
+   * call for. A commit that recorded nothing is removed again, and its tasks are triggered by the
+   * given record instead of its last one.
+   */
+  private static CommitResult finish(
+      StoreTransaction transaction,
+      String domain,
+      long commit,
+      Projection projection,
+      List<PositionedRecord> records,
+      TransitionResolver.Outcome outcome,
+      java.util.Map<Integer, String> urns,
+      String triggerWithoutCommit) {
+    var moved =
+        new Transitions(
+            outcome.confirmed(), outcome.rejected(), outcome.retired(), outcome.awaitingModel());
+    if (records.isEmpty()) {
+      transaction.deleteCommit(domain, commit);
+      var tasks =
+          BuildTasks.evaluationsFor(
+              transaction, domain, outcome.awaitingModel(), triggerWithoutCommit);
+      return new CommitResult(OptionalLong.empty(), urns, moved, tasks);
+    }
+    persist(transaction, domain, projection, records);
+    var tasks =
+        BuildTasks.evaluationsFor(
+            transaction,
+            domain,
+            outcome.awaitingModel(),
+            Urns.logRecord(domain, records.getLast().position()));
+    return new CommitResult(OptionalLong.of(commit), urns, moved, tasks);
+  }
+
+  /** Writes a commit's log records and the materialized rows its projection changed. */
+  private static void persist(
+      StoreTransaction transaction,
+      String domain,
+      Projection projection,
+      List<PositionedRecord> records) {
     for (var record : records) {
       transaction.insertLogRecord(
           domain,
@@ -184,7 +225,45 @@ public final class SemanticCatalogStore implements AutoCloseable {
     for (var row : projection.removedRows()) {
       transaction.deleteRow(domain, row);
     }
-    return new CommitResult(OptionalLong.of(commit), resolution.urns(), moved);
+  }
+
+  /** Resolves transitions in a commit with no request records. */
+  @FunctionalInterface
+  interface Resolution {
+    TransitionResolver.Outcome resolve(Projection projection, Projector projector, long commit);
+  }
+
+  /**
+   * Writes a commit whose records transition resolution alone produces, such as a policy
+   * re-evaluation, or nothing when it produces none. The Facts it leaves to the policy evaluation
+   * model get evaluation tasks, triggered by the commit's last record or, when nothing was written,
+   * by the given trigger.
+   */
+  static CommitResult commitResolved(
+      StoreTransaction transaction,
+      String domain,
+      String operation,
+      String author,
+      String triggerWithoutCommit,
+      Resolution resolution) {
+    var commit = transaction.lastCommit(domain) + 1;
+    // Inserted first, so a concurrent writer of the same number collides before the resolution
+    // does its work; removed again if the resolution records nothing.
+    transaction.insertCommit(domain, commit, operation, author);
+    var projection = new Projection(domain, transaction.projectionSource(domain));
+    var projector = Projector.validating(projection);
+    projector.begin(commit);
+    var outcome = resolution.resolve(projection, projector, commit);
+    projector.end();
+    return finish(
+        transaction,
+        domain,
+        commit,
+        projection,
+        outcome.records(),
+        outcome,
+        java.util.Map.of(),
+        triggerWithoutCommit);
   }
 
   /** The review presentation an answer or a conflict resolution was given in, if any. */
@@ -285,7 +364,8 @@ public final class SemanticCatalogStore implements AutoCloseable {
                   without(moved.confirmed(), answered),
                   without(moved.rejected(), answered),
                   without(moved.retired(), answered),
-                  moved.awaitingModel()));
+                  moved.awaitingModel()),
+              result.buildTasks());
         });
   }
 
@@ -479,15 +559,32 @@ public final class SemanticCatalogStore implements AutoCloseable {
 
   /**
    * Sets a new user policy version (see {@code docs/semantic-catalog/public-api.md}, "Setting a
-   * user policy version"). Evaluations from then on name it.
+   * user policy version"). Evaluations from then on name it, and an evaluation made under an
+   * earlier version no longer stands. The same transaction creates the re-evaluation build task, or
+   * adds a trigger to the one not run yet.
    *
-   * @return the URN of the version's log record
+   * @return the version's log record and the re-evaluation task
    */
-  public String setPolicyVersion(String domain, LogRecord.PolicyVersion version) {
-    var request = CommitRequest.builder("set-policy-version", version.setBy());
-    var ref = request.add(version);
-    return commit(domain, request.build()).urn(ref);
+  public PolicyVersionSet setPolicyVersion(String domain, LogRecord.PolicyVersion version) {
+    return store.write(
+        transaction -> {
+          requireDomain(transaction, domain);
+          var request = CommitRequest.builder("set-policy-version", version.setBy());
+          var ref = request.add(version);
+          var urn = commit(transaction, domain, request.build(), true).urn(ref);
+          var task =
+              BuildTasks.trigger(transaction, domain, new BuildTask.Work.PolicyReEvaluation(), urn);
+          return new PolicyVersionSet(urn, task);
+        });
   }
+
+  /**
+   * What setting a user policy version wrote.
+   *
+   * @param logRecord the URN of the version's log record
+   * @param reEvaluation the number of the re-evaluation build task
+   */
+  public record PolicyVersionSet(String logRecord, long reEvaluation) {}
 
   /**
    * Registers a review presentation, outside the log (see {@code
@@ -528,6 +625,73 @@ public final class SemanticCatalogStore implements AutoCloseable {
    */
   public Review.PolicyCheck checkPolicyVersion(String domain, LogRecord.PolicyVersion proposed) {
     return read(domain, Point.LATEST, snapshot -> snapshot.policyCheck(proposed));
+  }
+
+  // Build tasks
+
+  /**
+   * Runs a domain's build tasks (see {@code docs/semantic-catalog/public-api.md}, "Running build
+   * tasks and resuming a failed one"). It takes the domain's builder semaphore, returns every task
+   * a stopped run left {@code running} to {@code created}, and runs created tasks one at a time,
+   * oldest first, including those created while it runs, reporting each as it finishes. It returns
+   * once no created task remains or, when asked to keep waiting, once stopped.
+   *
+   * @throws com.scalar.db.analytics.labs.semantic.model.BuildRunInProgressException when another
+   *     process runs the domain's build tasks
+   * @throws SemanticCatalogException when the domain does not exist
+   */
+  public BuildRun.Summary runBuildTasks(
+      String domain,
+      BuildRun.Environment environment,
+      BuildRun.Mode mode,
+      BuildRun.Listener listener) {
+    if (!domainExists(domain)) {
+      throw new SemanticCatalogException("Unknown domain " + domain);
+    }
+    return new BuildRunner(store, domain, environment).run(mode, listener);
+  }
+
+  /**
+   * Resumes a failed build task: returns it to {@code created}, so the next run runs it on the
+   * latest state. Nothing is written to the log.
+   *
+   * @throws SemanticCatalogException when the domain or the task does not exist, or the task is not
+   *     {@code failed}
+   */
+  public BuildTask resumeBuildTask(String domain, long task) {
+    return store.write(
+        transaction -> {
+          requireDomain(transaction, domain);
+          var current =
+              transaction
+                  .buildTask(domain, task)
+                  .orElseThrow(() -> new SemanticCatalogException("Unknown build task " + task));
+          if (!(current.status() instanceof BuildTask.Status.Failed)) {
+            throw new SemanticCatalogException(
+                "Build task "
+                    + task
+                    + " is "
+                    + current.status().state().value()
+                    + "; only a failed task is resumed");
+          }
+          var resumed = BuildRunner.withStatus(current, new BuildTask.Status.Created());
+          transaction.updateBuildTask(domain, resumed, BuildTask.State.FAILED);
+          return resumed;
+        });
+  }
+
+  /** A build task by number. */
+  public Optional<BuildTask> buildTask(String domain, long task) {
+    return store.read(transaction -> transaction.buildTask(domain, task));
+  }
+
+  /** Every build task of a domain, oldest first. */
+  public List<BuildTask> buildTasks(String domain) {
+    return store.read(
+        transaction -> {
+          requireDomain(transaction, domain);
+          return transaction.buildTasks(domain);
+        });
   }
 
   /** A review presentation by the number its registration returned. */

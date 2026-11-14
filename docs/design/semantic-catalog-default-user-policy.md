@@ -6,8 +6,9 @@ The `auto` preset, with `declared-unenforced` not counted as a deterministic val
 Machine judgement adopts a candidate inline when deterministic checks support all of its content, no
 item that restricts what the data may hold rests on data checks alone, nothing refutes it, and it
 would not confirm a second Fact where one is already selected. A refuted candidate or a second
-Fact always goes to a person. **[Planned]** The policy evaluation model decides every other
-candidate, adopting it or sending it to the deciding party. `full-auto` and `manual` remain
+Fact always goes to a person. The policy evaluation model decides every other candidate, adopting
+it or sending it to the deciding party; **[Planned]** the language model behind it is not connected
+yet. `full-auto` and `manual` remain
 available, and the semantics owner can change the setting at any time.
 
 ## Rationale
@@ -38,6 +39,6 @@ adopted inline, because erring there only makes queries more cautious.
 
 ## Consequences
 
-- **[Planned]** Changing the policy re-evaluates waiting candidates, so loosening it can confirm
-  many at once. The application must show the semantics owner which candidates the new version would
+- Changing the policy re-evaluates waiting candidates, so loosening it can confirm many at once.
+  **[Planned]** The application must show the semantics owner which candidates the new version would
   adopt inline and which would go to the policy evaluation model before applying it.

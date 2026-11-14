@@ -321,7 +321,14 @@ public sealed interface LogRecord {
      * @param version the model and the prompt, recorded as a Generator's version is
      * @param reviewMaterial the material it built for the deciding party when it requested consent
      */
-    record Model(JsonNode version, @Nullable JsonNode reviewMaterial) implements Evaluator {}
+    record Model(JsonNode version, @Nullable JsonNode reviewMaterial) implements Evaluator {
+      public Model {
+        // Stored JSON reads an absent material back as a JSON null.
+        if (reviewMaterial != null && reviewMaterial.isNull()) {
+          reviewMaterial = null;
+        }
+      }
+    }
   }
 
   /**

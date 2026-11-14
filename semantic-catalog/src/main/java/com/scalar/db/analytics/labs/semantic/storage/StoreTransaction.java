@@ -4,6 +4,7 @@
  */
 package com.scalar.db.analytics.labs.semantic.storage;
 
+import com.scalar.db.analytics.labs.semantic.model.BuildTask;
 import com.scalar.db.analytics.labs.semantic.model.LogPosition;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord.FactEvent;
@@ -107,6 +108,16 @@ public final class StoreTransaction {
     } catch (DuplicateKeyException e) {
       throw new CommitNumberTaken(domain, commit, e);
     }
+  }
+
+  /**
+   * Removes a commit this transaction inserted and wrote nothing under, so a write that turns out
+   * to have nothing to record leaves no commit.
+   */
+  public void deleteCommit(String domain, long commit) {
+    jdbc.sql("DELETE FROM semantic_catalog.commits WHERE domain = ? AND commit_number = ?")
+        .params(domain, commit)
+        .update();
   }
 
   /** A concurrent writer took the commit number, so the write starts again on top of it. */
@@ -447,7 +458,135 @@ public final class StoreTransaction {
     return presentations;
   }
 
+  // Build tasks, kept outside the log
+
+  /**
+   * Records a build task under the number one past the domain's last one in this snapshot.
+   * Overlapping creations collide on the primary key and retry.
+   *
+   * @return the task as recorded
+   */
+  public BuildTask insertBuildTask(
+      String domain, BuildTask.Work work, List<String> triggers, BuildTask.Status status) {
+    var number =
+        jdbc.sql("SELECT coalesce(max(task), 0) FROM semantic_catalog.build_tasks WHERE domain = ?")
+                .params(domain)
+                .query(Long.class)
+                .single()
+            + 1;
+    var task = new BuildTask(number, work, triggers, status);
+    try {
+      jdbc.sql(
+              "INSERT INTO semantic_catalog.build_tasks"
+                  + " (domain, task, kind, state, target, content)"
+                  + " VALUES (:domain, :task, :kind, :state, :target, CAST(:content AS jsonb))")
+          .param("domain", domain)
+          .param("task", number)
+          .param("kind", work.kind().value())
+          .param("state", status.state().value())
+          .param("target", work.target(), Types.VARCHAR)
+          .param("content", LogRecordJson.writeNode(LogRecordJson.toStored(task)))
+          .update();
+    } catch (DuplicateKeyException e) {
+      throw new CommitNumberTaken(domain, number, e);
+    }
+    return task;
+  }
+
+  /**
+   * Replaces a build task's triggers and status. Overlapping updates of one task collide on its
+   * row, and the later one retries.
+   *
+   * @param expected the state the task must still be in
+   * @return whether the task was still in that state and was updated
+   */
+  public boolean updateBuildTask(String domain, BuildTask task, BuildTask.State expected) {
+    return jdbc.sql(
+                "UPDATE semantic_catalog.build_tasks"
+                    + " SET state = :state, content = CAST(:content AS jsonb)"
+                    + " WHERE domain = :domain AND task = :task AND state = :expected")
+            .param("domain", domain)
+            .param("task", task.number())
+            .param("state", task.status().state().value())
+            .param("content", LogRecordJson.writeNode(LogRecordJson.toStored(task)))
+            .param("expected", expected.value())
+            .update()
+        > 0;
+  }
+
+  /** A build task by number. */
+  public Optional<BuildTask> buildTask(String domain, long task) {
+    return jdbc.sql(
+            "SELECT content::text FROM semantic_catalog.build_tasks WHERE domain = ? AND task = ?")
+        .params(domain, task)
+        .query(String.class)
+        .optional()
+        .map(StoreTransaction::buildTaskOf);
+  }
+
+  /** The created build task of a kind for a target, if any. */
+  public Optional<BuildTask> createdBuildTask(
+      String domain, BuildTask.Kind kind, @Nullable String target) {
+    return jdbc.sql(
+            "SELECT content::text FROM semantic_catalog.build_tasks"
+                + " WHERE domain = :domain AND state = 'created' AND kind = :kind"
+                + " AND target IS NOT DISTINCT FROM :target ORDER BY task LIMIT 1")
+        .param("domain", domain)
+        .param("kind", kind.value())
+        .param("target", target, Types.VARCHAR)
+        .query(String.class)
+        .optional()
+        .map(StoreTransaction::buildTaskOf);
+  }
+
+  /** The oldest build task of a domain in a state, if any. */
+  public Optional<BuildTask> firstBuildTaskIn(String domain, BuildTask.State state) {
+    return jdbc.sql(
+            "SELECT content::text FROM semantic_catalog.build_tasks"
+                + " WHERE domain = ? AND state = ? ORDER BY task LIMIT 1")
+        .params(domain, state.value())
+        .query((rs, row) -> buildTaskOf(rs.getString(1)))
+        .optional();
+  }
+
+  /** The build tasks of a domain in a state, oldest first. */
+  public List<BuildTask> buildTasksIn(String domain, BuildTask.State state) {
+    return jdbc.sql(
+            "SELECT content::text FROM semantic_catalog.build_tasks"
+                + " WHERE domain = ? AND state = ? ORDER BY task")
+        .params(domain, state.value())
+        .query((rs, row) -> buildTaskOf(rs.getString(1)))
+        .list();
+  }
+
+  /** Every build task of a domain, oldest first. */
+  public List<BuildTask> buildTasks(String domain) {
+    return jdbc.sql(
+            "SELECT content::text FROM semantic_catalog.build_tasks WHERE domain = ? ORDER BY task")
+        .params(domain)
+        .query((rs, row) -> buildTaskOf(rs.getString(1)))
+        .list();
+  }
+
+  private static BuildTask buildTaskOf(String json) {
+    return LogRecordJson.fromStored(LogRecordJson.readNode(json), BuildTask.class);
+  }
+
   // Reads for review
+
+  /** The URN of the user policy version in force at a commit: the latest one written by then. */
+  public Optional<String> policyVersionAt(String domain, long commit) {
+    return jdbc.sql(
+            "SELECT commit_number, ordinal FROM semantic_catalog.log_records"
+                + " WHERE domain = ? AND kind = 'policy-version' AND commit_number <= ?"
+                + " ORDER BY commit_number DESC, ordinal DESC LIMIT 1")
+        .params(domain, commit)
+        .query(
+            (rs, row) ->
+                Urns.logRecord(
+                    domain, new LogPosition(rs.getLong("commit_number"), rs.getInt("ordinal"))))
+        .optional();
+  }
 
   /**
    * The Facts with a policy evaluation that requested consent at or before a commit: every Fact
@@ -477,6 +616,17 @@ public final class StoreTransaction {
   /** The current Fact Records of every candidate. */
   public List<FactRecordRow> candidateRecords(String domain) {
     return jdbc.sql(RECORDS + " WHERE domain = ? AND state = 'CANDIDATE' ORDER BY fact")
+        .params(domain)
+        .query(this::record)
+        .list();
+  }
+
+  /** The current Fact Records of the confirmed Facts with an open retirement proposal. */
+  public List<FactRecordRow> openRetirementRecords(String domain) {
+    return jdbc.sql(
+            RECORDS
+                + " WHERE domain = ? AND state = 'CONFIRMED'"
+                + " AND open_retirement_proposal IS NOT NULL ORDER BY fact")
         .params(domain)
         .query(this::record)
         .list();

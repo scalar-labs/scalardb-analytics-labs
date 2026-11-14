@@ -6,7 +6,10 @@ package com.scalar.db.analytics.labs.semantic.storage;
 
 import com.scalar.db.analytics.labs.semantic.model.SemanticCatalogException;
 import com.zaxxer.hikari.HikariDataSource;
+import java.sql.Connection;
+import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
 import org.jspecify.annotations.Nullable;
@@ -166,6 +169,96 @@ public final class JdbcStore implements AutoCloseable {
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       throw new SemanticCatalogException("Interrupted while retrying a write", e);
+    }
+  }
+
+  /**
+   * Takes a domain's builder semaphore: a session-level advisory lock that says a process is
+   * running the domain's build tasks (see {@code docs/semantic-catalog/storage.md}, "Writes and
+   * reads"). It is held on a connection of its own, opened outside the pool so the pool keeps its
+   * full size, for as long as the returned lock is open. The server releases it when that
+   * connection ends, so it lives exactly as long as the process that holds it.
+   *
+   * @return the lock, or empty when another process holds it
+   * @throws SemanticCatalogException when the domain does not exist or the store cannot be reached
+   */
+  public Optional<BuilderLock> tryLockBuilder(String domain) {
+    var key =
+        jdbc.sql("SELECT builder_lock FROM semantic_catalog.domains WHERE domain = ?")
+            .param(domain)
+            .query(Long.class)
+            .optional()
+            .orElseThrow(() -> new SemanticCatalogException("Unknown domain " + domain));
+    Connection connection;
+    try {
+      connection =
+          DriverManager.getConnection(
+              dataSource.getJdbcUrl(), dataSource.getUsername(), dataSource.getPassword());
+    } catch (SQLException e) {
+      throw new SemanticCatalogException("Cannot connect to the Semantic Catalog store", e);
+    }
+    try (var statement = connection.prepareStatement("SELECT pg_try_advisory_lock(?)")) {
+      statement.setLong(1, key);
+      try (var rs = statement.executeQuery()) {
+        rs.next();
+        if (rs.getBoolean(1)) {
+          return Optional.of(new BuilderLock(connection, key));
+        }
+      }
+      connection.close();
+      return Optional.empty();
+    } catch (SQLException e) {
+      closeQuietly(connection);
+      throw new SemanticCatalogException("Cannot take the builder semaphore of " + domain, e);
+    }
+  }
+
+  /** A held builder semaphore; closing it releases the semaphore and its connection. */
+  public final class BuilderLock implements AutoCloseable {
+    private final Connection connection;
+    private final long key;
+
+    private BuilderLock(Connection connection, long key) {
+      this.connection = connection;
+      this.key = key;
+    }
+
+    /**
+     * Confirms that the semaphore is still held. The server releases it if it ends the session, for
+     * example on a timeout or a restart, and another process may then run the domain's tasks.
+     *
+     * @throws SemanticCatalogException when the semaphore is lost
+     */
+    public void requireHeld() {
+      try (var statement =
+          connection.prepareStatement(
+              "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted"
+                  + " AND pid = pg_backend_pid()"
+                  + " AND ((classid::bigint << 32) | objid::bigint) = ?")) {
+        statement.setLong(1, key);
+        try (var rs = statement.executeQuery()) {
+          if (rs.next() && rs.getLong(1) > 0) {
+            return;
+          }
+        }
+      } catch (SQLException e) {
+        throw new SemanticCatalogException("Lost the builder semaphore", e);
+      }
+      throw new SemanticCatalogException("Lost the builder semaphore");
+    }
+
+    /** Releases the semaphore by ending its connection. */
+    @Override
+    public void close() {
+      closeQuietly(connection);
+    }
+  }
+
+  private static void closeQuietly(Connection connection) {
+    try {
+      connection.close();
+    } catch (SQLException e) {
+      // The session ends either way, and the server releases its locks with it.
     }
   }
 

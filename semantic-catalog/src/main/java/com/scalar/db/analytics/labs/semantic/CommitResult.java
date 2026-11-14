@@ -5,6 +5,7 @@
 package com.scalar.db.analytics.labs.semantic;
 
 import com.scalar.db.analytics.labs.semantic.model.Ref;
+import java.util.List;
 import java.util.Map;
 import java.util.OptionalLong;
 
@@ -17,11 +18,17 @@ import java.util.OptionalLong;
  *     URN issued for a written record, the URN of the existing record a proposal was the same as,
  *     or, for a record that creates nothing, the URN of its log record
  * @param transitions what policy evaluation and cascades moved in the same commit
+ * @param buildTasks the build tasks the commit created or added a trigger to, in the same
+ *     transaction
  */
 public record CommitResult(
-    OptionalLong commit, Map<Integer, String> urns, Transitions transitions) {
+    OptionalLong commit,
+    Map<Integer, String> urns,
+    Transitions transitions,
+    List<Long> buildTasks) {
   public CommitResult {
     urns = Map.copyOf(urns);
+    buildTasks = List.copyOf(buildTasks);
   }
 
   /**

@@ -1,9 +1,12 @@
 -- The Semantic Catalog store. Every table has the domain as the first column of its primary key.
 
--- The domains of the Semantic Catalog.
+-- The domains of the Semantic Catalog. builder_lock is the key of the session-level advisory lock
+-- that a process running the domain's build tasks holds, issued per domain so domains never share
+-- one.
 CREATE TABLE semantic_catalog.domains (
     domain text PRIMARY KEY,
-    created_at timestamptz NOT NULL
+    created_at timestamptz NOT NULL,
+    builder_lock bigint GENERATED ALWAYS AS IDENTITY UNIQUE
 );
 
 -- The log of each domain, and the records its creating log records materialize.
@@ -219,3 +222,20 @@ CREATE TABLE semantic_catalog.review_presentation_targets (
 
 CREATE INDEX review_presentation_targets_fact
     ON semantic_catalog.review_presentation_targets (domain, fact);
+
+-- Build tasks: one run of a Generator, an impact judgement, an evaluation by the policy evaluation
+-- model, or a policy re-evaluation. Running one changes no Fact's state by itself, so it is not in
+-- the log. task is a number increasing within the domain; kind and state are kept as columns for
+-- build task reads; target is the Fact an evaluation task evaluates, to find the created task a new
+-- trigger joins; content holds the work, the triggers, and the result or failure reason.
+CREATE TABLE semantic_catalog.build_tasks (
+    domain text NOT NULL REFERENCES semantic_catalog.domains (domain),
+    task bigint NOT NULL,
+    kind text NOT NULL,
+    state text NOT NULL,
+    target text,
+    content jsonb NOT NULL,
+    PRIMARY KEY (domain, task)
+);
+
+CREATE INDEX build_tasks_state_kind ON semantic_catalog.build_tasks (domain, state, kind, target);

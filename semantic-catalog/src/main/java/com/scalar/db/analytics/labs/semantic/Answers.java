@@ -98,10 +98,13 @@ public final class Answers {
    * @param catalogSnapshot the Catalog Snapshot of the commit written
    * @param outcomes one per answer, in submission order
    * @param cascaded the Facts the answers moved, other than the answered Facts themselves
+   * @param buildTasks the build tasks the submission created or added a trigger to
    */
-  public record Outcomes(String catalogSnapshot, List<Outcome> outcomes, Transitions cascaded) {
+  public record Outcomes(
+      String catalogSnapshot, List<Outcome> outcomes, Transitions cascaded, List<Long> buildTasks) {
     public Outcomes {
       outcomes = List.copyOf(outcomes);
+      buildTasks = List.copyOf(buildTasks);
     }
   }
 }

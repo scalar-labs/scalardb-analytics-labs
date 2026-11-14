@@ -1,7 +1,5 @@
 # How does machine judgement decide what deterministic signals do not settle?
 
-**[Planned]** This decision is accepted but not implemented yet.
-
 ## Current answer
 
 Under `auto`, a language model kept separate from the Generators, the policy evaluation model,
@@ -10,6 +8,8 @@ with review material it builds. Candidates that deterministic signals cover are 
 without it. A refuted candidate, or one that would confirm a second Fact where one is selected,
 always goes to a person. The policy evaluation model runs as its own build task, and its reason and
 version are recorded.
+**[Planned]** No language model is connected to it yet; the evaluation task calls whichever
+`PolicyEvaluationModel` the build environment supplies.
 
 ## Rationale
 

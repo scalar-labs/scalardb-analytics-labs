@@ -68,8 +68,18 @@ public final class FactRecord {
   private @Nullable LogPosition latestAcceptance;
   private @Nullable LogPosition latestConfirmation;
 
-  /** A policy evaluation of the Fact, at its log position. */
-  public record Evaluation(LogPosition at, PolicyResult result) {}
+  /**
+   * A policy evaluation of the Fact, at its log position.
+   *
+   * @param policyVersion the URN of the user policy version it was made under; it stands only while
+   *     that version is in force
+   */
+  public record Evaluation(LogPosition at, PolicyResult result, String policyVersion) {
+    /** Whether it was made under the version in force. */
+    public boolean under(String policyInForce) {
+      return policyVersion.equals(policyInForce);
+    }
+  }
 
   /**
    * The complete content of a Fact Record after at least one event, in the form it is stored. It
@@ -234,7 +244,8 @@ public final class FactRecord {
         }
       }
       case LogRecord.EvaluatePolicy evaluation -> {
-        var recorded = new Evaluation(at, evaluation.result());
+        var recorded =
+            new Evaluation(at, evaluation.result(), evaluation.policyVersion().urnValue());
         switch (evaluation.transition()) {
           case CONFIRM -> latestConfirmEvaluation = recorded;
           case RETIRE -> latestRetireEvaluation = recorded;
@@ -400,24 +411,40 @@ public final class FactRecord {
   /**
    * Whether the latest policy evaluation requested consent that no answer has given yet: for a
    * candidate, about its confirmation within the current judgement; for a confirmed Fact, about its
-   * open retirement proposal.
+   * open retirement proposal. The request may have been made under an earlier user policy version,
+   * which no longer stands; {@link #awaitingConsent(String)} answers for the version in force.
    */
-  public boolean awaitingConsent() {
+  public boolean askedForConsent() {
+    return latestConsentRequest().isPresent();
+  }
+
+  /**
+   * Whether the Fact awaits consent under the user policy version in force: its latest policy
+   * evaluation requested consent under that version and no answer has given it yet. A request made
+   * under an earlier version was sent back to policy evaluation when the version changed.
+   */
+  public boolean awaitingConsent(String policyInForce) {
+    return latestConsentRequest().map(evaluation -> evaluation.under(policyInForce)).orElse(false);
+  }
+
+  private Optional<Evaluation> latestConsentRequest() {
     if (state == FactState.CANDIDATE) {
       return requestsConsent(latestConfirmEvaluation, latestConfirmAnswer, judgementStart);
     }
     if (state == FactState.CONFIRMED && openRetirementProposal != null) {
       return requestsConsent(latestRetireEvaluation, latestRetireAnswer, openRetirementProposal);
     }
-    return false;
+    return Optional.empty();
   }
 
-  private static boolean requestsConsent(
+  private static Optional<Evaluation> requestsConsent(
       @Nullable Evaluation evaluation, @Nullable LogPosition answer, @Nullable LogPosition since) {
     return evaluation != null
-        && evaluation.result() == PolicyResult.REQUEST_CONSENT
-        && (since == null || evaluation.at().compareTo(since) > 0)
-        && (answer == null || answer.compareTo(evaluation.at()) < 0);
+            && evaluation.result() == PolicyResult.REQUEST_CONSENT
+            && (since == null || evaluation.at().compareTo(since) > 0)
+            && (answer == null || answer.compareTo(evaluation.at()) < 0)
+        ? Optional.of(evaluation)
+        : Optional.empty();
   }
 
   /**
@@ -431,7 +458,7 @@ public final class FactRecord {
     }
     return new MaterializedRow.Treatment(
         state,
-        awaitingConsent(),
+        askedForConsent(),
         openRetirementProposal == null
             ? null
             : Urns.logRecord(Urns.domain(fact), openRetirementProposal),

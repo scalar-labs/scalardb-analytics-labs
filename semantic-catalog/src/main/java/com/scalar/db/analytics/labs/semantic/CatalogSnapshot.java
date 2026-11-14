@@ -17,6 +17,7 @@ import com.scalar.db.analytics.labs.semantic.model.Urns;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Transition;
+import com.scalar.db.analytics.labs.semantic.policy.PolicyEvaluationModel;
 import com.scalar.db.analytics.labs.semantic.policy.PolicyEvaluator;
 import com.scalar.db.analytics.labs.semantic.projection.FactRecord;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.AddressSelectionRow;
@@ -59,6 +60,7 @@ public final class CatalogSnapshot {
   private final StoreTransaction transaction;
   private final String domain;
   private final long commit;
+  private @Nullable String policyInForce;
 
   CatalogSnapshot(StoreTransaction transaction, String domain, long commit) {
     this.transaction = transaction;
@@ -220,7 +222,7 @@ public final class CatalogSnapshot {
                 fact -> {
                   var record = reader.records.get(fact);
                   return record != null
-                      && record.awaitingConsent()
+                      && record.awaitingConsent(policyInForce())
                       && !record.unknownAnswerPending();
                 })
             .toList();
@@ -310,6 +312,82 @@ public final class CatalogSnapshot {
               earlier.stream().distinct().sorted().toList()));
     }
     return group(items, tables, query);
+  }
+
+  /**
+   * The user policy version in force at this commit; a consent request made under an earlier one no
+   * longer stands, because setting a version sends it back to policy evaluation.
+   */
+  private String policyInForce() {
+    if (policyInForce == null) {
+      policyInForce =
+          transaction
+              .policyVersionAt(domain, commit)
+              .orElseThrow(
+                  () -> new IllegalStateException("Domain " + domain + " has no policy version"));
+    }
+    return policyInForce;
+  }
+
+  /**
+   * What the policy evaluation model reads to evaluate a Fact at this commit: for a candidate, its
+   * confirmation with its inputs read and its premises expanded; for a confirmed Fact with an open
+   * retirement proposal, that retirement.
+   *
+   * @return the subject, or empty when the Fact is neither
+   */
+  public Optional<PolicyEvaluationModel.Subject> policyEvaluationSubject(String fact) {
+    if (commit == 0) {
+      return Optional.empty();
+    }
+    var reader = new Reader();
+    reader.keep(transaction.factRecordsOf(domain, List.of(fact)));
+    var record = reader.records.get(fact);
+    if (record == null) {
+      return Optional.empty();
+    }
+    var addressUrn = reader.addressOf(fact);
+    reader.loadAddresses(List.of(addressUrn));
+    var address =
+        transaction.addressesAt(domain, List.of(addressUrn), commit).stream()
+            .findFirst()
+            .orElseThrow(() -> new IllegalStateException("No Fact Address " + addressUrn));
+    var target = new Tables(List.of(address.element())).target(address);
+    var log = transaction.factLogsOf(domain, List.of(fact), commit).getOrDefault(fact, List.of());
+    if (record.is(FactState.CANDIDATE)) {
+      var acceptedAt = record.latestAcceptance().orElseThrow();
+      var acceptance =
+          (LogRecord.Accept)
+              log.stream()
+                  .filter(positioned -> positioned.position().equals(acceptedAt))
+                  .findFirst()
+                  .orElseThrow(() -> new IllegalStateException("No acceptance at " + acceptedAt))
+                  .record();
+      var premises =
+          reader.premisesOf(fact).stream()
+              .filter(reader.records::containsKey)
+              .map(reader::content)
+              .toList();
+      return Optional.of(
+          new PolicyEvaluationModel.Subject.Confirmation(
+              target, reader.content(fact), acceptance.inputsRead(), premises));
+    }
+    var proposalAt = record.openRetirementProposal();
+    if (record.is(FactState.CONFIRMED) && proposalAt.isPresent()) {
+      var proposal =
+          log.stream()
+              .filter(positioned -> positioned.position().equals(proposalAt.get()))
+              .findFirst()
+              .orElseThrow(() -> new IllegalStateException("No proposal at " + proposalAt.get()))
+              .record();
+      return Optional.of(
+          new PolicyEvaluationModel.Subject.Retirement(
+              target,
+              reader.content(fact),
+              Urns.logRecord(domain, proposalAt.get()),
+              (LogRecord.ProposeRetire) proposal));
+    }
+    return Optional.empty();
   }
 
   /** The latest evaluation of a transition, read from the Fact's log. */
@@ -480,7 +558,8 @@ public final class CatalogSnapshot {
                     var record = reader.records.get(premise);
                     return record != null
                         && (record.is(FactState.CONFIRMED)
-                            || (record.is(FactState.CANDIDATE) && record.awaitingConsent()));
+                            || (record.is(FactState.CANDIDATE)
+                                && record.awaitingConsent(policyInForce())));
                   });
       if (!evaluable) {
         continue;
@@ -705,7 +784,7 @@ public final class CatalogSnapshot {
           return Knowledge.Waiting.DEPENDENCIES;
         }
       }
-      return record.awaitingConsent()
+      return record.awaitingConsent(policyInForce())
           ? Knowledge.Waiting.CONSENT
           : Knowledge.Waiting.POLICY_EVALUATION;
     }

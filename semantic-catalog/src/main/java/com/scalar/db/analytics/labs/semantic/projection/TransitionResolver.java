@@ -24,8 +24,10 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Resolves the transitions a commit causes, to a fixed point, inside the commit (see {@code
@@ -55,7 +57,7 @@ public final class TransitionResolver {
 
   private final String domain;
   private final Projection projection;
-  private final Projector projector;
+  private final @Nullable Projector projector;
   private final long commit;
   private int nextOrdinal;
   private final Map<String, LogPosition> proposalsAgainstCandidates = new HashMap<>();
@@ -78,6 +80,10 @@ public final class TransitionResolver {
       List<String> rejected,
       List<String> retired,
       List<String> awaitingModel) {
+    /** Nothing moved. */
+    public static final Outcome NONE =
+        new Outcome(List.of(), List.of(), List.of(), List.of(), List.of());
+
     public Outcome {
       records = List.copyOf(records);
       confirmed = List.copyOf(confirmed);
@@ -87,7 +93,8 @@ public final class TransitionResolver {
     }
   }
 
-  private TransitionResolver(Projection projection, Projector projector, long commit, int next) {
+  private TransitionResolver(
+      Projection projection, @Nullable Projector projector, long commit, int next) {
     this.domain = projection.domain();
     this.projection = projection;
     this.projector = projector;
@@ -107,13 +114,85 @@ public final class TransitionResolver {
     var touched = new LinkedHashSet<String>();
     for (var positioned : request) {
       if (positioned.record() instanceof FactEvent event) {
-        touched.add(event.fact().urnValue());
+        var fact = event.fact().urnValue();
+        touched.add(fact);
         if (event instanceof LogRecord.ProposeRetire) {
-          resolver.proposalsAgainstCandidates.put(event.fact().urnValue(), positioned.position());
+          resolver.proposalsAgainstCandidates.put(fact, positioned.position());
+        }
+        if (event instanceof LogRecord.EvaluatePolicy) {
+          // An evaluation recorded by the policy evaluation model that requests consent moves no
+          // Fact itself, but makes the candidates resting on this one evaluable.
+          touched.addAll(resolver.followers(fact));
         }
       }
     }
     return resolver.run(touched);
+  }
+
+  /**
+   * Resolves the transitions of some Facts in a commit of their own, with no request records: each
+   * takes its next step, such as the inline evaluation it lacks, and the Facts depending on any
+   * that move follow. A policy re-evaluation settles every candidate and every confirmed Fact with
+   * an open retirement proposal: an evaluation made under an earlier user policy version no longer
+   * stands, so each one without a standing answer is evaluated again under the version in force
+   * (see {@code docs/semantic-catalog/construction.md}, "Choosing the confirmation path").
+   */
+  public static Outcome settle(
+      Projection projection, Projector projector, long commit, List<String> facts) {
+    return new TransitionResolver(projection, projector, commit, 1).run(new LinkedHashSet<>(facts));
+  }
+
+  /** Whether a Fact waits for the policy evaluation model, on the projection's current state. */
+  public enum ModelWait {
+    /**
+     * Nothing about the Fact waits for an evaluation: it was judged, answered, or not evaluable.
+     */
+    NOT_AWAITING,
+    /** It lacks a standing evaluation, but inline evaluation now decides it. */
+    DECIDED_INLINE,
+    /** It lacks a standing evaluation, and inline evaluation leaves it undecided. */
+    AWAITING
+  }
+
+  /**
+   * Whether the policy evaluation model is to evaluate a Fact: a candidate's confirmation, or a
+   * confirmed Fact's open retirement proposal, with no standing evaluation or answer.
+   */
+  public static ModelWait modelWait(Projection projection, String fact) {
+    var resolver = new TransitionResolver(projection, null, 0, 0);
+    var slice = projection.fact(fact).orElse(null);
+    if (slice == null || slice.record().state().isEmpty()) {
+      return ModelWait.NOT_AWAITING;
+    }
+    var record = slice.record();
+    Transition transition;
+    if (record.is(FactState.CANDIDATE)) {
+      var premises = resolver.premises(slice, record.factDependencies());
+      if (!resolver.evaluable(premises)
+          || resolver
+              .currentAnswer(slice, premises)
+              .filter(answer -> answer.answer().answerType() != AnswerType.UNKNOWN)
+              .isPresent()
+          || record
+              .latestEvaluation(Transition.CONFIRM)
+              .filter(e -> resolver.standingEvaluation(slice, premises, e))
+              .isPresent()) {
+        return ModelWait.NOT_AWAITING;
+      }
+      transition = Transition.CONFIRM;
+    } else if (record.is(FactState.CONFIRMED) && record.openRetirementProposal().isPresent()) {
+      var proposal = record.openRetirementProposal().get();
+      if (record.latestAnswer(Transition.RETIRE).filter(at -> after(at, proposal)).isPresent()
+          || resolver.standingRetireEvaluation(record, proposal).isPresent()) {
+        return ModelWait.NOT_AWAITING;
+      }
+      transition = Transition.RETIRE;
+    } else {
+      return ModelWait.NOT_AWAITING;
+    }
+    return resolver.decide(slice, transition) instanceof Decision.Undecided
+        ? ModelWait.AWAITING
+        : ModelWait.DECIDED_INLINE;
   }
 
   private Outcome run(Set<String> touched) {
@@ -167,7 +246,8 @@ public final class TransitionResolver {
 
   private void append(LogRecord record) {
     var positioned = new PositionedRecord(new LogPosition(commit, nextOrdinal++), record);
-    projector.apply(positioned);
+    Objects.requireNonNull(projector, "A resolver that only inspects appends nothing")
+        .apply(positioned);
     appended.add(positioned);
   }
 
@@ -225,7 +305,7 @@ public final class TransitionResolver {
       return Optional.empty();
     }
     var evaluation = record.latestEvaluation(Transition.CONFIRM);
-    if (evaluation.isEmpty() || !standing(record, premises, evaluation.get().at())) {
+    if (evaluation.isEmpty() || !standingEvaluation(slice, premises, evaluation.get())) {
       return evaluate(slice, Transition.CONFIRM);
     }
     if (evaluation.get().result() == PolicyResult.MACHINE_JUDGEMENT && premisesConfirmed) {
@@ -258,8 +338,7 @@ public final class TransitionResolver {
         return Optional.empty();
       }
     }
-    var evaluation =
-        record.latestEvaluation(Transition.RETIRE).filter(e -> after(e.at(), proposal.get()));
+    var evaluation = standingRetireEvaluation(record, proposal.get());
     if (evaluation.isEmpty()) {
       return evaluate(slice, Transition.RETIRE);
     }
@@ -272,24 +351,8 @@ public final class TransitionResolver {
 
   /** Inline evaluation of a transition, or nothing when it leaves the transition undecided. */
   private Optional<LogRecord> evaluate(FactSlice slice, Transition transition) {
-    var policy =
-        projection
-            .policyInForce()
-            .orElseThrow(
-                () -> new IllegalStateException("Domain " + domain + " has no policy version"));
-    var record = slice.record();
-    var decision =
-        switch (transition) {
-          case CONFIRM ->
-              PolicyEvaluator.evaluateConfirmation(
-                  policy.version(), record.checks(), anotherFactSelected(slice));
-          case RETIRE -> {
-            var proposal =
-                (LogRecord.ProposeRetire)
-                    requireEvent(slice, record.openRetirementProposal().orElseThrow());
-            yield PolicyEvaluator.evaluateRetirement(policy.version(), proposal.checks());
-          }
-        };
+    var policy = policy();
+    var decision = decide(slice, transition);
     var result =
         switch (decision) {
           case Decision.Adopt ignored -> PolicyResult.MACHINE_JUDGEMENT;
@@ -312,6 +375,30 @@ public final class TransitionResolver {
             decision.reason()));
   }
 
+  private Projection.PolicyInForce policy() {
+    return projection
+        .policyInForce()
+        .orElseThrow(
+            () -> new IllegalStateException("Domain " + domain + " has no policy version"));
+  }
+
+  /** What inline evaluation decides about a transition on the current state. */
+  private Decision decide(FactSlice slice, Transition transition) {
+    var policy = policy();
+    var record = slice.record();
+    return switch (transition) {
+      case CONFIRM ->
+          PolicyEvaluator.evaluateConfirmation(
+              policy.version(), record.checks(), anotherFactSelected(slice));
+      case RETIRE -> {
+        var proposal =
+            (LogRecord.ProposeRetire)
+                requireEvent(slice, record.openRetirementProposal().orElseThrow());
+        yield PolicyEvaluator.evaluateRetirement(policy.version(), proposal.checks());
+      }
+    };
+  }
+
   private boolean stillUndecided(FactSlice slice) {
     var record = slice.record();
     if (record.is(FactState.CANDIDATE)) {
@@ -319,18 +406,13 @@ public final class TransitionResolver {
       return evaluable(premises)
           && record
               .latestEvaluation(Transition.CONFIRM)
-              .map(e -> !standing(record, premises, e.at()))
+              .map(e -> !standingEvaluation(slice, premises, e))
               .orElse(true);
     }
     return record.is(FactState.CONFIRMED)
         && record
             .openRetirementProposal()
-            .map(
-                proposal ->
-                    record
-                        .latestEvaluation(Transition.RETIRE)
-                        .map(e -> !after(e.at(), proposal))
-                        .orElse(true))
+            .map(proposal -> standingRetireEvaluation(record, proposal).isEmpty())
             .orElse(false);
   }
 
@@ -344,7 +426,8 @@ public final class TransitionResolver {
     for (var premise : premises) {
       var premiseRecord = requireFact(premise).record();
       if (!premiseRecord.is(FactState.CONFIRMED)
-          && !(premiseRecord.is(FactState.CANDIDATE) && premiseRecord.awaitingConsent())) {
+          && !(premiseRecord.is(FactState.CANDIDATE)
+              && premiseRecord.awaitingConsent(policy().logRecord()))) {
         return false;
       }
     }
@@ -366,6 +449,29 @@ public final class TransitionResolver {
       }
     }
     return true;
+  }
+
+  /**
+   * Whether an evaluation of a candidate's confirmation still stands: it {@linkplain #standing
+   * stands} as an answer would, and it was made under the user policy version in force. After a
+   * version is set, an earlier evaluation neither takes effect nor holds the candidate back; the
+   * re-evaluation, or any commit that reaches the candidate first, evaluates it again.
+   */
+  private boolean standingEvaluation(
+      FactSlice slice, Set<String> premises, FactRecord.Evaluation evaluation) {
+    return standing(slice.record(), premises, evaluation.at())
+        && evaluation.under(policy().logRecord());
+  }
+
+  /**
+   * The evaluation of a confirmed Fact's open retirement proposal that still stands: made after the
+   * proposal and under the user policy version in force.
+   */
+  private Optional<FactRecord.Evaluation> standingRetireEvaluation(
+      FactRecord record, LogPosition proposal) {
+    return record
+        .latestEvaluation(Transition.RETIRE)
+        .filter(e -> after(e.at(), proposal) && e.under(policy().logRecord()));
   }
 
   private record PositionedAnswer(LogPosition at, LogRecord.Answer answer) {}

@@ -480,6 +480,14 @@ public final class Projector {
     }
   }
 
+  /** The log record of the user policy version in force. */
+  private String policyInForce() {
+    return projection
+        .policyInForce()
+        .orElseThrow(() -> reject("Domain " + domain + " has no user policy version"))
+        .logRecord();
+  }
+
   /**
    * Requires every premise dependency of a candidate to be confirmed: a candidate is neither
    * evaluated for confirmation nor confirmed before then.
@@ -506,7 +514,8 @@ public final class Projector {
     for (var premise : premises(slice, slice.record().factDependencies())) {
       var premiseRecord = requireFact(Ref.urn(premise)).record();
       if (!premiseRecord.is(FactState.CONFIRMED)
-          && !(premiseRecord.is(FactState.CANDIDATE) && premiseRecord.awaitingConsent())) {
+          && !(premiseRecord.is(FactState.CANDIDATE)
+              && premiseRecord.awaitingConsent(policyInForce()))) {
         throw reject(
             "Fact "
                 + slice.row().fact()
