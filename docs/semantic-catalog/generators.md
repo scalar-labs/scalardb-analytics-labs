@@ -20,8 +20,8 @@ Generators.
 records why.
 
 Generators fall into three **input routes** by what they mainly read. The routes differ in how they
-read and in the conditions for passing input to an external model. Whether `auto` can confirm a
-candidate depends on the validation methods of its checks, never on its route.
+read and in the conditions for passing input to an external model. Whether `auto` adopts a
+candidate inline depends on the validation methods of its checks, never on its route.
 
 | Route | Reads | Determinism | Main validation methods |
 | --- | --- | --- | --- |
@@ -36,7 +36,6 @@ candidate depends on the validation methods of its checks, never on its route.
 | Schema interpretation | Uniqueness declaration ingestion | Uniqueness of a Field set |
 | Schema interpretation | Correspondence from foreign key | Existence of an identifier correspondence and its business definition; support for the containment of the referencing side in its set relationship |
 | Schema interpretation | Value kind from source type | Time-or-date and boolean value kinds |
-| Schema interpretation | Column rename inference | Moving a technical reference to a new column; after rejection, retirement of the old Field and a Field for the new column |
 | Data checks | Uniqueness check | Uniqueness of a Field set |
 | Data checks | Candidate key discovery | Uniqueness, and a key for a Dataset without a primary key |
 | Data checks | Inclusion discovery | Existence of an undeclared identifier correspondence |
@@ -72,9 +71,8 @@ Revision, so a candidate built from a derived record could not track changes.
 
 **Validation capability.** Each Generator declares which validation items of which predicates it can
 examine with which validation methods; the tables in this document are those declarations. A
-Generator being deterministic is separate from its methods being deterministic. Column rename
-inference and inclusion discovery always give the same output for the same input, yet their
-candidates are `inference`.
+Generator being deterministic is separate from its methods being deterministic. Inclusion discovery
+always gives the same output for the same input, yet its candidates are `inference`.
 
 **Version.** Provenance records the Generator and its version. Any configuration change that can
 change output for the same input makes a new version, and for model-based Generators the version
@@ -91,8 +89,13 @@ provenance.
 
 An answer is an input read, referenced by its log record. It is neither a dependency, because it
 never changes, nor a check reference, so a deciding party's wording never counts as support for a
-new candidate. A candidate made from a correction therefore needs consent under `auto`, and the
+new candidate. A candidate made from a correction is therefore never adopted inline, and the
 original correction can be traced and shown from its inputs read.
+
+A Generator that proposes a new Concept, Measure, Dimension, or business term gives it a slug, a
+short business name from which its URN is built, and is given the slugs in use so it avoids them
+(see [`record-model.md`](record-model.md#identity-and-urns)). These Generators always call a
+model, so the slug is the model's choice.
 
 When a candidate targets a Fact Address that has a selected Fact, the Generator reads that Fact and
 depends on it, so its candidate replaces the selection once confirmed.
@@ -126,7 +129,6 @@ metadata marks as missing are not treated as disappeared.
 | Uniqueness declaration ingestion | Primary keys; unique constraints and unique indexes on non-null columns | Same; a unique index is `declared-enforced` |
 | Correspondence from foreign key | Foreign key | Same, except as noted for string columns |
 | Value kind from source type | Date, time, and boolean types | `declared-enforced` |
-| Column rename inference | A column disappeared and one of the same source type was added to the table | `inference` for the move; `declared-enforced` for the retirement and new Field |
 
 When the table metadata does not say whether the source enforces a constraint, it is
 `declared-unenforced`. Treating an enforced constraint as unenforced costs only a data check, while
@@ -142,7 +144,7 @@ proposes its business definition with `declared-enforced`. An unenforced key giv
 `declared-unenforced`. A foreign key on string columns leaves the matching condition's validation
 item undecidable unless equality under the column's collation is known to match byte comparison,
 because a key can reference a row that an equality comparison does not match. Such correspondences
-need consent under `auto`.
+are never adopted inline.
 
 A foreign key on non-null columns also declares that every referencing value appears on the
 referenced side, which is one validation item of the set relationship, so the Generator supports
@@ -152,10 +154,10 @@ referencing side repeats; the uniqueness check observes that. With both, an enfo
 referenced side has unreferenced rows yields `subset` by machine judgement under `auto`.
 
 Under the default policy, existence, technical references, value kinds, enforced constraints, and
-correspondences from enforced foreign keys are confirmed by machine judgement. Uniqueness from an
-unenforced declaration is confirmed once the uniqueness check supports the same Fact. Keys and
-correspondences from unenforced declarations need consent, because the absence of duplicates does
-not show that a set is a business identifier.
+correspondences from enforced foreign keys are adopted inline. Uniqueness from an unenforced
+declaration is adopted inline once the uniqueness check supports the same Fact. Keys and
+correspondences from unenforced declarations go to the judging model, because the absence of
+duplicates does not show that a set is a business identifier.
 
 ## Data checks
 
@@ -185,8 +187,8 @@ less than a whole table:
 
 | Result | Example | Rests on | Under `auto` |
 | --- | --- | --- | --- |
-| Loosens what the data may hold | A Field set repeats; some values on one side have no match | A counterexample, which a sample shows as surely as a whole table as long as the other side is looked up whole | Confirmed by machine judgement |
-| Restricts what the data may hold | A Field set does not repeat; every value on one side has a match | No counterexample found | Confirmed by machine judgement only when a declaration also supports it; otherwise needs consent, with the range read shown |
+| Loosens what the data may hold | A Field set repeats; some values on one side have no match | A counterexample, which a sample shows as surely as a whole table as long as the other side is looked up whole | Adopted inline |
+| Restricts what the data may hold | A Field set does not repeat; every value on one side has a match | No counterexample found | Adopted inline only when a declaration also supports it; otherwise the judging model decides, with the range read in view |
 
 [`construction.md`](construction.md#choosing-the-confirmation-path) gives the rule and its reason.
 
@@ -214,8 +216,8 @@ Meaning inference uses a model for predicates that declarations and data cannot 
 element it passes names and types, confirmed Facts, relevant document parts, feedback, and permitted
 data statistics, and asks for predicate values with what supports them. An item that cites a
 registered document is `document`, with a quotation the Generator verifies against the document;
-anything else is `inference`. Neither is deterministic, so every meaning-inference candidate needs
-consent under `auto`.
+anything else is `inference`, with the basis the model stated. Neither is deterministic, so no
+meaning-inference candidate is adopted inline; under `auto` the judging model decides each.
 
 | Generator | Triggered by |
 | --- | --- |
@@ -245,11 +247,12 @@ Undeclared identifier correspondences are central to combining sources. Identifi
 inference proposes, for example, that e-commerce customers and POS members correspond through the
 e-mail address given at registration, compared after lower-casing because the two systems store it
 in different case. Once its existence is confirmed, the set relationship check examines it. Its
-business definition cannot be checked against data and needs consent as a separate candidate.
+business definition cannot be checked against data and is judged as a separate candidate.
 
 Currency, code meanings, tax treatment, and the posting date of sales rarely have support in data or
 declarations. Without documents, meaning inference can offer only `inference`, and the deciding
-party's judgement becomes the main source.
+party's judgement becomes the main source: a tax treatment that only a column name suggests is a
+signal too weak for the judging model to adopt alone.
 
 Correction interpretation gives the model the feedback's content and context and the related Facts'
 content, and asks for a revised value or applicability scope for the same element and predicate. Its
@@ -266,14 +269,15 @@ correction.
 input the confirmation of what an earlier one produces. When the e-commerce database is registered:
 
 1. The physical schema observation triggers table and column ingestion, whose existence and
-   technical-reference candidates are confirmed by machine judgement.
+   technical-reference candidates are adopted inline.
 2. Confirmed existence triggers key from primary key, uniqueness declaration ingestion,
    correspondence from foreign key, the uniqueness check, inclusion discovery, and row and Field
    meaning inference.
 3. If the table metadata does not say whether the primary key is enforced, the uniqueness check
-   supports the declared uniqueness with `data-check` and it is confirmed, while the key waits for
-   consent.
-4. Row and Field meaning candidates wait for consent.
+   supports the declared uniqueness with `data-check` and it is adopted inline, while the key goes
+   to the judging model.
+4. Row and Field meaning candidates go to the judging model, which adopts them or sends them to
+   the deciding party.
 
 Registering the POS database repeats this, after which identifier correspondence inference proposes
 the customer-to-member correspondence. Declaring confirmed existence as input avoids producing
@@ -307,9 +311,9 @@ conditions below. Input that does not is left out and recorded as missing.
 
 Meaning inference creates new elements only from specific inputs. Concepts come from confirmed
 represented concepts, documents, and feedback. Measures, Dimensions, and business terms come from
-documents and feedback. Datasets and Fields come only from table
-and column ingestion and column rename inference. Creating Measures from confirmed Facts alone would
-let each confirmation trigger another inference and grow elements without bound.
+documents and feedback. Datasets and Fields come only from table and column ingestion. Creating
+Measures from confirmed Facts alone would let each confirmation trigger another inference and grow
+elements without bound.
 
 **Why construction stops.** Build tasks arise only from observations, confirmations, answers,
 changes in selection, impact judgements, and policy versions. Deterministic Generators reproduce
@@ -327,22 +331,25 @@ deciding party varies with data and person.
 
 ## Column changes
 
-When a column disappears from a physical schema observation:
+A column that disappears from a physical schema observation is retired, and a column that appears
+is a new Field, whether or not the two are a rename:
 
 | Observation | Candidates | Path under the default policy |
 | --- | --- | --- |
-| A column disappeared | Retirement of that Field's existence (`declared-enforced`) | Machine judgement |
-| A column disappeared and one of the same source type appeared in the table | No retirement and no new Field from ingestion; rename inference proposes moving the technical reference (`inference`) | Consent |
-| That move was rejected | Rename inference proposes retiring the old Field and a Field for the new column | Machine judgement |
+| A column disappeared | Retirement of that Field's existence (`declared-enforced`) | Adopted inline |
+| A column appeared | Existence and technical reference of a new Field (`declared-enforced`) | Adopted inline |
 
-While the move waits, the old Field stays selected and the Query Agent sees that its input has a
-newer observation. No predicate represents a rename; it is a replacement of the technical reference,
-the same form a Dataset uses for a renamed table.
+Names cannot tell a rename from a drop and an add, and an element's URN is built from its name, so
+no Generator judges renames. The retirement cascades to the Facts that rest on the old Field, and
+their Generators propose them again on the new premise (see
+[`construction.md`](construction.md#following-input-changes)). No predicate represents a rename,
+and a technical reference never moves; a renamed table likewise becomes a new Dataset.
 
 ## Reaching a language model
 
-Meaning inference, impact judgement, and the duplicate check call a language model through an
-**adapter**, the only part of the Semantic Catalog that knows how a model is reached. A Generator
+Meaning inference, impact judgement, the duplicate check, and the judging model (see
+[`construction.md`](construction.md#choosing-the-confirmation-path)) call a language model through
+an **adapter**, the only part of the Semantic Catalog that knows how a model is reached. A Generator
 passes a prompt and receives the model's answer; it never depends on a particular provider, so the
 provider can change without changing a Generator.
 
@@ -364,9 +371,9 @@ An unavailable model fails the build task, which can be resumed.
 
 ## Input passed to external models
 
-Meaning inference, impact judgement, and the duplicate check may send input to an external model
-through the adapter. Usage feedback and data values reach a model only as far as the domain's
-settings allow:
+Meaning inference, impact judgement, the duplicate check, and the judging model may send input to
+an external model through the adapter. Usage feedback and data values reach a model only as far as
+the domain's settings allow:
 
 | Input | Content | Default |
 | --- | --- | --- |

@@ -26,9 +26,11 @@ The **business domain model**, the concepts such as customer and order and the r
 them, is data semantics and lives in the Semantic Catalog. Each domain holds only as much of it as
 it needs, and no unmanaged business domain model is kept elsewhere.
 
-A Dataset is the logical object meaning is given to, not a table. It holds a **technical reference**
-to the Physical Catalog table its data comes from, so a table rename is handled as a change of
-reference rather than a change of meaning. One technical-reference Fact points to one table.
+A Dataset is the logical object meaning is given to. It holds a **technical reference** to the
+Physical Catalog table its data comes from, and a Field holds one to its column. One
+technical-reference Fact points to one table or column and never moves to another: a renamed table
+or column becomes a new element, as a renamed table gets a new resource identifier in the Physical
+Catalog (see [Identity and URNs](#identity-and-urns)).
 
 ## Elements and predicates
 
@@ -87,10 +89,21 @@ Some values deserve note:
 - A Field's **value kind** is identifier, classification, amount, quantity, time or date, string, or
   boolean. It is separate from the physical type and tells Generators which further predicates to
   pursue.
-- A Measure's **aggregation rule** is an aggregate function over a value expression on its base
-  Dataset's Fields. A period that changes per question belongs to the question, not to the Measure.
-  Its default time granularity refers to a level of a calendar Dimension, because "monthly" may mean
-  calendar or fiscal month.
+- A Measure's **aggregation rule** is an aggregate function, chosen from a closed list, over a value
+  expression on its base Dataset's Fields. A period that changes per question belongs to the
+  question, not to the Measure. Its default time granularity refers to a level of a calendar
+  Dimension, because "monthly" may mean calendar or fiscal month.
+- **Expression values**, the value expression of an aggregation rule, a Measure's filter
+  conditions, and a Dimension's classification expression, are SQL expression strings in the Query
+  Engine's dialect over the column names of the base Dataset's table, such as
+  `status <> 'cancelled'`. The string is the reference representation of the definition: the
+  product's Query Engine runs it as written, and running it on another engine means translating
+  it. At acceptance the Semantic Catalog parses it with the Query Engine's parser and adds the
+  Fields it references as premise dependencies, so a column that disappears cascades to the
+  definitions that use it. An expression that does not parse or names a missing column is not
+  accepted.
+  [`../design/semantic-catalog-expression-values.md`](../design/semantic-catalog-expression-values.md)
+  records why.
 - An identifier correspondence's **set relationship** is equal, subset, partial overlap, or
   disjoint. Without it, nobody can tell whether an inner join drops members who appear on one side
   only.
@@ -158,32 +171,53 @@ written content cannot be erased.
 Every record is referred to by a URN of the form
 `urn:scalardb:analytics:<domain>:<record kind>:<identifier>`. The namespace spells out the product
 name, because the product defines no abbreviation of it. The Semantic Catalog issues URNs when it
-creates records. A URN is unique, never changes, is
-never reused, and carries none of the record's content. Content-based names would break references
-on correction and merge distinct objects that share a name, and the business identity they would
-presuppose is what construction is meant to establish. The domain comes first after the namespace
-so that cross-domain references can use the same form.
+creates records. A URN is unique, never changes, and is never reused. The domain comes first after
+the namespace so that cross-domain references can use the same form.
 
-| Record | Identifier | A new one appears |
+The identifier is built so that a person reading a URN can tell roughly what it names. Most of what
+a catalog holds is about tables and columns, and opaque numbers would make every review item,
+citation, and log entry unreadable without a lookup. The form is a construction choice, not a
+contract. Callers never parse a URN, programs read exact names from Facts such as technical
+references and written forms, and the form of newly issued URNs may change. The text of a URN is
+never knowledge either: meaning is read only from Facts.
+[`../design/semantic-catalog-urn-form.md`](../design/semantic-catalog-urn-form.md) records why.
+
+| Record | Identifier, for example | A new one appears |
 | --- | --- | --- |
-| Catalog Snapshot | Domain and commit number | At each commit |
+| Catalog Snapshot | Commit number | At each commit |
 | Log record | Commit number and order within the commit | For each record |
-| Fact Revision | Fact URN and the Fact Event that produced it | Each time a Fact Event applies |
-| Node element | Issued value | When a Fact stating its existence is first accepted |
-| Edge element, Fact Address, Fact | Issued value | When no existing one is the same under the rules below |
-| Input Resource, Input Observation | Issued value | On a new source, on each observation |
-| Build task | Issued value | For each build task |
+| Dataset | Data-source registration, namespace, and table name: `dataset:shop.public.orders` | When a Fact stating its existence is first accepted |
+| Field | Its table's identifier and the column name: `field:shop.public.orders.amount` | When a Fact stating its existence is first accepted |
+| Concept, Measure, Dimension, business term | A slug the proposing Generator gives: `measure:ec-sales` | When a Fact stating its existence is first accepted |
+| Edge element | Its kind and the identifiers of its ends | When no existing one is the same under the rules below |
+| Fact Address | Its element's identifier and predicate: `…orders.amount/meaning` | When no existing one is the same under the rules below |
+| Fact | Its Fact Address's identifier and a sequence number | When no existing one is the same under the rules below |
+| Fact Revision | Fact URN and the position of the Fact Event that produced it | Each time a Fact Event applies |
+| Input Resource, Input Observation, build task | Issued value | On a new source, on each observation, for each build task |
+
+Where an identifier built this way is already taken, as for two edges between the same ends with
+different identifying parts, or a Fact Address with a non-empty applicability scope, a sequence
+number is appended. Characters a URN cannot carry as written are percent-encoded.
+
+A slug is a short business name such as `ec-sales`, never a definitional attribute such as tax
+treatment, because a slug stays as issued. The proposing Generator, which for these kinds always
+calls a model, is given the slugs in use and avoids them. The Semantic Catalog guarantees uniqueness
+at acceptance, inside the serialized write, by appending a sequence number.
 
 Sameness is decided by rules per kind, never from URNs. Meaning is fuzzy, so mechanical decisions
 are limited to cases that are easy to identify:
 
 - **Datasets and Fields** are the same element when their technical-reference Facts that are neither
-  rejected nor retired point to the same physical object. Replacing the technical reference keeps
-  the element through a column rename. A column dropped and re-added under the same name is the same
-  Field, because observations cannot tell them apart.
+  rejected nor retired point to the same physical object. A renamed table or column is another
+  physical object and so a new element; a URN built from the old name would otherwise misname it,
+  and names cannot tell a rename from a drop and an add anyway. A column dropped and re-added under
+  the same name is the same Field, because observations cannot tell them apart.
 - **Concepts, Measures, Dimensions, and business terms** are the same element only when the proposer
-  points to the existing one. Two concepts later found to denote the same object are linked by a
-  concept-relationship edge, which a deciding party or a document must support.
+  points to the existing one, never because their slugs match. Two concepts later found to denote
+  the same object are linked by a concept-relationship edge, which a deciding party or a document
+  must support. A correction that contradicts what an element's slug itself says is proposed as a
+  new element with a retirement proposal for the old one; any other correction replaces values on
+  the same element.
 - **Edges** are the same when kind, ends, direction, and identifying part match; undirected edges
   ignore the order of their ends. Two Generators proposing the same correspondence therefore produce
   one edge.
@@ -212,7 +246,7 @@ other.
 | --- | --- | --- |
 | `accept` | One Fact | Inputs read, dependency references, validation result, provenance (Generator, version, build task) |
 | `propose-retire` | One Fact | Reason (element no longer exists, source declaration no longer exists, or confirmation was wrong), inputs read, validation result, provenance |
-| `evaluate-policy` | One Fact | Policy version, what is evaluated (confirmation or retirement), result (machine judgement or request consent), deciding party, reason |
+| `evaluate-policy` | One Fact | Policy version, what is evaluated (confirmation or retirement), result (machine judgement or request consent), deciding party, reason; for a judgement by the judging model, its version and, when it requests consent, the review material it built |
 | `answer` | One Fact | What is answered, answer type (consent, rejection, correction, unknown), deciding party, authority-check reference, wording, review presentation |
 | `confirm` | One Fact | Path (machine judgement or human consent) and the policy evaluation or answer it rests on |
 | `reject` | One Fact | The answer it rests on, or the rejection or retirement of a Fact it depends on |
@@ -234,9 +268,15 @@ The state of a Fact Record is defined by which Fact Events it accepts next:
 | State | Meaning | Accepts |
 | --- | --- | --- |
 | `candidate` | Accepted but not confirmed | `accept`, `propose-retire`, `evaluate-policy`, `answer`, `confirm`, `reject` |
-| `confirmed` | Confirmed knowledge | `accept`, `propose-retire`, `evaluate-policy`, `answer`, `retire` |
-| `rejected` | Judged not to be confirmed | `accept` with a new dependency reference (back to `candidate`), `answer` (no change) |
-| `retired` | Confirmed knowledge judged no longer usable | Same as `rejected` |
+| `confirmed` | Adopted as knowledge to use | `accept`, `propose-retire`, `evaluate-policy`, `answer`, `retire` |
+| `rejected` | Judged not to be adopted | `accept` with a new dependency reference (back to `candidate`), `answer` (no change) |
+| `retired` | Adopted knowledge judged no longer usable | Same as `rejected` |
+
+Confirmation means adoption, not proof. A Fact is confirmed when the deciding party consents, or
+when machine judgement under the user policy the organization chose adopts it. Either way the
+checks behind it are signals (see
+[Validation results and dependencies](#validation-results-and-dependencies)), and its confirmation
+path shows which kind of decision adopted it.
 
 Transitions need the events they rest on:
 
@@ -254,10 +294,14 @@ recorded without a transition; the candidate is judged again, from policy evalua
 A candidate's **current judgement** starts with the acceptance that made it a candidate, the first
 one or one that returned it from `rejected` or `retired`. Policy evaluations and answers made
 earlier belong to an earlier judgement, and none of them can be the basis of a transition. A
-candidate is evaluated for confirmation only when every premise dependency is `confirmed`. A
-confirmation, and a rejection resting on an answer, rest only on an evaluation or answer of the
-current judgement made after every premise dependency was last confirmed. A rejection resting on
-a retirement proposal needs a proposal made within the current judgement.
+candidate is evaluated for confirmation once every premise dependency is `confirmed` or is a
+candidate whose latest evaluation requested consent, so a candidate and the premises it waits on can
+reach the deciding party together. The confirmation itself still waits until every premise is
+`confirmed`. A confirmation, and a rejection resting on an answer, rest only on an evaluation or
+answer of the current judgement made after the current judgement of every premise dependency began;
+a premise that has since returned to `candidate` starts a new judgement of its own, and its
+dependents are evaluated again. A rejection resting on a retirement proposal needs a proposal made
+within the current judgement.
 
 Retirement covers both an element that no longer exists and a confirmation that was wrong; the
 reason and validation result say which. "No longer exists" is a change in treatment, not a value.
@@ -273,15 +317,24 @@ confirmation judgement and do not change selection.
 
 ## Validation results and dependencies
 
-A **validation result** records how far checks covered a predicate's **validation items**. For most
+A **validation result** records the checks made on a candidate. A check is a signal, not proof. It
+holds its validation method, the validation items it examined, a result of supported, refuted, or
+undecidable, a reference to the input it was checked against (an Input Observation or a Fact
+Revision), and its basis. A `document` check quotes the relevant source text. A `data-check`
+references a data observation, which records when it was read and whether it read the whole table
+or a sample. An `inference` check records the basis the model stated, because otherwise nothing
+about an inference survives for the deciding party to judge; it may have no reference.
+
+Even checks that all support a value show only that the evidence points to it. Data shows what held
+when it was read, usually in a sample; a declaration shows what the source states now; a document or
+a model's reading can be wrong. No predicate has a set of validation items known in advance to be
+sufficient for its value to hold, so no range is computed that would call the rest of a value
+confirmed. Where the parts of a value are known, its **validation items** name them. For most
 predicates the item is the value itself. An identifier correspondence's existence has one item per
 pair of corresponding Fields, per normalization step, and per intermediate step of its matching
 condition, and a Measure's aggregation rule has the aggregate function and the value expression.
-
-Each check holds its validation method, the items it covered, a result of supported, refuted, or
-undecidable, and a reference to the input it was checked against: an Input Observation or a Fact
-Revision. A `document` check quotes the relevant source text. An `inference` check may have no
-reference.
+Items that no supporting check examined are shown as information, never as the measure of whether a
+Fact holds.
 
 | Validation method | Meaning |
 | --- | --- |
@@ -292,18 +345,18 @@ reference.
 | `inference` | The Generator's inference, including from names or a model's prior knowledge |
 
 `declared-enforced` and `data-check` are the **deterministic validation methods**; a user policy
-version can add `declared-unenforced`. The range that could not be confirmed is computed as the
-items no supported check covers; Generators report coverage, never the unconfirmed range itself. A
-model's prior knowledge and name-based inference can produce candidates but are not validation. A
-human answer is never part of a validation result. Inputs read, validation results, and human
-consent are recorded separately and never substitute for one another.
+version can add `declared-unenforced`. They let machine judgement adopt a candidate without a model
+(see [`construction.md`](construction.md#choosing-the-confirmation-path)). A model's prior knowledge
+and name-based inference are the weakest signals: they can produce candidates, and their checks are
+always `inference`. A human answer is never part of a validation result. Inputs read, validation
+results, and human consent are recorded separately and never substitute for one another.
 
 A candidate answers three separate questions:
 
 | Question | Record | Content |
 | --- | --- | --- |
 | How was it produced? | Provenance | Generator and version, build task, and the inputs read |
-| How far was it checked? | Validation result | Each check's method, items, result, and reference |
+| What signals bear on it? | Validation result | Each check's method, items, result, reference, and basis |
 | What changes require re-examining it? | Dependency references | The Input Observations and Fact Revisions, at the versions read, whose changes are tracked |
 
 A dependency on an input names the Input Resource, used to find what a new observation affects, and

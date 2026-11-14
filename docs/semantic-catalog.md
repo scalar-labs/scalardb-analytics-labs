@@ -73,8 +73,10 @@ throughout a question, so later commits never change what it already read. See
 A **Generator** produces candidates, with validation results, from physical schemas, data checks,
 documents, existing knowledge, and feedback. A Generator goes no further than producing candidates.
 Each run is tracked as a **build task**. The **user policy** that the semantics owner sets decides
-whether an accepted candidate is confirmed by **machine judgement** or needs the deciding party's
-consent. See [`semantic-catalog/construction.md`](semantic-catalog/construction.md) and
+whether an accepted candidate is confirmed by **machine judgement**, inline on deterministic signals
+or by a separate judging model that weighs fuzzy ones, or needs the deciding party's consent. A
+confirmed Fact is adopted knowledge, not proven knowledge. See
+[`semantic-catalog/construction.md`](semantic-catalog/construction.md) and
 [`semantic-catalog/generators.md`](semantic-catalog/generators.md).
 
 ## Responsibilities and boundaries
@@ -94,12 +96,13 @@ The surrounding components keep the following responsibilities:
   source-declared part as its input and holds the connector-derived part only as a side record. A
   Dataset reaches a queryable table through a technical reference to a Physical Catalog table, never
   through a table name. See [`physical-catalog.md`](physical-catalog.md).
-- **Application.** It decides when build tasks run and how many run at once, because it owns
-  startup, shutdown, and resource release as one lifecycle. It provides the Semantic Catalog with
-  SQL execution for data checks, bounded by sampling and limits, name resolution from a Physical
-  Catalog table to its current name, and re-retrieval of table metadata. It authenticates callers,
-  issues the authority-check reference after checking that a person is a semantics owner, creates
-  the domain at `workspace init`, and keeps the domain's settings in the workspace configuration.
+- **Application.** It decides when build tasks run, one process per domain at a time, because it
+  owns startup, shutdown, and resource release as one lifecycle. It provides the Semantic Catalog
+  with SQL execution for data checks, bounded by sampling and limits, name resolution from a
+  Physical Catalog table to its current name, and re-retrieval of table metadata. It authenticates
+  callers, issues the authority-check reference after checking that a person is a semantics owner,
+  creates the domain at `workspace init`, and keeps the domain's settings in the workspace
+  configuration.
   See [`application.md`](application.md). It calls the Semantic Catalog only through the public API
   in [`semantic-catalog/public-api.md`](semantic-catalog/public-api.md).
 - **Query Agent.** Its model, knowledge discovery, SQL generation, and result interpretation are
@@ -132,9 +135,9 @@ register observation ---> build tasks ---> Generators (outside the writer)
                                                  v
                                   duplicate check, acceptance as candidates
                                                  |
-                       user policy evaluation (once dependencies are confirmed)
+        user policy evaluation (once dependencies are confirmed or awaiting consent)
                            |                                  |
-                  machine judgement                 review by deciding party
+         machine judgement: inline or judging model   review by deciding party
                            |                                  |
                            +-------------> confirmed <--------+
                                                |
@@ -150,15 +153,17 @@ register observation ---> build tasks ---> Generators (outside the writer)
    observation creates build tasks for the Generators that read it.
 2. Generators produce candidates. The Semantic Catalog accepts them as candidate Facts after the
    duplicate check, in one commit per run.
-3. Once every Fact a candidate depends on is confirmed, the user policy decides its path. Candidates
-   the policy confirms by machine judgement are confirmed in the same commit; the others wait for
-   the deciding party, who consents, rejects, corrects, or answers unknown.
+3. Once every Fact a candidate depends on is confirmed or awaiting consent, the user policy decides
+   its path. Candidates that deterministic signals cover are adopted in the same commit; under
+   `auto` the judging model decides the others in its own build task, adopting them or preparing
+   review material for the deciding party, who consents, rejects, corrects, or answers unknown.
 4. Each confirmation produces new build tasks for the Generators that build on it. For example,
    confirming that a Dataset exists starts key, uniqueness, row-meaning, and field-meaning
    Generators.
-5. The Query Agent fixes a Catalog Snapshot, finds elements, and requests knowledge. For each
-   request it receives the selected Fact with its validation results, provenance, and confirmation
-   path, or a status of missing knowledge, awaiting judgement, or conflict.
+5. The Query Agent fixes a Catalog Snapshot, reads along the hierarchy of data sources and tables
+   or finds elements, and requests knowledge. For each request it receives the selected Fact with
+   its validation results, provenance, and confirmation path, or a status of missing knowledge,
+   awaiting judgement, or conflict.
 6. Missing knowledge, other statements from use, and corrections are registered as usage feedback
    and start the next round. A user who is the deciding party can confirm on the spot; other users
    wait, or explicitly accept a result marked as based on unconfirmed knowledge.
@@ -169,3 +174,7 @@ register observation ---> build tasks ---> Generators (outside the writer)
 - [`design/semantic-catalog-write-serialization.md`](design/semantic-catalog-write-serialization.md)
 - [`design/semantic-catalog-generator-granularity.md`](design/semantic-catalog-generator-granularity.md)
 - [`design/semantic-catalog-default-user-policy.md`](design/semantic-catalog-default-user-policy.md)
+- [`design/semantic-catalog-machine-judgement.md`](design/semantic-catalog-machine-judgement.md)
+- [`design/semantic-catalog-premise-review.md`](design/semantic-catalog-premise-review.md)
+- [`design/semantic-catalog-urn-form.md`](design/semantic-catalog-urn-form.md)
+- [`design/semantic-catalog-expression-values.md`](design/semantic-catalog-expression-values.md)

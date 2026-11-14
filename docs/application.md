@@ -95,7 +95,8 @@ and persistence formats.
   the runtime, opens the workspace, and runs every component in the process. A one-shot operation
   waits until it completes, reaches a persisted state awaiting a review decision, or fails
   explicitly, and then stops the runtime and exits. Construction state persists in the workspace, so
-  a later invocation can review, decide, and resume without a long-running process.
+  a later invocation can review, decide, and resume without a long-running process. The one
+  exception is the watching mode of running build tasks below, which runs until interrupted.
 - **[Planned]** **Local workspace** keeps one foreground process with the workspace open and exposes
   REST, gRPC, and Flight SQL on loopback, for the Web UI and external SQL clients. It is not a
   remote or multi-user server.
@@ -121,6 +122,23 @@ their status, candidate review, decisions, corrections, and feedback as automata
 machine-readable operations. The Web UI lets a person compare candidates, validation results,
 conflicts, applicability, and impact before deciding. It owns no state transitions or decision rules
 of its own.
+
+**[Planned]** Running Semantic Catalog build tasks has two modes:
+
+- By default, it runs the domain's created build tasks, including those created while it runs, until
+  none remain, and exits. Scripts and CI use this mode.
+- A watching mode runs with no timeout until interrupted, picking up build tasks as answers and
+  observations from other processes create them. An agent reviewing with the semantics owner keeps
+  one running in the background. The first interrupt stops it after the current build task; a
+  second stops it at once, and the task left `running` returns to `created` when the next run
+  starts.
+
+Both print one event line per finished build task, with its result and the number of items awaiting
+review. Only one process runs a domain's build tasks at a time; a second attempt fails at once with
+a product error saying so, while answers, reads, and other operations proceed (see
+[`semantic-catalog/construction.md`](semantic-catalog/construction.md#build-tasks)). A watching run
+outlives changes that other processes write to the Physical Catalog, so each build task it runs uses
+the name resolution and table metadata current when that task starts.
 
 ## Callers and authority
 
@@ -172,6 +190,37 @@ discovery, how to read Fact states, how to proceed on missing knowledge or a con
 the spot, run with unconfirmed knowledge only when the user explicitly asks, or stop), and how to
 report feedback after use. It does not cover the agent's model, provider, question-specific
 planning, or SQL-generation prompt.
+
+**[Planned]** Agent Skill v1 covers two workflows:
+
+- **Building and reviewing with the semantics owner.** The agent starts a watching build in the
+  background if none is running and reads the review list as items appear, telling new items from
+  those it has seen by URN or by the commit each carries. It presents the review material the
+  Semantic Catalog built, per table: items likely to follow the suggestion one line each, with
+  consent to them accepted together, and items that need judgement one by one. It records each
+  presentation, submits the owner's answers, and presents again anything shown but unanswered. It
+  is done when nothing awaits review and no build task is created or running. It neither gathers
+  its own evidence nor triages; the judging model did both when it built the material (see
+  [`semantic-catalog/construction.md`](semantic-catalog/construction.md#review)).
+- **Answering a question.** The agent fixes one Catalog Snapshot for the question and reads along
+  the hierarchy, recursively from the root while the catalog is small. On knowledge awaiting
+  judgement it has the owner review it on the spot or, only when the user explicitly asks, proceeds
+  with the unconfirmed knowledge and says so; on a conflict an owner chooses; on missing knowledge
+  it registers usage feedback. It composes SQL only from confirmed knowledge and cites the Fact
+  Revisions and Catalog Snapshot it used.
+
+In both, only the owner's answer consents. The agent never answers for the owner, and stops at a
+consent when the user is not one (see [Callers and authority](#callers-and-authority)).
+
+**[Planned]** The first distribution of the Agent Skill for an agent host is a Claude Code plugin in
+the distribution. A user starts Claude Code with the plugin directory (`claude --plugin-dir`), and
+the plugin bundles Agent Skill v1, the slash commands `setup`, `build`, `ask`, and `status`, and a
+wrapper that only locates the distribution's CLI; the CLI itself reads the workspace from an
+environment variable. Claude Code wakes an agent whose turn has ended only on a notification, so
+`build` runs the watching build under Claude Code's `Monitor` tool, and its event that review items
+are ready wakes the agent. Only when another process already runs the domain's build tasks does the
+agent read the review list at an interval instead. The plugin is a way to deliver the Agent Skill,
+not an agent the product owns.
 
 ## Table metadata retrieval
 

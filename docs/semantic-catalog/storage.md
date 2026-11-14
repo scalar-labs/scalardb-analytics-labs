@@ -73,7 +73,8 @@ Running a build task never holds a transaction while a Generator runs:
 The output was produced from the state at the start of step 2, so step 3 reconciles it with the
 current state inside the recording transaction:
 
-- It replaces temporary numbers with issued URNs.
+- It replaces temporary numbers with issued URNs, appending a sequence number to a slug or another
+  name-based identifier already taken.
 - It matches edges, empty-scope Fact Addresses, and closed-range Facts, including those just written
   by concurrent Generators.
 - It finds Datasets and Fields by technical reference. Unique constraints cannot express this
@@ -83,7 +84,8 @@ current state inside the recording transaction:
 - It runs the consistency check, which fails the task and writes nothing when it finds a dependency
   cycle or a missing reference.
 
-If the process stops during step 2, the task stays `running`.
+If the process stops during step 2, the task stays `running` until the next process that runs the
+domain's build tasks returns it to `created`.
 
 A read runs in one `REPEATABLE READ` transaction, so its result does not change if a commit lands
 during it, and it neither blocks nor collides with writes. "Latest" means the last commit visible to
@@ -92,18 +94,22 @@ replays the log.
 
 ## Identifiers
 
-URNs of logged records come from the position of the log record that created them:
+URNs of elements, Fact Addresses, and Facts are built from names, as
+[`record-model.md`](record-model.md#identity-and-urns) explains; the others come from the position
+of the log record that created them:
 
 | Record | Identifier |
 | --- | --- |
-| Element, Fact Address, Fact, Input Observation | Commit number and order within the commit of the creating record |
+| Element, Fact Address, Fact | Name-based, with a sequence number appended when the identifier is taken |
+| Input Observation | Commit number and order within the commit of the creating record |
 | Input Resource | Position of the record that first observed it |
 | Fact Revision | Fact URN plus the commit number and order of the producing Fact Event |
 | Catalog Snapshot | Commit number |
 | Build task, review presentation record | A number increasing within the domain |
 
 Log positions are unique, never reused, and reproduced exactly when the log is replayed from empty,
-as long as log records are never deleted and the domain is never recreated. Generator output refers
+as long as log records are never deleted and the domain is never recreated. Sequence numbers for
+taken identifiers are assigned in log order, so replay reproduces name-based URNs too. Generator output refers
 to records not yet written by temporary numbers.
 
 ## Tables

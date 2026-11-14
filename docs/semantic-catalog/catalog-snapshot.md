@@ -26,7 +26,7 @@ A confirmed Fact is **presentable** from the commit at which it became `confirme
 before it became `retired`. A retired Fact can return to `candidate` with a new dependency reference
 and be confirmed again, so a Fact can have several presentable periods.
 
-Two invariants keep this simple. A candidate is evaluated only after every premise dependency is
+Two invariants keep this simple. A candidate is confirmed only once every premise dependency is
 confirmed, so the premises of a confirmed Fact are always confirmed. When a Fact is retired, every
 confirmed Fact that has it as a premise is retired in the same commit, so knowledge never stays
 presented without its premise. Retirement propagates per Fact; a Fact that only replaced the retired
@@ -93,10 +93,11 @@ it but remain retrievable as material for judgement.
 
 ## What the Query Agent receives
 
-The Query Agent requests knowledge as pairs of a target element and a predicate (see
-[`public-api.md`](public-api.md#requesting-knowledge)). For every Fact Address of the requested
-predicate on that element, whatever its applicability scope, the Semantic Catalog returns either the
-selected Fact or a status.
+The Query Agent requests knowledge as pairs of a target element and a predicate, or all predicates
+of an element, directly or by reading along the hierarchy of data sources and tables (see
+[`public-api.md`](public-api.md#reads)). For every Fact Address of the requested predicate on that
+element, whatever its applicability scope, the Semantic Catalog returns either the selected Fact or
+a status.
 
 When a Fact is selected and there is no conflict, the Fact is returned without a status, with any
 `candidate` Facts at the same Fact Address attached as new candidates. Otherwise one status applies,
@@ -105,8 +106,8 @@ judged in this order:
 | Status | Condition | Judgement material |
 | --- | --- | --- |
 | Conflict | Two or more eligible Facts | Each eligible Fact, and the selected Fact if any, which two replacements confirmed at once can leave outside the eligible Facts |
-| Awaiting judgement | No eligible Fact, but `candidate` Facts exist, including those waiting for their dependencies | Each candidate, and whether it awaits consent or awaits its dependencies |
-| Missing knowledge | Neither an eligible nor a `candidate` Fact, including when only rejected or retired Facts exist | The rejected and retired Facts, if any |
+| Awaiting judgement | No eligible Fact, but `candidate` Facts exist, including those waiting for their dependencies | Each candidate, and whether it awaits evaluation, consent, or its dependencies |
+| Missing knowledge | Neither an eligible nor a `candidate` Fact, including when only rejected or retired Facts exist | The rejected and retired Facts, if any, with the answers given to them |
 
 Facts that differ only in applicability scope are separate Fact Addresses and are not a conflict.
 The Semantic Catalog does not narrow them to one. When the question names entities, it reports for
@@ -114,14 +115,16 @@ each Fact Address whether the applicability scope overlaps them, does not overla
 unrestricted, and the Query Agent decides which to use in light of the question's intent, asking the
 user when unsure.
 
-For each returned Fact the Query Agent can see its state, validation results and the range that
-could not be confirmed, the deciding party when a person consented, the confirmation path and user
-policy version, the applicability scope and dependencies, and whether new candidates exist. It can
+For each returned Fact the Query Agent can see its state; its checks as signals, with their bases
+and the content of what they reference; the deciding party when a person consented; the
+confirmation path, inline machine judgement, the judging model, or consent, and the user policy
+version; the applicability scope and dependencies, with rejected or retired Facts among its inputs
+and their answers; and whether new candidates exist. It can
 also see when the Fact was last confirmed or checked: the commit of its latest confirmation or
 additional acceptance. An unchanged re-check records nothing, so this value can make knowledge look
 older than it is, never newer. It also sees whether any input the Fact depends on has an observation
-newer than the one depended on, up to the commit read. Nothing is presented as confirmed beyond what
-the validation result supports.
+newer than the one depended on, up to the commit read. Confirmed means adopted, not proven, and
+nothing is presented as more certain than its signals and confirmation path show.
 
 The Query Agent may compose and run a query with **unconfirmed knowledge**, meaning candidates,
 answers from a user who is not a deciding party, or its own assumptions, only when the user

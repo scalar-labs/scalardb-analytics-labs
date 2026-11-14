@@ -16,17 +16,17 @@ Every call targets one domain, named by an identifier the application supplies a
 Catalog treats as opaque.
 
 The application calls these operations: registering an observation, submitting answers, resolving a
-conflict, setting a user policy version, running a build task, resuming a build task, and
-registering a review presentation. Recording a Generator's results and policy re-evaluation run only
-inside a build task and are not exposed. The Semantic Catalog owns Generator output and the versions
-that produced it, and policy evaluation is its own judgement with nothing for the application to
-supply.
+conflict, setting a user policy version, running build tasks, resuming a build task, and registering
+a review presentation. Recording a Generator's results, evaluation by the judging model, and policy
+re-evaluation run only inside a build task and are not exposed. The Semantic Catalog owns Generator
+output and the versions that produced it, and policy evaluation is its own judgement with nothing
+for the application to supply.
 
-Running a build task is separate from the operations that create build tasks, because the
-application decides when and how many run. Every operation returns the build tasks it created or
-added a trigger to, and the application passes them to running a build task. Running one may call
-back into capabilities the application provides: SQL execution with scope and limits, name
-resolution from a Physical Catalog table to its current name, and re-retrieval of table metadata.
+Running build tasks is separate from the operations that create them, because the application
+decides when they run. Every operation returns the build tasks it created or added a trigger to.
+Running them may call back into capabilities the application provides: SQL execution with scope and
+limits, name resolution from a Physical Catalog table to its current name, and re-retrieval of
+table metadata.
 
 Operations on one domain are serializable; reads run concurrently with them and see only committed
 commits.
@@ -34,7 +34,9 @@ commits.
 ## Common contract
 
 **URNs** pass as opaque strings. Callers never parse them. A caller passes only URNs obtained from
-the API.
+the API. Their text is built so a person can tell roughly what they name, but it is not a contract
+and carries no knowledge; exact names come from Facts (see
+[`record-model.md`](record-model.md#identity-and-urns)).
 
 **Points.** A read takes either a Catalog Snapshot URN, meaning that commit, or "latest", meaning
 the last commit when the read is received. Every read returns the Catalog Snapshot URN it read, and
@@ -65,19 +67,25 @@ operation.
 
 - The Fact Revision, Fact, and Fact Address URNs, the value, the state at that version, and the
   applicability scope as a description plus entity URNs.
-- Dependency references. A Fact dependency is a Fact Revision URN. An input dependency is an Input
-  Resource URN with an Input Observation URN, plus, for a physical schema, the Physical Catalog
-  table identifier and version that produced it.
-- Inputs read, validation results with each check's method, items, result, and reference, and the
-  range that could not be confirmed.
+- Dependency references. A Fact dependency is a Fact Revision URN, marked premise or replacement.
+  An input dependency is an Input Resource URN with an Input Observation URN, plus, for a physical
+  schema, the Physical Catalog table identifier and version that produced it.
+- Inputs read and validation results. Each check carries its method, the items it examined, its
+  result, its reference, and its basis. Validation items that no supporting check examined are
+  listed as information; no range is reported that would call the rest of the value confirmed.
 - Provenance: Generator, version, and build task.
-- Confirmation path: machine judgement or human consent, the event it rests on, and the policy
-  version.
+- Confirmation path: inline machine judgement, the judging model with its version, or human
+  consent; the event it rests on; and the policy version.
 - The deciding party when a person consented, the commit at which the Fact was last confirmed or
   checked, and whether references are masked.
 
 Reads at a point add whether new candidates exist at the same Fact Address and whether any
-depended-on input has a newer observation.
+depended-on input has a newer observation. Where a read returns Fact Revision content as material
+for a judgement or for composing a query, the records behind it come with their content expanded:
+for each input read, check reference, and dependency, its content; for a rejected or retired Fact
+among them, its value and the answers given to it, with their wording and deciding party. A
+corrected candidate's feedback dependency and the rejected Fact it corrected thus show what was
+said and what it was said about.
 
 **Errors.** A failed operation writes nothing, neither in the log nor outside it. A Generator
 failing inside a build task is not an error; the task is returned as `failed`. Errors have a kind,
@@ -89,7 +97,7 @@ the identifier of their target, and a reason:
 | Target not found | An input identifier points to no record |
 | Point out of range | A Catalog Snapshot URN names a commit not yet written |
 | No authority check result | An answer or conflict resolution lacks the reference |
-| Not accepted in this state | A state condition of the operation is not met |
+| Not accepted in this state | A state condition of the operation is not met, such as running build tasks while another process runs them |
 | Storage failure | Storage could not be read or written |
 
 Registering an observation that records nothing because the content is unchanged is a success whose
@@ -141,13 +149,17 @@ Setting a user policy version takes the preset, the treatment of `declared-unenf
 semantics owner's reason, and returns the version's log record identifier and the re-evaluation
 build task. Beforehand, the application shows the semantics owner what the check below reports.
 
-### Running and resuming a build task
+### Running build tasks and resuming a failed one
 
-Running a build task takes a `created` build task, runs it to the end, and returns `succeeded` or
-`failed` with its result, the missing inputs when there was no candidate, or the reason for failure.
-A Generator run or re-evaluation records its result in one commit. An impact judgement creates build
-tasks for the Generators of the Facts it selects. Resuming a build task does the same for a `failed`
-task on the latest state.
+Running build tasks takes the domain's exclusive run: while one call holds it, another is not
+accepted. It first returns every task left `running` to `created`, since a stopped run wrote
+nothing, then runs `created` tasks one at a time, including those created while it runs. It reports
+each task as it finishes, `succeeded` or `failed`, with its result, the missing inputs when there
+was no candidate, or the reason for failure. It returns when no `created` task remains or, if the
+caller asked to keep waiting, when the caller stops it. A Generator run, an evaluation by the
+judging model, or a re-evaluation records its result in one commit. An impact judgement creates
+build tasks for the Generators of the Facts it selects. Resuming a build task returns a `failed`
+task to `created`, to run on the latest state.
 
 ### Registering a review presentation
 
@@ -155,10 +167,32 @@ Registering a review presentation records that a judgement was requested: the pr
 target Facts with their Fact Addresses (several Fact Addresses may be presented together), the
 person asked, which need not be the using party, the time, and a reference to the screen or dialogue
 shown. It returns an identifier that answers and conflict resolutions reference. The Semantic
-Catalog fills in the resulting events when they are recorded. Review orchestration decides what to
-present; this operation records what was presented.
+Catalog fills in the resulting events when they are recorded. The interface decides how to present
+a review item; this operation records what was presented.
 
 ## Reads
+
+### Reading along the hierarchy
+
+Reading along the hierarchy follows the levels the Physical Catalog uses, data source, namespace,
+table, and column, because that is how people and agents locate what a catalog holds. It takes a
+point and a position: the domain root, a data source, a namespace, or a table.
+
+- Datasets are tables and Fields are columns. A Measure or Dimension belongs to the table of its
+  base Dataset, and an identifier correspondence to the tables at its ends. Concepts, business
+  terms, and concept relationships belong to the domain root.
+- A table is read as one unit: the Dataset, every Field, the Measures and Dimensions based on it,
+  and the correspondences it is an end of, each element with the result of requesting all its
+  predicates (see [Requesting knowledge](#requesting-knowledge)).
+- Above a table, the caller chooses this level only, the position with its direct children, or
+  recursive, every table unit below the position. A read at the root adds the domain-wide elements.
+- Every level carries counts of confirmed Facts, items awaiting review, and closed-core predicates
+  with missing knowledge.
+
+The data source, namespace, and table of a Dataset come from its technical reference. Until a
+method for searching the catalog exists, a recursive read from the root returns the whole catalog,
+which is small enough at first to hand to a language model; reading from a lower position keeps a
+read bounded as the catalog grows.
 
 ### Finding elements
 
@@ -170,7 +204,8 @@ It does not interpret question wording; finding elements from a question is the 
 ### Requesting knowledge
 
 Requesting knowledge takes a point, a sequence of requests, and optionally one set of entity URNs
-the question mentions. A request is a target element and one of its kind's predicates. An edge whose
+the question mentions. A request is a target element and one of its kind's predicates, or all of
+them. An edge whose
 URN is unknown can be given by its kind and the URNs of its ends in direction order (any order if
 undirected), without its identifying part. For each request the Semantic Catalog:
 
@@ -184,9 +219,14 @@ undirected), without its identifying part. For each request the Semantic Catalog
 4. If entity URNs were given, reports for each Fact Address whether its applicability scope overlaps
    them, does not overlap, or is unrestricted. Non-overlapping Fact Addresses are still returned.
 
+Requesting all predicates of an element returns every closed-core predicate of its kind, each
+judged as above, so a predicate with no Fact Address shows as missing knowledge. It also returns
+every other Fact Address of the element, such as those of free-description and Generator-declared
+predicates, which cannot be listed in advance.
+
 An unknown element URN is a target-not-found error. A nonexistent edge, or an element with no Fact
 Address for the predicate, is missing knowledge. Free-description predicates cannot be requested by
-name, because they have no identity of their own.
+name, because they have no identity of their own; requesting all predicates returns them.
 
 ### Retrieving a Fact Revision
 
@@ -198,17 +238,24 @@ from them.
 
 ### Retrieving the review list
 
-Retrieving the review list returns, at a point and optionally filtered by presentation kind, element
-or Fact Address, the items awaiting a person:
+Retrieving the review list takes a point and a position in the hierarchy, the domain root, a data
+source, a namespace, or a table, optionally filtered by presentation kind, element, or Fact Address.
+It returns the review items below that position (see
+[`construction.md`](construction.md#review)), grouped per table as in
+[Reading along the hierarchy](#reading-along-the-hierarchy), with domain-wide items in a group of
+their own:
 
-- Candidates with confirmed dependencies whose latest evaluation requested consent.
+- Candidates whose latest evaluation requested consent, including those whose premises still await
+  consent. Such an item is marked as resting on its premises and points to their items.
 - Open retirement proposals whose latest evaluation requested consent.
 - Conflicting Fact Addresses.
 
 Items answered unknown without a new dependency reference since are excluded. Each item carries the
-evaluation that requested the judgement and any earlier presentations of it. Items are ordered by
-the commit at which the need for judgement arose. That is not a presentation order, which review
-orchestration decides.
+evaluation that requested the judgement, with its review material, any earlier presentations of it,
+and the commit at which the need for judgement arose. Within a group, items are ordered by that
+commit, which also lets a caller tell new items from ones it has already seen; a re-evaluation gives
+an item a newer commit, because its basis changed. The order is not a presentation order, which the
+interface decides.
 
 ### Retrieving build tasks
 
@@ -218,9 +265,9 @@ kind, triggers, Generator and version, input versions, evaluation version, and r
 ### Checking a user policy version
 
 Checking a user policy version evaluates a proposed setting at the latest point and returns the
-current version, the number and URNs of candidates that would be confirmed by machine judgement, and
-the point evaluated. A commit between this read and setting the version can change the actual
-outcome.
+current version, the number and URNs of candidates that would be adopted inline, those that would
+go to the judging model, whose decisions are known only by running it, and the point evaluated. A
+commit between this read and setting the version can change the actual outcome.
 
 ## One question, end to end
 
