@@ -8,8 +8,10 @@ with review material it builds. Candidates that deterministic signals cover are 
 without it. A refuted candidate, or one that would confirm a second Fact where one is selected,
 always goes to a person. The policy evaluation model runs as its own build task, and its reason and
 version are recorded.
-**[Planned]** No language model is connected to it yet; the evaluation task calls whichever
-`PolicyEvaluationModel` the build environment supplies.
+It reaches a language model through the Semantic Catalog's adapter (see
+[`../semantic-catalog/generators.md`](../semantic-catalog/generators.md#reaching-a-language-model)).
+**[Planned]** The application supplies the adapter and model a domain's workspace configuration
+names.
 
 ## Rationale
 

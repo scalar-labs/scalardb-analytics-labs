@@ -7,8 +7,7 @@ Machine judgement adopts a candidate inline when deterministic checks support al
 item that restricts what the data may hold rests on data checks alone, nothing refutes it, and it
 would not confirm a second Fact where one is already selected. A refuted candidate or a second
 Fact always goes to a person. The policy evaluation model decides every other candidate, adopting
-it or sending it to the deciding party; **[Planned]** the language model behind it is not connected
-yet. `full-auto` and `manual` remain
+it or sending it to the deciding party. `full-auto` and `manual` remain
 available, and the semantics owner can change the setting at any time.
 
 ## Rationale

@@ -296,12 +296,12 @@ UI. A review item carries:
   each one up.
 - **What consent changes:** the selected Fact it would replace, the premise items it rests on with
   their content, and the items a rejection would cascade to.
-- **[Planned]** **Review material,** when the policy evaluation model sent it to a person: what is
-  to be decided, why it was not adopted and what remains uncertain, the evidence for and against,
-  and a suggested answer with its reasons. The policy evaluation model may sample values through the
-  application's SQL execution within its build task's limits to build it, and it sorts the items of
-  each table into those likely to follow the suggestion and those that need judgement. The material
-  is kept with the evaluation.
+- **Review material,** when the policy evaluation model sent it to a person: what is to be decided,
+  why it was not adopted and what remains uncertain, the evidence for and against, and a suggested
+  answer with its reasons. The material is kept with the evaluation. **[Planned]** The policy
+  evaluation model may sample values through the application's SQL execution within its build
+  task's limits to build it, and it sorts the items of each table into those likely to follow the
+  suggestion and those that need judgement.
 
 **[Planned]** The material is selected for judgement rather than dumped from the stored context: too
 little makes the deciding party investigate alone, too much makes them search for what matters, and

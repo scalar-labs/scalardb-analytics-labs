@@ -1,7 +1,5 @@
 # Generators and generation strategy
 
-**[Planned]** This document describes accepted design that is not implemented yet.
-
 A Generator holds one interpretation or check rule and produces candidates, with validation results,
 from what it reads. The generation strategy decides what each run aims at and why construction
 stops. This document explains the contract every Generator follows, the Generators the design runs,
@@ -12,6 +10,8 @@ Some values here are **initial behavior**: starting points such as search limits
 counts that are expected to be tuned from use of the product.
 
 ## One rule per Generator
+
+**[Planned]** This section describes design that is not implemented yet.
 
 Each interpretation or check rule is its own Generator. The rule that derives a key from a primary
 key and the rule that derives an identifier correspondence from a foreign key are separate
@@ -54,6 +54,8 @@ or withdrawing it identifies what to rerun. Being able to follow a relationship 
 never by itself a basis for derivation.
 
 ## The Generator contract
+
+**[Planned]** This section describes design that is not implemented yet.
 
 **Input kinds.** Each Generator declares what it may read, and build tasks are created from these
 declarations:
@@ -114,6 +116,8 @@ result equal to the previous observation of the same Input Resource is not recor
 
 ## Schema interpretation
 
+**[Planned]** This section describes design that is not implemented yet.
+
 Schema interpretation maps what the source declares to candidates. Table and column ingestion runs
 on each new physical schema observation. The others also declare the confirmed existence of their
 target element as input, so any element they point to exists. When the declaration a Fact came from
@@ -160,6 +164,8 @@ correspondences from unenforced declarations go to the policy evaluation model, 
 of duplicates does not show that a set is a business identifier.
 
 ## Data checks
+
+**[Planned]** This section describes design that is not implemented yet.
 
 Data checks run aggregate queries, counts and set comparisons only, and never read data rows.
 
@@ -211,6 +217,8 @@ values happen to overlap need not denote the same objects; otherwise `auto` coul
 coincidental correspondence. For the same reason, keys from candidate key discovery are `inference`.
 
 ## Meaning inference
+
+**[Planned]** This section describes design that is not implemented yet.
 
 Meaning inference uses a model for predicates that declarations and data cannot decide. For a target
 element it passes names and types, confirmed Facts, relevant document parts, feedback, and permitted
@@ -265,6 +273,8 @@ When the wording yields no value or scope, the build task records that and the u
 correction.
 
 ## Generation strategy
+
+**[Planned]** This section describes design that is not implemented yet.
 
 **Order.** The strategy defines no global order. Order emerges because a later Generator declares as
 input the confirmation of what an earlier one produces. When the e-commerce database is registered:
@@ -332,6 +342,8 @@ deciding party varies with data and person.
 
 ## Column changes
 
+**[Planned]** This section describes design that is not implemented yet.
+
 A column that disappears from a physical schema observation is retired, and a column that appears
 is a new Field, whether or not the two are a rename:
 
@@ -348,29 +360,63 @@ and a technical reference never moves; a renamed table likewise becomes a new Da
 
 ## Reaching a language model
 
-Meaning inference, impact judgement, the duplicate check, and the policy evaluation model (see
-[`construction.md`](construction.md#choosing-the-confirmation-path)) call a language model through
-an **adapter**, the only part of the Semantic Catalog that knows how a model is reached. A Generator
-passes a prompt and receives the model's answer; it never depends on a particular provider, so the
-provider can change without changing a Generator.
+The policy evaluation model (see
+[`construction.md`](construction.md#choosing-the-confirmation-path)) calls a language model through
+an **adapter**, the only part of the Semantic Catalog that knows how a model is reached.
+**[Planned]** Meaning inference, impact judgement, and the duplicate check call it the same way. A
+caller passes a prompt and receives the model's answer; it never depends on a particular provider,
+so the provider can change without changing a Generator.
 
 The first adapters run a locally installed, already signed-in coding-agent CLI (`claude -p` or
-`codex exec`) as a subprocess with no tools, in an empty temporary directory, so the CLI picks up no
-repository context. A third adapter pipes the prompt to a configured command, to connect another
-harness. The product therefore holds no provider credential. Which adapter and model a domain uses
-is set in the workspace configuration, and the application passes it to the Semantic Catalog.
+`codex exec`) as a subprocess in an empty temporary directory, so the CLI picks up no repository
+context, with the tools and the user's customizations turned off as far as the CLI's options allow.
+A third adapter pipes the prompt to a configured command, to connect another harness. The adapters
+are interim; the later phase below replaces the CLIs.
 
-A Generator's version includes the model, so an adapter is configured with a concrete model and
-reports it. A model alias that the provider may point elsewhere later, such as `sonnet`, is refused,
-because provenance could then not say which model produced a Fact.
+- `claude -p` runs with no tools, in safe mode, and with no settings files or MCP servers, so it
+  reads no `CLAUDE.md`, memory, skills, plugins, or hooks. The CLI still adds a short note of its
+  environment, such as the working directory and the signed-in account.
+- `codex exec` runs in a read-only sandbox, ignoring the user's `config.toml` and execpolicy rules,
+  with every tool its feature flags can remove removed and no skills, plugins, apps, sub-agents,
+  memories, or web search. Codex has no option that removes every tool or skips its home directory's
+  instructions, so `apply_patch` and the code-mode `exec` tool stay declared, kept from writing or
+  running anything by the sandbox and the disabled code-mode host, and `AGENTS.md` in the Codex
+  home directory still reaches the model.
 
-After the first release, a later phase moves from coding-agent CLIs to a harness the product owns,
-such as one built on Pi or on a DeepSeek harness. The adapter boundary is what keeps that change
-away from the Generators.
+The subprocess inherits the process environment, which is how a CLI finds its own sign-in,
+so the product holds and passes no provider credential. The Semantic Catalog takes the adapter, the
+model, and how long one answer may take as settings. **[Planned]** Which adapter and model a domain
+uses is set in the workspace configuration, and the application passes it to the Semantic Catalog.
 
-An unavailable model fails the build task, which can be resumed.
+A caller's version includes the model, so an adapter is configured with a concrete model and reports
+it. A model alias that the provider may point elsewhere later, such as `sonnet`, is refused, because
+provenance could then not say which model produced a Fact. The `claude` adapter refuses bare
+aliases, accepting only model IDs that start with `claude-` and do not end in `-latest`; it cannot
+tell other moving IDs from fixed ones, so the configured ID is recorded as given. The `codex` adapter
+requires a model and uses it as given, and the command adapter requires the identity of the model
+its command reaches, which the product cannot learn from the command.
+
+An adapter adds no wording of its own: a caller gives its instructions and its input, and the
+instructions, given as the system prompt where the CLI has one, are the whole fixed part of what the
+model reads. The policy evaluation model's version is therefore the adapter's identity and its
+instructions, named and hashed, so changing either makes a new version.
+
+**[Planned]** After the first release, a later phase moves from coding-agent CLIs to a harness the
+product owns, such as one built on Pi or on a DeepSeek harness. The adapter boundary is what keeps
+that change away from the Generators.
+
+An unavailable model fails the build task, which can be resumed. So do a model that gives no answer
+in time and an answer not in the form the caller asked for: the policy evaluation model fails rather
+than reading such an answer as a consent request, so a model that misreads its instructions is
+noticed.
 
 ## Input passed to external models
+
+**[Planned]** This section describes design that is not implemented yet.
+
+The policy evaluation model's subject holds Fact content and what the candidate's Generator recorded
+as read; it expands no observation content. The settings below apply wherever observation content is
+passed to a model, that subject included.
 
 Meaning inference, impact judgement, the duplicate check, and the policy evaluation model may send
 input to an external model through the adapter. Usage feedback and data values reach a model only as
