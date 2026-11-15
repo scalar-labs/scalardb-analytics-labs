@@ -192,16 +192,19 @@ class ScalarDbAnalyticsCliIntegrationTest {
             new StoreSettings(STORE.getJdbcUrl(), STORE.getUsername(), STORE.getPassword()))) {
       var observation =
           store.observationContent(domain, lines.get("inputObservation").asText()).orElseThrow();
+      // The source metadata is the observation; the table metadata derived from it is not.
       assertThat(observation.get("sourceMetadata").get("connector").asText())
           .isEqualTo("postgresql");
-      assertThat(observation.get("tableMetadata").get("constraints").toString())
-          .contains("primary-key", "foreign-key", "orders")
-          .doesNotContain("analyticsType");
+      assertThat(observation.has("tableMetadata")).isFalse();
+      assertThat(observation.get("sourceMetadata").get("document").toString())
+          .contains("order_lines", "orders");
       assertThat(
               store.derivedRecord(
                   domain, "warehouse.public.order_lines", lines.get("version").asLong()))
           .hasValueSatisfying(
-              derived -> assertThat(derived.toString()).contains("analyticsTypes", "int"));
+              derived ->
+                  assertThat(derived.get("tableMetadata").toString())
+                      .contains("primary-key", "foreign-key", "analyticsType"));
     }
     assertThat(postgresRegistration.allOutput()).doesNotContain(POSTGRES_PASSWORD);
   }
