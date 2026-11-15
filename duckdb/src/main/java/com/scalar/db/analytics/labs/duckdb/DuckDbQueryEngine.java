@@ -67,6 +67,8 @@ public final class DuckDbQueryEngine implements QueryEngine {
 
   private final RootAllocator allocator;
   private final Connection connection;
+  // The memory limit the engine runs with outside a query that sets its own.
+  private final String engineMemoryLimit;
   private final @Nullable CatalogHostRegistration catalogHost;
   private final ExecutorService queryExecutor;
   private final ScheduledExecutorService deadlineExecutor;
@@ -105,6 +107,7 @@ public final class DuckDbQueryEngine implements QueryEngine {
     try {
       var opened = openConnection(catalogProvider, attachedSources);
       connection = opened.connection();
+      engineMemoryLimit = opened.memoryLimit();
       catalogHost = opened.catalogHost();
     } catch (RuntimeException e) {
       try {
@@ -122,7 +125,7 @@ public final class DuckDbQueryEngine implements QueryEngine {
   }
 
   private record OpenedConnection(
-      Connection connection, @Nullable CatalogHostRegistration catalogHost) {}
+      Connection connection, @Nullable CatalogHostRegistration catalogHost, String memoryLimit) {}
 
   private static OpenedConnection openConnection(
       @Nullable NativeCatalogProvider catalogProvider, List<SourceAttachment> sources) {
@@ -141,7 +144,7 @@ public final class DuckDbQueryEngine implements QueryEngine {
           PackagedDuckDbExtensions.load(openedConnection, extensionDirectory, catalogProvider);
       SourceAttachments.attach(openedConnection, sources);
       configureConnection(openedConnection);
-      return new OpenedConnection(openedConnection, registration);
+      return new OpenedConnection(openedConnection, registration, memoryLimit(openedConnection));
     } catch (IncompatibleExtensionsException | AttachFailedException e) {
       closeAfterFailedInitialization(openedConnection, e);
       closeCatalogHost(registration, e);
@@ -228,12 +231,14 @@ public final class DuckDbQueryEngine implements QueryEngine {
     var memoryLimitConfigured = false;
     try {
       execution.throwIfTerminated();
+      // Validation only parses the submitted text, so it runs before the query's memory limit,
+      // which bounds the query and not the engine's own checks.
+      validateReadOnlyQuery(sql, execution);
+      execution.throwIfTerminated();
       if (options.memoryLimitBytes().isPresent()) {
         setMemoryLimit(options.memoryLimitBytes().getAsLong());
         memoryLimitConfigured = true;
       }
-      execution.throwIfTerminated();
-      validateReadOnlyQuery(sql, execution);
       execution.throwIfTerminated();
 
       var allocatorLimit = options.memoryLimitBytes().orElse(Long.MAX_VALUE);
@@ -364,9 +369,24 @@ public final class DuckDbQueryEngine implements QueryEngine {
     }
   }
 
+  /**
+   * Restores the engine's memory limit after a query that set its own. {@code RESET memory_limit}
+   * restores only the setting's value in DuckDB 1.5.6, not the limit its buffer pool enforces, so
+   * the engine's own value is set again.
+   */
   void resetMemoryLimit() throws SQLException {
     try (var statement = connection.createStatement()) {
-      statement.execute("RESET memory_limit");
+      statement.execute("SET memory_limit = " + sqlLiteral(engineMemoryLimit));
+    }
+  }
+
+  private static String memoryLimit(Connection connection) throws SQLException {
+    try (var statement = connection.createStatement();
+        var resultSet = statement.executeQuery("SELECT current_setting('memory_limit')")) {
+      if (!resultSet.next()) {
+        throw new SQLException("DuckDB reported no memory limit");
+      }
+      return resultSet.getString(1);
     }
   }
 

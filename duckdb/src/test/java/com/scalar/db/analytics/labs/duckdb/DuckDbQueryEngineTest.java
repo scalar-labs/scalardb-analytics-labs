@@ -325,6 +325,30 @@ class DuckDbQueryEngineTest {
   }
 
   @Test
+  void aQueryWithoutALimitDoesNotInheritAnEarlierQuerysMemoryLimit() throws Exception {
+    try (var queryEngine = new DuckDbQueryEngine()) {
+      try (var limited =
+          queryEngine.start(
+              "SELECT list(i) FROM range(10000000) values_source(i)",
+              options(
+                  OptionalLong.empty(),
+                  OptionalLong.empty(),
+                  Optional.empty(),
+                  OptionalLong.of(1_048_576)))) {
+        assertThatThrownBy(limited::awaitResult).isInstanceOf(QueryEngineException.class);
+      }
+
+      // Far more than the earlier query's limit.
+      try (var result =
+          queryEngine.execute("SELECT length(list(i)) AS n FROM range(1000000) values_source(i)")) {
+        assertThat(result.reader().loadNextBatch()).isTrue();
+        assertThat(result.reader().getVectorSchemaRoot().getVector("n").getObject(0))
+            .isEqualTo(1_000_000L);
+      }
+    }
+  }
+
+  @Test
   void cancellationIsIdempotentAndInterruptsStreamingWork() throws Exception {
     try (var queryEngine = new DuckDbQueryEngine();
         var execution =
