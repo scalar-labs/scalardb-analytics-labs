@@ -111,20 +111,26 @@ types, and the gRPC `ColumnSchema.type` becomes a structured message. Until a so
 complete, the interim scanner path produces table metadata of the same shape; see
 [`query-engine.md`](query-engine.md#interim-scanner-path).
 
-Table metadata is divided between the two catalogs so that no source declaration is copied where
-nothing uses it:
+A connector returns each table in two layers: **source metadata**, what it read in a shape only that
+connector defines, and **table metadata**, the source-independent subset it derives from the source
+metadata. The Physical Catalog is built from the table metadata; the Semantic Catalog takes the
+source metadata as its input. The table metadata items are divided so that no source declaration is
+copied where nothing uses it:
 
 | Item | Physical Catalog | Semantic Catalog |
 | --- | --- | --- |
-| Catalog, namespace, table name, and table kind | Persisted; used for name resolution | Part of its input |
-| Column name, ordinal, nullability, and source type | Persisted; used for planning and for showing unsupported columns | Part of its input |
-| Column Analytics type, or unsupported | Persisted; used for planning | Kept as a derived record |
-| Constraints (primary keys, unique constraints and indexes, foreign keys, CHECK constraints) | Not persisted | Part of its input |
-| Source-side identifier | Not persisted | Part of its input |
+| Catalog, namespace, table name, and table kind | Persisted; used for name resolution | In the source metadata |
+| Column name, ordinal, nullability, and source type | Persisted; used for planning and for showing unsupported columns | In the source metadata |
+| Column Analytics type, or unsupported | Persisted; used for planning | Not an input |
+| Constraints (primary keys, unique constraints and indexes, foreign keys, CHECK constraints) | Not persisted | In the source metadata |
+| Source-side identifier | Not persisted | In the source metadata |
 | Source schema version | Not persisted | Not recorded; it changes on non-schema events, so it cannot detect a change |
-| Completeness, missing items, and "does not exist" | Persisted; used to avoid inferring deletions from missing information | Part of its input |
+| Completeness, missing items, and "does not exist" | Persisted; used to avoid inferring deletions from missing information | "Does not exist" is an observation |
 | "Not retrieved" | Not made a version; reported in the change notification | Not received |
 | Retrieval information and content digest | Persisted with the version; used for version management | Kept as a derived record |
+
+Until the Physical Catalog keeps the table metadata it is built from, the Semantic Catalog also
+keeps each version's whole table metadata in its derived record.
 
 Query Engines do not use constraints, so their absence from the Physical Catalog changes neither
 planning nor execution. Users and Query Agents who need keys and constraints get them from the
@@ -152,7 +158,7 @@ the retrieval information differ, because any of those can change Analytics type
 source. A change of retrieval time alone updates the time of last confirmation. Digests are compared
 only between metadata from the same library MAJOR.MINOR. A different library version always makes a
 new version, so a library or connector update passes every table to the Semantic Catalog once, and
-the Semantic Catalog records only a derived record where source declarations did not change. "Not
+the Semantic Catalog records only a derived record where the source metadata did not change. "Not
 retrieved" metadata is never a version, so missing privileges or a transient failure cannot remove
 columns used for planning. Incomplete metadata is a version, and the catalog infers no deletion from
 a missing item.

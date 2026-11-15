@@ -92,8 +92,9 @@ The surrounding components keep the following responsibilities:
 
 - **Physical Catalog.** It is authoritative for physical schemas and Analytics types used for
   planning and execution. The two catalogs do not depend on each other. The application passes each
-  table's metadata, exactly as the connector returned it, to both; the Semantic Catalog keeps the
-  source-declared part as its input and holds the connector-derived part only as a side record. A
+  table's retrieval, exactly as the connector returned it, to both; the Semantic Catalog keeps the
+  connector's source metadata as its input and holds the table metadata only as a side record,
+  until the Physical Catalog keeps the table metadata it is built from. A
   Dataset reaches a queryable table through a technical reference to a Physical Catalog table, never
   through a table name. See [`physical-catalog.md`](physical-catalog.md).
 - **Application.** It decides when build tasks run, one process per domain at a time, because it

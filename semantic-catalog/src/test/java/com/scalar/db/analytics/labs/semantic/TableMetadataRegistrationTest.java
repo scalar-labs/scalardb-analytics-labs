@@ -42,22 +42,29 @@ class TableMetadataRegistrationTest extends StoreScenarioTest {
 
   private static final String DECIMAL = "{\"kind\": \"decimal\", \"precision\": 10, \"scale\": 2}";
 
+  /** Source metadata of the orders table, with the given table comment. */
+  private static SourceMetadata ordersSource(String comment) {
+    return new SourceMetadata(
+        "postgresql",
+        json("{\"table\": {\"name\": \"orders\", \"comment\": \"%s\"}}".formatted(comment)));
+  }
+
   private static TableMetadataObservation observation(long version, JsonNode tableMetadata) {
+    return observation(version, tableMetadata, ordersSource("Orders"));
+  }
+
+  private static TableMetadataObservation observation(
+      long version, JsonNode tableMetadata, SourceMetadata sourceMetadata) {
     return new TableMetadataObservation(
         TABLE,
         version,
-        new Read(
-            true,
-            tableMetadata,
-            new SourceMetadata(
-                "postgresql", json("{\"table\": {\"name\": \"orders\", \"comment\": \"Orders\"}}")),
-            Instant.parse("2026-11-15T00:00:00Z")),
+        new Read(true, tableMetadata, sourceMetadata, Instant.parse("2026-11-15T00:00:00Z")),
         json("{\"connector\": {\"name\": \"postgresql\", \"version\": \"0.1.0\"}}"),
         "digest-" + version);
   }
 
   @Test
-  void aNewTableBecomesAnInputResourceWithItsSourceDeclarations() {
+  void aNewTableBecomesAnInputResourceObservedThroughItsSourceMetadata() {
     var s = scenario();
 
     var registration =
@@ -67,20 +74,18 @@ class TableMetadataRegistrationTest extends StoreScenarioTest {
     var observed = (Observed) registration;
     assertThat(observed.newInputResource()).isTrue();
     assertThat(observed.commit()).isEqualTo(s.lastCommit());
-    // The source declarations and the source metadata are the observation; the Analytics types
-    // the connector derived are not.
+    // The source metadata is the observation; the table metadata the connector derived from it
+    // is not.
     var content = store.observationContent(s.domain, observed.inputObservation()).orElseThrow();
-    assertThat(content.at("/state").asText()).isEqualTo("read");
-    assertThat(content.at("/tableMetadata/columns/1/dataSourceType").asText())
-        .isEqualTo("numeric(10,2)");
-    assertThat(content.at("/tableMetadata/columns/1").has("analyticsType")).isFalse();
-    assertThat(content.at("/tableMetadata/constraints/0/name").asText()).isEqualTo("orders_pkey");
-    assertThat(content.at("/sourceMetadata/connector").asText()).isEqualTo("postgresql");
-    assertThat(content.at("/sourceMetadata/document/table/comment").asText()).isEqualTo("Orders");
-    // They are kept in the version's derived record instead.
+    assertThat(content)
+        .isEqualTo(
+            json(
+                "{\"state\": \"read\", \"sourceMetadata\": {\"connector\": \"postgresql\","
+                    + " \"document\": {\"table\": {\"name\": \"orders\", \"comment\": \"Orders\"}}}}"));
+    // It is kept whole in the version's derived record instead.
     var derived = store.derivedRecord(s.domain, TABLE, 1).orElseThrow();
-    assertThat(derived.at("/analyticsTypes/1/column").asText()).isEqualTo("amount");
-    assertThat(derived.at("/analyticsTypes/1/analyticsType/kind").asText()).isEqualTo("decimal");
+    assertThat(derived.at("/tableMetadata")).isEqualTo(orders(DECIMAL, ""));
+    assertThat(derived.at("/complete").asBoolean()).isTrue();
     assertThat(derived.at("/retrieval/connector/name").asText()).isEqualTo("postgresql");
     assertThat(derived.at("/contentDigest").asText()).isEqualTo("digest-1");
     assertThat(derived.at("/readAt").asText()).isEqualTo("2026-11-15T00:00:00Z");
@@ -108,15 +113,15 @@ class TableMetadataRegistrationTest extends StoreScenarioTest {
   }
 
   @Test
-  void aChangeOnlyInTheConnectorsMappingRecordsOnlyADerivedRecord() {
+  void aChangeOnlyInTheTableMetadataRecordsOnlyADerivedRecord() {
     var s = scenario();
     var first =
         (Observed)
             store.registerTableMetadata(s.domain, "app", observation(1, orders(DECIMAL, "")));
     var commit = s.lastCommit();
 
-    // A connector update maps the column to another Analytics type; the source declared nothing
-    // new.
+    // A connector update maps the column to another Analytics type; the source metadata is
+    // unchanged.
     var registration =
         store.registerTableMetadata(
             s.domain, "app", observation(2, orders("{\"kind\": \"double\"}", "")));
@@ -124,32 +129,30 @@ class TableMetadataRegistrationTest extends StoreScenarioTest {
     assertThat(registration)
         .isEqualTo(new DerivedRecordOnly(first.inputResource(), first.inputObservation()));
     assertThat(s.lastCommit()).isEqualTo(commit);
-    assertThat(store.derivedRecord(s.domain, TABLE, 2).orElseThrow().at("/analyticsTypes/1"))
-        .isEqualTo(json("{\"column\": \"amount\", \"analyticsType\": {\"kind\": \"double\"}}"));
+    assertThat(
+            store
+                .derivedRecord(s.domain, TABLE, 2)
+                .orElseThrow()
+                .at("/tableMetadata/columns/1/analyticsType"))
+        .isEqualTo(json("{\"kind\": \"double\"}"));
     // The next version is judged against the latest version received, not the latest observation.
     assertThat(store.registerTableMetadata(s.domain, "app", observation(2, orders(DECIMAL, ""))))
         .isEqualTo(new NotNewer(2));
   }
 
   @Test
-  void aChangedSourceDeclarationIsANewObservationOfTheSameInputResource() {
+  void changedSourceMetadataIsANewObservationOfTheSameInputResource() {
     var s = scenario();
     var first =
         (Observed)
             store.registerTableMetadata(s.domain, "app", observation(1, orders(DECIMAL, "")));
 
-    var added =
+    var commented =
         (Observed)
             store.registerTableMetadata(
                 s.domain,
                 "app",
-                observation(
-                    2,
-                    orders(
-                        DECIMAL,
-                        ", {\"name\": \"note\", \"ordinal\": 3, \"nullable\": true,"
-                            + " \"dataSourceType\": \"text\","
-                            + " \"analyticsType\": {\"kind\": \"text\"}}")));
+                observation(2, orders(DECIMAL, ""), ordersSource("Customer orders")));
     var dropped =
         (Observed)
             store.registerTableMetadata(
@@ -158,16 +161,16 @@ class TableMetadataRegistrationTest extends StoreScenarioTest {
                 new TableMetadataObservation(
                     TABLE, 3, new DoesNotExist(), json("{\"connector\": {}}"), "digest-3"));
 
-    assertThat(added.newInputResource()).isFalse();
-    assertThat(added.inputResource()).isEqualTo(first.inputResource());
-    assertThat(added.inputObservation()).isNotEqualTo(first.inputObservation());
+    assertThat(commented.newInputResource()).isFalse();
+    assertThat(commented.inputResource()).isEqualTo(first.inputResource());
+    assertThat(commented.inputObservation()).isNotEqualTo(first.inputObservation());
     assertThat(
             store
-                .observationContent(s.domain, added.inputObservation())
+                .observationContent(s.domain, commented.inputObservation())
                 .orElseThrow()
-                .at("/tableMetadata/columns/2/name")
+                .at("/sourceMetadata/document/table/comment")
                 .asText())
-        .isEqualTo("note");
+        .isEqualTo("Customer orders");
     assertThat(dropped.inputResource()).isEqualTo(first.inputResource());
     assertThat(store.observationContent(s.domain, dropped.inputObservation()).orElseThrow())
         .isEqualTo(json("{\"state\": \"does-not-exist\"}"));
@@ -220,7 +223,7 @@ class TableMetadataRegistrationTest extends StoreScenarioTest {
           observed++;
         }
       }
-      // The table is new only once, and its source declarations never change, so exactly one
+      // The table is new only once, and its source metadata never changes, so exactly one
       // registration observes it.
       assertThat(observed).isEqualTo(1);
     }

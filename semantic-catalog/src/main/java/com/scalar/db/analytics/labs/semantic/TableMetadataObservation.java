@@ -15,9 +15,12 @@ import java.time.Instant;
  * SemanticCatalogStore#registerTableMetadata} (see {@code docs/semantic-catalog/public-api.md},
  * "Registering an observation").
  *
- * <p>The metadata is passed whole, exactly as the connector returned it. The Semantic Catalog
- * splits it: the source-declared part becomes an Input Observation of the table's physical-schema
- * Input Resource, and the connector-derived part becomes a derived record of the version.
+ * <p>The record is passed whole, exactly as the connector returned it. The connector's source
+ * metadata, what it read about the table, becomes an Input Observation of the table's
+ * physical-schema Input Resource. The table metadata, which the connector derives from the source
+ * metadata, is kept with the read time, retrieval information, and content digest as the version's
+ * derived record. The table metadata is held only until the Physical Catalog keeps the table
+ * metadata it is built from; the Semantic Catalog then reads it there.
  *
  * @param tableIdentifier the Physical Catalog's identifier of the table; opaque to the Semantic
  *     Catalog, which never parses it
@@ -34,12 +37,6 @@ public record TableMetadataObservation(
     TableRecord table,
     JsonNode retrieval,
     String contentDigest) {
-  /**
-   * The member of a column in the table metadata that holds what the connector derived for it: its
-   * Analytics type, or why it has none. A column whose type was not read has no such member.
-   */
-  public static final String ANALYTICS_TYPE = "analyticsType";
-
   public TableMetadataObservation {
     if (tableIdentifier.isBlank()) {
       throw new IllegalArgumentException("A table identifier is not blank");
@@ -57,10 +54,10 @@ public record TableMetadataObservation(
    * never passed, so a missing privilege or a transient failure cannot look like a change.
    */
   public sealed interface TableRecord {
-    /** The source-declared part, as the content of the table's Input Observation. */
-    JsonNode sourceDeclared();
+    /** What the source declared, as the content of the table's Input Observation. */
+    JsonNode observed();
 
-    /** The connector-derived part besides the retrieval information and the content digest. */
+    /** What the connector derived, besides the retrieval information and the content digest. */
     JsonNode derived();
   }
 
@@ -69,11 +66,9 @@ public record TableMetadataObservation(
    *
    * @param complete whether every item of the table could be read; incomplete metadata states what
    *     is missing, and nothing is inferred from a missing item
-   * @param tableMetadata the source-independent table metadata as the connector returned it: an
-   *     object with the table's names, kind, source identifier, columns, and constraints, each
-   *     column carrying its Analytics type or the reason it has none in its {@value
-   *     #ANALYTICS_TYPE} member
-   * @param sourceMetadata the connector's source metadata of the table
+   * @param tableMetadata the source-independent table metadata as the connector returned it, a JSON
+   *     object; the Semantic Catalog keeps it without reading it
+   * @param sourceMetadata the connector's source metadata of the table, the observation
    * @param readAt when the connector read the table's catalog
    */
   public record Read(
@@ -83,23 +78,12 @@ public record TableMetadataObservation(
       if (!tableMetadata.isObject()) {
         throw new IllegalArgumentException("Table metadata is a JSON object");
       }
-      var columns = tableMetadata.get("columns");
-      if (columns != null && !(columns.isArray() && allObjects(columns))) {
-        throw new IllegalArgumentException("The columns of table metadata are JSON objects");
-      }
     }
 
     @Override
-    public JsonNode sourceDeclared() {
-      var declared = (ObjectNode) LogRecordJson.toStored(tableMetadata);
-      var columns = declared.get("columns");
-      if (columns != null) {
-        columns.forEach(column -> ((ObjectNode) column).remove(ANALYTICS_TYPE));
-      }
+    public JsonNode observed() {
       var content = JsonNodeFactory.instance.objectNode();
       content.put("state", "read");
-      content.put("complete", complete);
-      content.set("tableMetadata", declared);
       content.set("sourceMetadata", LogRecordJson.toStored(sourceMetadata));
       return content;
     }
@@ -107,36 +91,17 @@ public record TableMetadataObservation(
     @Override
     public JsonNode derived() {
       var derived = JsonNodeFactory.instance.objectNode();
-      var types = derived.putArray("analyticsTypes");
-      var columns = tableMetadata.get("columns");
-      if (columns != null) {
-        for (var column : columns) {
-          var type = column.get(ANALYTICS_TYPE);
-          if (type != null) {
-            var entry = types.addObject();
-            entry.set("column", column.get("name"));
-            entry.set(ANALYTICS_TYPE, type);
-          }
-        }
-      }
+      derived.put("complete", complete);
+      derived.set("tableMetadata", LogRecordJson.toStored(tableMetadata));
       derived.put("readAt", readAt.toString());
-      return LogRecordJson.toStored(derived);
-    }
-
-    private static boolean allObjects(JsonNode array) {
-      for (var element : array) {
-        if (!element.isObject()) {
-          return false;
-        }
-      }
-      return true;
+      return derived;
     }
   }
 
   /** A table the source reports does not exist. */
   public record DoesNotExist() implements TableRecord {
     @Override
-    public JsonNode sourceDeclared() {
+    public JsonNode observed() {
       return JsonNodeFactory.instance.objectNode().put("state", "does-not-exist");
     }
 

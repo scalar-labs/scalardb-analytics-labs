@@ -11,17 +11,19 @@ explains that cycle and the records each step writes. The records themselves are
 
 Construction starts from new or changed input, not from questions:
 
-- Registration of a data source and re-retrieval of its table metadata. Each table's source-declared
-  part (names, table kind, source-side identifier, columns without Analytics types, constraints,
-  completeness and missing items, and "does not exist") becomes an Input Observation of that table's
-  physical schema Input Resource, which holds the Physical Catalog's identifier for the table,
-  together with the connector's **source metadata**: what the connector read about the table, in a
-  shape only that connector defines, which is the material for interpreting its meaning. The
-  connector-derived part (Analytics types, read time, retrieval information, and content digest) is
-  kept as a **derived record** of the table metadata version, which is neither an Input Observation
-  nor a Fact. Whether an observation is new is judged by comparing its source-declared part and
-  source metadata with the previous observation, so a change only in the connector's mapping adds a
-  derived record and no observation.
+- Registration of a data source and re-retrieval of its table metadata. Each table's **source
+  metadata**, what the connector read about the table in a shape only that connector defines,
+  becomes an Input Observation of that table's physical schema Input Resource, which holds the
+  Physical Catalog's identifier for the table; a table found not to exist becomes an observation
+  that says so. Source metadata is the material for interpreting meaning, and it holds every
+  declaration the table metadata states, such as names, columns, and constraints, because the
+  connector derives the table metadata from it. The table metadata, with whether it is complete,
+  the read time, the retrieval information, and the content digest, is kept as a **derived record**
+  of the table metadata version, which is neither an Input Observation nor a Fact. Whether an
+  observation is new is judged by comparing the source metadata with the previous observation, so a
+  change only in the connector's mapping adds a derived record and no observation. The derived
+  record holds the table metadata only until the Physical Catalog keeps the table metadata it is
+  built from; the Semantic Catalog then reads it there.
 - **[Planned]** Documents the semantics owner registers or changes.
 - Usage feedback: corrections given in review. **[Planned]** Missing knowledge and statements from a
   user's LLM session.
@@ -362,7 +364,7 @@ No operation sets the selected Fact directly. Selection changes only as the rule
 
 | Operation | Writes in one commit | Not accepted when | Creates build tasks for |
 | --- | --- | --- | --- |
-| Register an observation | Input Observation and Observation Event | Content equals the previous observation, which records nothing; a physical schema whose source-declared part is unchanged records only a derived record; a table metadata version no newer than one received records nothing | **[Planned]** Generators that read that input kind; an impact judgement for a new physical schema or document observation |
+| Register an observation | Input Observation and Observation Event | Content equals the previous observation, which records nothing; a physical schema whose source metadata is unchanged records only a derived record; a table metadata version no newer than one received records nothing | **[Planned]** Generators that read that input kind; an impact judgement for a new physical schema or document observation |
 | **[Planned]** Record a Generator's results (inside a build task) | Data observations, acceptances, retirement proposals, inline evaluations, machine-judgement transitions, cascades | A dependency cycle, a missing referenced record, a check reference that is not a dependency, or an expression value that does not parse; the task fails | Evaluations by the policy evaluation model; Generators that read the newly confirmed predicates |
 | Record an evaluation by the policy evaluation model (inside a build task) | Evaluation with its reason and review material, machine-judgement transitions, cascades; **[Planned]** data observations it read | The Fact no longer waits for the model, which records nothing; inline evaluation now decides it, which records that inline evaluation instead; or the material it read changed, which creates a new evaluation task | Evaluations of dependents left undecided; **[Planned]** Generators that read the newly confirmed predicates |
 | Submit answers | Answers, resulting transitions, cascades, and feedback for each correction | An answer lacks an authority-check reference | Evaluations left undecided; **[Planned]** Generators of rejected, corrected, retired, and cascaded Facts; Generators that read the feedback; Generators that read newly confirmed predicates |

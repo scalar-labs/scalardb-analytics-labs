@@ -111,8 +111,8 @@ attaching a catalog never creates catalogs or data sources implicitly.
 **[Planned]** The Physical Catalog retrieves the table metadata of the registered tables (names,
 columns, source types, Analytics types, and constraints) and persists, with a version, the parts
 used for planning and execution. It does not persist declared constraints. The application passes
-the whole of the same table metadata to the Semantic Catalog, which records the source declarations
-as its input.
+the connector's source metadata from the same retrieval to the Semantic Catalog, which records it as
+its input.
 
 **[Planned]** **Constructing knowledge.** Registration, an input change, or usage feedback from a
 user's LLM session, such as missing knowledge met while composing a query, becomes input to Semantic

@@ -287,8 +287,8 @@ public final class SemanticCatalogStore implements AutoCloseable {
    * docs/semantic-catalog/construction.md}, "What starts construction").
    *
    * <p>A version no newer than the latest one received for the table records nothing. Otherwise the
-   * connector-derived part becomes the version's derived record, and the source-declared part, with
-   * the connector's source metadata, becomes a new Input Observation of the table's physical-schema
+   * table metadata and what else the connector derived become the version's derived record, and the
+   * connector's source metadata becomes a new Input Observation of the table's physical-schema
    * Input Resource when it differs from the latest observation. The Input Resource is created with
    * the table's first observation. Registrations for one table run one at a time.
    *
@@ -299,7 +299,7 @@ public final class SemanticCatalogStore implements AutoCloseable {
       String domain, String author, TableMetadataObservation observation) {
     var table = observation.tableIdentifier();
     var version = observation.version();
-    var declared = observation.table().sourceDeclared();
+    var declared = observation.table().observed();
     return store.write(
         transaction -> {
           requireDomain(transaction, domain);

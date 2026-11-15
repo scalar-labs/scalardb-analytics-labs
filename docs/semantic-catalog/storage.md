@@ -183,7 +183,7 @@ Records kept outside the log:
 | `build_tasks` | Domain, build task | Kind, state, the Fact an evaluation evaluates, content (work, triggers, Generator and version, observation judged, result, failure reason) |
 | `review_presentations` | Domain, review presentation | Creation order, content |
 | `review_presentation_targets` | Domain, review presentation, Fact | Nothing more |
-| `derived_records` | Domain, Physical Catalog table identifier, table metadata version | Analytics types, read time, retrieval information, content digest |
+| `derived_records` | Domain, Physical Catalog table identifier, table metadata version | Table metadata, completeness, read time, retrieval information, content digest |
 | `call_records` | Domain, call identifier | Operation kind, input, output, time recorded |
 
 `build_tasks` is indexed on state, kind, and evaluated Fact, for build task reads and for finding the `created` task a new trigger joins. `review_presentation_targets` finds
