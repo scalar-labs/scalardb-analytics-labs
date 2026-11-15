@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
@@ -88,12 +89,19 @@ sealed interface DatabaseServer {
       return psql(database, sql, true).lines().toList();
     }
 
+    private static final Pattern EXTENDED_EXECUTE = Pattern.compile("LOG:  execute [^:]*: ");
+
     @Override
     public List<String> statementsContaining(String marker) {
       return container
           .getLogs()
           .lines()
-          .filter(line -> line.contains("statement: ") && line.contains(marker))
+          // The scanner path sends simple queries ("statement: "), and the connector path's ADBC
+          // driver sends extended-protocol ones ("execute <name>: ").
+          .filter(
+              line ->
+                  (line.contains("statement: ") || EXTENDED_EXECUTE.matcher(line).find())
+                      && line.contains(marker))
           .toList();
     }
 

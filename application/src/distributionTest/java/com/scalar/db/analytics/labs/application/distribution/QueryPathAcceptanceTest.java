@@ -413,7 +413,7 @@ class QueryPathAcceptanceTest {
 
   @Test
   @Order(7)
-  void pushesProjectionFilterAndLimitIntoPostgreSql() throws Exception {
+  void pushesProjectionAndFilterIntoPostgreSql() throws Exception {
     var marker = "pushdown-" + UUID.randomUUID();
     var output =
         query(
@@ -422,13 +422,14 @@ class QueryPathAcceptanceTest {
                 + "' AND order_id > 10 LIMIT 3");
     assertThat(output.get("rows")).hasSize(3);
 
+    // PostgreSQL is read through its Connector, whose DuckDB adapter offers the scan's projection
+    // and filters but not the limit, which DuckDB applies.
     var received = env().server(WAREHOUSE).statementsContaining(marker);
     assertThat(received).hasSize(1);
     assertThat(received.getFirst())
-        .contains("SELECT \"status\", \"order_id\" FROM \"sales\".\"orders\"")
-        .contains("WHERE \"status\" <> '" + marker + "'")
-        .contains("AND \"order_id\" > '10'")
-        .contains("LIMIT 3")
+        .contains("FROM \"sales\".\"orders\"")
+        .contains("\"status\" <> CAST('" + marker + "' AS text)")
+        .contains("\"order_id\" > CAST(10 AS bigint)")
         .doesNotContain("amount", "note", "receipt");
   }
 

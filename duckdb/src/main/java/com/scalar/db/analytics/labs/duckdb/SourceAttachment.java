@@ -22,4 +22,12 @@ public interface SourceAttachment {
    * @throws SourceAttachException if the source cannot be attached
    */
   void attach(AttachSession session) throws SourceAttachException;
+
+  /**
+   * Whether the source attaches through the connectors' DuckDB extension, which the engine then
+   * loads from the connectors distribution before attaching.
+   */
+  default boolean usesConnectorsExtension() {
+    return false;
+  }
 }

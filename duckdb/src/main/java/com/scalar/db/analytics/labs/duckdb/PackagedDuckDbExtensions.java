@@ -4,6 +4,7 @@
  */
 package com.scalar.db.analytics.labs.duckdb;
 
+import com.scalar.db.analytics.labs.connector.ConnectorPackage;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -24,6 +25,14 @@ import org.jspecify.annotations.Nullable;
  */
 final class PackagedDuckDbExtensions {
   static final String PRODUCT_EXTENSION = "scalardb_analytics";
+
+  /**
+   * The DuckDB extension of the connectors distribution. It is not staged with the extensions
+   * above: it comes with the distribution, whose layout it needs, and is loaded only when a source
+   * reads through it.
+   */
+  static final String CONNECTORS_EXTENSION = ConnectorPackage.EXTENSION_NAME;
+
   static final List<String> EXTENSIONS =
       List.of("postgres_scanner", "mysql_scanner", PRODUCT_EXTENSION);
   static final List<String> SUPPORTED_PLATFORMS =
@@ -39,7 +48,14 @@ final class PackagedDuckDbExtensions {
       List.of(
           new FunctionPolicy("postgres_scanner", List.of("postgres_"), List.of("pg_clear_cache")),
           new FunctionPolicy("mysql_scanner", List.of("mysql_"), List.of()),
-          new FunctionPolicy(PRODUCT_EXTENSION, List.of(), List.of()));
+          new FunctionPolicy(PRODUCT_EXTENSION, List.of(), List.of()),
+          // The connectors' extension attaches Data Sources from a definitions file through its
+          // pragma, and its scan function reads a source directly; sources are queryable only
+          // through the databases the engine attached.
+          new FunctionPolicy(
+              CONNECTORS_EXTENSION,
+              List.of(),
+              List.of("scalardb_analytics_attach", "scalardb_analytics_scan")));
 
   /** The functions of one packaged extension that SQL must not call. */
   record FunctionPolicy(
@@ -47,7 +63,10 @@ final class PackagedDuckDbExtensions {
 
   static {
     // An extension added to the packaged set must declare which of its functions are denied.
-    if (!FUNCTION_POLICIES.stream().map(FunctionPolicy::extension).toList().equals(EXTENSIONS)) {
+    var policed = FUNCTION_POLICIES.stream().map(FunctionPolicy::extension).toList();
+    var packaged = new ArrayList<>(EXTENSIONS);
+    packaged.add(CONNECTORS_EXTENSION);
+    if (!policed.equals(packaged)) {
       throw new IllegalStateException("Every packaged extension needs a function policy");
     }
   }
@@ -120,6 +139,17 @@ final class PackagedDuckDbExtensions {
               catalogProvider);
     } catch (IOException | IllegalStateException e) {
       throw new SQLException("Could not stage the packaged DuckDB extensions.", e);
+    }
+  }
+
+  /**
+   * Loads the connectors' DuckDB extension from the staged connectors distribution, where it finds
+   * the distribution's library and ADBC drivers relative to itself.
+   */
+  static void loadConnectors(Connection connection, ConnectorPackage connectors)
+      throws SQLException {
+    try (var statement = connection.createStatement()) {
+      statement.execute("LOAD '" + escapeSqlLiteral(connectors.extension().toAbsolutePath()) + "'");
     }
   }
 

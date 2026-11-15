@@ -168,8 +168,9 @@ through a read-only provider that the application registers into the product ext
 administration and source credentials stay out of SQL. `ApplicationRuntime` composes the two: it
 starts the catalog before the Query Engine and stops it after the engine. It resolves the registered
 data sources of one catalog, chooses a read path for each, and hands them to the engine, so SQL
-addresses sources only by their registered names. Until connectors are available, every source uses
-the interim scanner path; see [`query-engine.md`](query-engine.md#source-attachment-and-read-paths).
+addresses sources only by their registered names. A source type with a Connector in the connectors
+distribution, today PostgreSQL, reads through the connector path, and any other through the
+interim scanner path; see [`query-engine.md`](query-engine.md#source-attachment-and-read-paths).
 See [`physical-catalog.md`](physical-catalog.md) for the boundary and its credential handling.
 
 **[Planned]** The Semantic Catalog also runs inside the application process. It keeps its records in

@@ -5,11 +5,13 @@ product-owned capability. Its public data-plane contract is an Apache Arrow stre
 keeps JDBC and DuckDB-specific types out of application use cases while preserving Arrow schemas,
 types, and batches across engine integrations.
 
-DuckDB is the first embedded Query Engine and works as an engine within one domain. **[Planned]** A
-Query Engine integration binds Physical Catalog tables and Analytics types into the engine, takes
-connector Arrow output as engine scans, offers pushdown candidates to connectors and rewrites its
-plan by their answer, and maps stale registrations, unsupported types, and source failures to
-product errors. The connector repository is authoritative for that model: see [Plan pushdown with
+DuckDB is the first embedded Query Engine and works as an engine within one domain. A Query Engine
+integration takes connector Arrow output as engine scans, offers pushdown candidates to connectors
+and rewrites its plan by their answer, and maps stale registrations, unsupported types, and source
+failures to engine errors; for DuckDB, the connectors' DuckDB extension does this on the connector
+read path. **[Planned]** It also binds Physical Catalog tables and Analytics types into the engine
+instead of reading them from the connector. The connector repository is authoritative for that
+model: see [Plan pushdown with
 Query Engine
 planners](https://github.com/scalar-labs/scalardb-analytics-connectors/blob/main/docs/plan-pushdown-with-query-engine-planners.md),
 [Query Engine
@@ -79,8 +81,13 @@ application --resolveConnection--> Physical Catalog
      |
      +-- read path per data source --> SourceAttachment --> DuckDbQueryEngine
                                            |
-                                           +-- interim scanner path --ATTACH (READ_ONLY)--> PostgreSQL / MySQL
+                                           +-- connector path --secret + ATTACH--> connectors extension --> Connector --> PostgreSQL
+                                           +-- interim scanner path --secret + ATTACH (READ_ONLY)--> MySQL
 ```
+
+A data source whose source type has a Connector in the connectors distribution reads
+through the connector path; any other reads through the interim scanner path. Today PostgreSQL has
+a Connector and MySQL does not.
 
 Attachment happens once, before external access is disabled. DuckDB refuses source attachments
 afterwards but keeps attached sources queryable, so a running engine sees exactly the sources it
@@ -99,10 +106,37 @@ SQL can read anything the source account can read through the attached database,
 source's own system catalogs. Source accounts should therefore be read-only and limited to the data
 meant for analysis.
 
+### Connector path
+
+The connector path reads a source through the DuckDB extension of the connectors distribution
+(`scalardb_analytics_connectors`, see [`../connector/README.md`](../connector/README.md)). The
+distribution is staged whole once per process, because the extension finds its library and ADBC
+drivers relative to itself, and every engine with such a source loads the extension from there; the
+extension initializes the library once for the process.
+
+- `ConnectorPath` binds the source's connection settings as DuckDB variables, creates a temporary
+  `scalardb_analytics_connectors` secret from them with the Connector as its provider, resets
+  the variables, and attaches the source with `ATTACH '' AS <name> (TYPE
+  scalardb_analytics_connectors, SECRET ..., READ_ONLY)`. No connection value appears in SQL
+  text, and `duckdb_secrets()` shows the password redacted.
+- The attached catalog reads namespaces, tables, and table metadata from the Connector itself.
+  **[Planned]** It is to read the table metadata the Physical Catalog registered instead.
+- Each scan offers its filters and projection to the Connector's pushdown planning and reads the
+  remote execution's Arrow stream. Columns without an Analytics type are not visible, and a table
+  whose shape no longer matches the source fails with a stale registration. The extension's
+  [README](https://github.com/scalar-labs/scalardb-analytics-connectors/blob/main/adapters/duckdb/README.md)
+  describes its catalog, planning, and type mapping.
+- The extension's definitions-file pragma and scan function are denied by query validation, so SQL
+  reaches sources only through the attached databases.
+- The extension's request time limits are the DuckDB settings `scalardb_analytics_connection_timeout`,
+  `scalardb_analytics_metadata_timeout`, and `scalardb_analytics_read_timeout`, all unlimited by
+  default. A request already sent to the source is not interrupted by a query time limit or
+  cancellation; it ends when the source answers.
+
 ### Interim scanner path
 
-Until a connector serves a source type, PostgreSQL and MySQL sources are read through DuckDB's
-packaged scanners. Every source-type-specific decision of this path lives in the
+Until a connector serves a source type, its sources are read through DuckDB's packaged scanners.
+Today this is MySQL; the path also still supports PostgreSQL. Every source-type-specific decision of this path lives in the
 `com.scalar.db.analytics.labs.duckdb.scanner` package, which is removed once connectors replace it:
 
 - `ScannerPath` turns a Physical Catalog `DataSourceConnection` into a read-only scanner
@@ -156,7 +190,9 @@ switches one source as one administrative operation:
 4. Resume accepting queries.
 
 The changed retrieval information makes a new version, which reaches the Semantic Catalog like any
-other retrieval. PostgreSQL and MySQL start on the scanner path with DuckDB's official extensions.
+other retrieval. MySQL starts on the scanner path with DuckDB's official extension. PostgreSQL moved
+to the connector path without this operation, because no table metadata of the scanner path is
+stored yet.
 **[Planned]** SQLite, Parquet, Iceberg, and Delta Lake are to start there too; Oracle has no such
 extension and is connector-only.
 

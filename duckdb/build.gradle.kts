@@ -111,6 +111,8 @@ dependencies {
     // The interim scanner read path takes data source connections as the Physical Catalog
     // resolves them.
     api(project(":physical-catalog"))
+    // The connector read path loads the DuckDB extension of the connectors distribution package.
+    implementation(project(":connector"))
     implementation(libs.arrow.c.data)
     implementation(libs.arrow.memory.unsafe)
     implementation(libs.duckdb.jdbc) {

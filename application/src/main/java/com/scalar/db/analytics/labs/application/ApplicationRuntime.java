@@ -7,6 +7,7 @@ package com.scalar.db.analytics.labs.application;
 import com.scalar.db.analytics.labs.duckdb.DuckDbQueryEngine;
 import com.scalar.db.analytics.labs.duckdb.NativeCatalogProvider;
 import com.scalar.db.analytics.labs.duckdb.SourceAttachment;
+import com.scalar.db.analytics.labs.duckdb.connector.ConnectorPath;
 import com.scalar.db.analytics.labs.duckdb.scanner.ScannerPath;
 import com.scalar.db.analytics.labs.physical.DataSourceConnection;
 import com.scalar.db.analytics.labs.physical.PhysicalCatalog;
@@ -101,11 +102,12 @@ public final class ApplicationRuntime implements AutoCloseable {
   }
 
   /**
-   * Chooses how the engine reads one data source. Every source uses the interim scanner path until
-   * a connector serves its source type; a data source then moves to the connector path here.
+   * Chooses how the engine reads one data source: through its Connector when the connectors package
+   * has one for its source type, and through the interim scanner path otherwise.
    */
   private static SourceAttachment readPath(String name, DataSourceConnection connection) {
-    return ScannerPath.attachment(name, connection);
+    return ConnectorPath.attachment(name, connection)
+        .orElseGet(() -> ScannerPath.attachment(name, connection));
   }
 
   private static NativeCatalogProvider nativeCatalogProvider(PhysicalCatalog physicalCatalog) {

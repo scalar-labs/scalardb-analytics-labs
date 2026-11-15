@@ -4,6 +4,7 @@
  */
 package com.scalar.db.analytics.labs.duckdb;
 
+import com.scalar.db.analytics.labs.connector.ConnectorPackage;
 import com.scalar.db.analytics.labs.duckdb.PackagedDuckDbExtensions.IncompatibleExtensionsException;
 import com.scalar.db.analytics.labs.duckdb.SourceAttachments.AttachFailedException;
 import com.scalar.db.analytics.labs.query.QueryEngine;
@@ -109,6 +110,7 @@ public final class DuckDbQueryEngine implements QueryEngine {
       connection = opened.connection();
       engineMemoryLimit = opened.memoryLimit();
       catalogHost = opened.catalogHost();
+
     } catch (RuntimeException e) {
       try {
         allocator.close();
@@ -142,6 +144,11 @@ public final class DuckDbQueryEngine implements QueryEngine {
       openedConnection = DriverManager.getConnection("jdbc:duckdb:", properties);
       registration =
           PackagedDuckDbExtensions.load(openedConnection, extensionDirectory, catalogProvider);
+      if (sources.stream().anyMatch(SourceAttachment::usesConnectorsExtension)) {
+        // The extension loads the package's library and, when a Data Source opens, its ADBC
+        // drivers relative to itself, from the package staged once for the process.
+        PackagedDuckDbExtensions.loadConnectors(openedConnection, ConnectorPackage.forProcess());
+      }
       SourceAttachments.attach(openedConnection, sources);
       configureConnection(openedConnection);
       return new OpenedConnection(openedConnection, registration, memoryLimit(openedConnection));
