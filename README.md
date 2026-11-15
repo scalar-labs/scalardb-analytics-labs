@@ -10,11 +10,14 @@ an external Query Agent; this repository does not implement the agent runtime or
 ## Run a query
 
 Java 25 is required. The Gradle wrapper supplies the repository's Gradle version. Building the
-embedded Physical Catalog also needs:
+embedded Physical Catalog and packaging the connectors also needs:
 
 - the upstream catalog source, the `upstream/scalardb-analytics` submodule. Gradle checks it out at
   its recorded commit when it is missing or behind, which needs network access. A submodule with
   uncommitted changes at another commit fails the build instead of being overwritten.
+- the scalardb-analytics-connectors distribution for the build host, which
+  [`connector/distribution/`](connector/distribution) carries for `osx_arm64` only; see
+  [`connector/README.md`](connector/README.md).
 - credentials for the private ScalarDB SQL package registry, as the `gprUsername` and
   `gprPassword` Gradle properties or the `GPR_USERNAME` and `GPR_PASSWORD` environment variables
 
@@ -101,8 +104,9 @@ registration, metadata discovery, SQL input modes, time limits, and the packaged
 | `duckdb/` | Embedded Query Engine boundary and DuckDB integration | Java and C++ product extension |
 | `physical-catalog/` | Boundary to the embedded upstream Physical Catalog | Java and Gradle |
 | `upstream/scalardb-analytics/` | Pinned upstream Physical Catalog source (submodule) | Java; included Gradle build |
+| `connector/` | The connectors distribution and the Java binding of its connector API library | Java and Gradle |
 | Semantic Catalog modules | Semantic catalog behavior | Java |
-| Connector artifacts | Source access and ADBC drivers | Rust and Cargo in `scalardb-analytics-connectors` |
+| Connectors distribution | Connector API library, Connectors, their DuckDB extension, and ADBC drivers | Rust and C++, built by `scalardb-analytics-connectors` |
 
 Root Gradle orchestrates these build units while their native build systems remain authoritative.
 The architecture and rationale are documented under [`docs/`](docs/README.md).

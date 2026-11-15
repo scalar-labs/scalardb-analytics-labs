@@ -58,6 +58,7 @@ include("application")
 include("query-engine")
 include("duckdb")
 include("physical-catalog")
+include("connector")
 include("semantic-catalog")
 
 // The Physical Catalog is built from the pinned upstream source, a submodule. Included builds are
