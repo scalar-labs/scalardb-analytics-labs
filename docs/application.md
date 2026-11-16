@@ -294,9 +294,11 @@ Re-retrieval never registers new tables.
 ## Startup, configuration, and isolation
 
 The application validates configuration and credential references, checks dependency compatibility,
-initializes components, publishes interfaces, and shuts down safely, as one lifecycle. **[Planned]**
-It initializes the connector API library once per process, hands it to the Query Engine adapter and
-the Physical Catalog, and finalizes it at shutdown.
+initializes components, publishes interfaces, and shuts down safely, as one lifecycle. It
+initializes the connector API library once per process, the first time table metadata retrieval or
+a Query Engine with a connector-path source needs it, and shuts it down after the Query Engine has
+closed. The engine's connectors extension uses that initialization instead of making its own.
+**[Planned]** It hands the same library to the Physical Catalog.
 
 The application unifies configuration but does not interpret source-specific provider payloads;
 connectors or the Physical Catalog codec validate and interpret them. Credentials never appear in

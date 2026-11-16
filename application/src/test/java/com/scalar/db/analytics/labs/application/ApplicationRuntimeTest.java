@@ -114,6 +114,32 @@ class ApplicationRuntimeTest {
   }
 
   @Test
+  void queriesThroughTheConnectorAfterAnOperationUsedTheRuntimesConnectorLibrary()
+      throws Exception {
+    var catalogName = newCatalogName();
+    for (int run = 0; run < 2; run++) {
+      try (var runtime = ApplicationRuntime.start(storeSettings())) {
+        var catalog = runtime.physicalCatalog();
+        if (run == 0) {
+          catalog.createCatalog(catalogName);
+          catalog.registerDataSource(
+              catalogName, "warehouse", postgresConnection(POSTGRES_PASSWORD));
+        }
+        // An operation such as table metadata retrieval initializes the library first; the
+        // engine's connectors extension then loads into the process that owns it.
+        runtime.connectorLibrary();
+        var queryEngine = runtime.startQueryEngine(catalogName);
+
+        // The second run sees a library shut down by the first runtime and initializes it again.
+        assertThat(
+                rows(
+                    queryEngine.execute("SELECT sum(amount)::BIGINT FROM warehouse.public.orders")))
+            .containsExactly(List.of(35L));
+      }
+    }
+  }
+
+  @Test
   void reportsAnUnattachableSourceWithoutItsCredentials() {
     var catalogName = newCatalogName();
     try (var runtime = ApplicationRuntime.start(storeSettings())) {

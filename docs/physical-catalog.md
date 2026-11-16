@@ -82,7 +82,8 @@ Catalog work runs on the catalog's own threads:
 
 `ApplicationRuntime` starts the catalog first. It starts at most one Query Engine, for one catalog
 and with the data sources registered in it at that moment, and closes the engine before the
-catalog, so the extension can never call a stopped catalog. Every state-bearing CLI invocation
+catalog, so the extension can never call a stopped catalog. Between the two it shuts down the
+connector API library it owns, after the engine that uses it has closed. Every state-bearing CLI invocation
 loads one workspace configuration, starts this runtime against its catalog store, and exits after
 the requested operation.
 

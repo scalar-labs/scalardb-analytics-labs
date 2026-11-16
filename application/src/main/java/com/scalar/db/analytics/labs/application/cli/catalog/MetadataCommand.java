@@ -129,7 +129,7 @@ final class MetadataRetrieveCommand extends WorkspaceCatalogCommand implements C
           CatalogOperations.executeInWorkspace(
               workspaceDirectory(),
               environment,
-              (workspace, catalog) -> TableMetadataRetrieval.retrieve(workspace, catalog, source));
+              (workspace, runtime) -> TableMetadataRetrieval.retrieve(workspace, runtime, source));
       CliOutput.write(
           commandSpec().commandLine().getOut(),
           new RetrievalOutput(

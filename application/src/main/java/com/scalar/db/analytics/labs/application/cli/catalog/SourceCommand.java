@@ -104,13 +104,15 @@ final class SourceRegisterCommand extends WorkspaceCatalogCommand implements Cal
           CatalogOperations.executeInWorkspace(
               workspaceDirectory(),
               environment,
-              (workspace, catalog) -> {
+              (workspace, runtime) -> {
                 var source =
-                    catalog.registerDataSource(workspace.catalogName(), sourceName, connection);
+                    runtime
+                        .physicalCatalog()
+                        .registerDataSource(workspace.catalogName(), sourceName, connection);
                 // Registration retrieves the registered tables' metadata for the Semantic Catalog.
                 try {
                   return new Registered(
-                      source, TableMetadataRetrieval.retrieve(workspace, catalog, sourceName));
+                      source, TableMetadataRetrieval.retrieve(workspace, runtime, sourceName));
                 } catch (ApplicationFailure e) {
                   var message = Objects.requireNonNull(e.getMessage());
                   throw new ApplicationFailure(

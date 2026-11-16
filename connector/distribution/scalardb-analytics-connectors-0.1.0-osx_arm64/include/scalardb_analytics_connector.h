@@ -922,6 +922,12 @@ typedef struct ScalardbAnalyticsConnectorApi {
   //
   // `bytes` was returned by this library and not yet freed.
   void (*owned_bytes_free)(struct ScalardbAnalyticsConnectorOwnedBytes bytes);
+  // Returns whether the library is initialized in this process.
+  //
+  // A caller that does not own the library, such as an adapter loaded into
+  // an application that initialized it, uses the library as it is when this
+  // returns true, and initializes it only when this returns false.
+  bool (*library_is_initialized)(void);
 } ScalardbAnalyticsConnectorApi;
 
 #ifdef __cplusplus

@@ -5,6 +5,7 @@
 package com.scalar.db.analytics.labs.application.cli.catalog;
 
 import com.scalar.db.analytics.labs.application.ApplicationFailure;
+import com.scalar.db.analytics.labs.application.ApplicationRuntime;
 import com.scalar.db.analytics.labs.application.workspace.Workspace;
 import com.scalar.db.analytics.labs.physical.PhysicalCatalog;
 import com.scalar.db.analytics.labs.physical.PhysicalCatalogException;
@@ -28,14 +29,17 @@ final class CatalogOperations {
     }
   }
 
-  /** As {@link #execute}, for an operation that also needs the workspace's other settings. */
+  /**
+   * As {@link #execute}, for an operation that also needs the workspace's other settings or the
+   * runtime's other components.
+   */
   static <T> T executeInWorkspace(
       Path workspaceDirectory,
       Map<String, String> environment,
-      BiFunction<Workspace, PhysicalCatalog, T> operation) {
+      BiFunction<Workspace, ApplicationRuntime, T> operation) {
     var workspace = Workspace.load(workspaceDirectory, environment);
     try (var runtime = workspace.openRuntime()) {
-      return operation.apply(workspace, runtime.physicalCatalog());
+      return operation.apply(workspace, runtime);
     } catch (PhysicalCatalogException e) {
       throw ApplicationFailure.from(e);
     }

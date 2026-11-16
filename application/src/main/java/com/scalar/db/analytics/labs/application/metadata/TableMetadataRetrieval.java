@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.cfg.JsonNodeFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.scalar.db.analytics.labs.application.ApplicationFailure;
+import com.scalar.db.analytics.labs.application.ApplicationRuntime;
 import com.scalar.db.analytics.labs.application.workspace.Workspace;
 import com.scalar.db.analytics.labs.connector.ConnectorException;
 import com.scalar.db.analytics.labs.connector.ConnectorLibrary;
@@ -37,7 +38,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.function.Function;
 
 /**
  * The retrieval operation (see {@code docs/application.md}, "Table metadata retrieval"): retrieves
@@ -101,12 +101,15 @@ public final class TableMetadataRetrieval {
   /**
    * Runs the retrieval operation for one registered data source of the workspace's catalog.
    *
-   * <p>The connector API library and the Semantic Catalog store are open only for the operation.
+   * <p>The Semantic Catalog store is open only for the operation. The connector API library is the
+   * runtime's, which stays initialized until the runtime closes.
    *
    * @throws ApplicationFailure classified when the Connector or the Semantic Catalog fails; the
    *     operation is then run again rather than resent from a stored copy
    */
-  public static Outcome retrieve(Workspace workspace, PhysicalCatalog catalog, String sourceName) {
+  public static Outcome retrieve(
+      Workspace workspace, ApplicationRuntime runtime, String sourceName) {
+    var catalog = runtime.physicalCatalog();
     var connection =
         catalog
             .resolveConnection(workspace.catalogName(), sourceName)
@@ -120,17 +123,15 @@ public final class TableMetadataRetrieval {
       case DataSourceConnection.PostgreSql postgreSql -> {
         var domain = workspace.semanticCatalogDomain();
         try (var semanticCatalog = SemanticCatalogStore.open(workspace.semanticCatalogSettings())) {
-          yield withLibrary(
-              library ->
-                  retrieve(
-                      catalog,
-                      workspace.catalogName(),
-                      sourceName,
-                      library,
-                      semanticCatalog,
-                      domain,
-                      "postgresql",
-                      postgreSqlOptions(postgreSql)));
+          yield retrieve(
+              catalog,
+              workspace.catalogName(),
+              sourceName,
+              library(runtime),
+              semanticCatalog,
+              domain,
+              "postgresql",
+              postgreSqlOptions(postgreSql));
         } catch (SemanticCatalogException e) {
           throw registrationFailed();
         }
@@ -138,32 +139,13 @@ public final class TableMetadataRetrieval {
     };
   }
 
-  private static Outcome withLibrary(Function<ConnectorLibrary, Outcome> operation) {
-    final ConnectorLibrary library;
+  private static ConnectorLibrary library(ApplicationRuntime runtime) {
     try {
-      library = ConnectorLibrary.open();
+      return runtime.connectorLibrary();
     } catch (ConnectorException | IOException e) {
       throw new ApplicationFailure(
           "TABLE_METADATA_RETRIEVAL_FAILED", "The connector API library could not be loaded.");
     }
-    Outcome outcome;
-    try {
-      outcome = operation.apply(library);
-    } catch (RuntimeException e) {
-      try {
-        library.close();
-      } catch (ConnectorException closeFailure) {
-        e.addSuppressed(closeFailure);
-      }
-      throw e;
-    }
-    try {
-      library.close();
-    } catch (ConnectorException e) {
-      throw new ApplicationFailure(
-          "TABLE_METADATA_RETRIEVAL_FAILED", "The connector API library could not shut down.");
-    }
-    return outcome;
   }
 
   private static Outcome retrieve(

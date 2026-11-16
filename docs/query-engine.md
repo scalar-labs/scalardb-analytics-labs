@@ -114,8 +114,11 @@ meant for analysis.
 The connector path reads a source through the DuckDB extension of the connectors distribution
 (`scalardb_analytics_connectors`, see [`../connector/README.md`](../connector/README.md)). The
 distribution is staged whole once per process, because the extension finds its library and ADBC
-drivers relative to itself, and every engine with such a source loads the extension from there; the
-extension initializes the library once for the process.
+drivers relative to itself, and every engine with such a source loads the extension from there. The
+extension uses the library already initialized in the process: `ApplicationRuntime` initializes it
+before it starts an engine with such a source and shuts it down after the engine closes. An engine
+started without that owner, as in this module's tests, has the extension initialize the library,
+which then stays initialized until the process exits.
 
 - `ConnectorPath` binds the source's connection settings as DuckDB variables, creates a temporary
   `scalardb_analytics_connectors` secret from them with the Connector as its provider, resets

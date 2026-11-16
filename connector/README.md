@@ -28,11 +28,13 @@ package's `include/scalardb_analytics_connector.h`:
   loader identifies the library by its install name, so a second staged copy would resolve to the
   library already loaded.
 - `ConnectorLibrary.open()` loads that library and initializes it with the package's driver
-  directory. The library allows one initialization per process at a time, so one instance is open
-  at a time. The package's DuckDB extension initializes the same library when it loads and never
-  shuts it down; an instance opened after that shares the extension's initialization and leaves
-  it in place when it closes. The extension cannot yet load while an instance that initialized the
-  library is open. `close()` shuts the library down when the instance initialized it.
+  directory, and `close()` shuts it down. The library allows one initialization per process at a
+  time, so one instance is open at a time, and opening fails when something else in the process
+  already initialized the library. The instance owns the library: the package's DuckDB extension,
+  loaded while it is open, uses its initialization and never shuts the library down, so the
+  instance closes only after the DuckDB databases that loaded the extension have closed. An
+  extension loaded while no instance is open initializes the library itself until the process
+  exits.
 - `DataSource` lists namespaces and tables and retrieves table metadata, each request on a session
   of its own. Connection options are passed as the text the Connector parses.
 - The records (`TableRecord`, `TableMetadata`, `Column`, `Constraint`, `AnalyticsType`,

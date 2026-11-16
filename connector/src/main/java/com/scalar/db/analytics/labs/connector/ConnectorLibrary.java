@@ -27,13 +27,15 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>Opening loads the library of the package staged for the process ({@link
  * ConnectorPackage#forProcess()}) and initializes it with the package's ADBC driver directory. The
- * library allows one initialization per process at a time, so at most one instance is open. Closing
- * shuts the library down when this instance initialized it.
+ * library allows one initialization per process at a time, so at most one instance is open, and
+ * opening fails with {@link ConnectorException.Kind#INVALID_STATE} when something else in the
+ * process already initialized the library. Closing shuts the library down.
  *
- * <p>The package's DuckDB extension initializes the same library when it loads and never shuts it
- * down. An instance opened after the extension loaded shares that initialization and leaves the
- * library initialized when it closes. The extension cannot yet load while an instance that
- * initialized the library is open.
+ * <p>The instance owns the library for the process. The package's DuckDB extension, loaded while an
+ * instance is open, uses that initialization and never shuts the library down, so an instance is
+ * closed only after every DuckDB database that loaded the extension has closed. An extension loaded
+ * while no instance is open initializes the library itself, which then stays initialized until the
+ * process exits.
  */
 public final class ConnectorLibrary implements AutoCloseable {
   private static final AtomicBoolean OPEN = new AtomicBoolean();
@@ -41,8 +43,6 @@ public final class ConnectorLibrary implements AutoCloseable {
   private final Arena libraryArena;
   final Functions functions;
   private final AtomicBoolean closed = new AtomicBoolean();
-  // Whether this instance initialized the library, and so shuts it down.
-  private boolean initialized;
 
   private ConnectorLibrary(Arena libraryArena, MemorySegment api) {
     this.libraryArena = libraryArena;
@@ -86,14 +86,8 @@ public final class ConnectorLibrary implements AutoCloseable {
       var settings = arena.allocate(ADDRESS);
       settings.set(ADDRESS, 0, arena.allocateFrom(drivers.toAbsolutePath().toString()));
       functions.check((MemorySegment) functions.libraryInitialize.invokeExact(settings));
-      initialized = true;
     } catch (ConnectorException e) {
-      // The package's DuckDB extension initializes the same library, from the same staged package
-      // and so with the same driver directory, when it loads; the library is then shared, and the
-      // extension keeps it initialized.
-      if (e.kind() != ConnectorException.Kind.INVALID_STATE) {
-        throw e;
-      }
+      throw e;
     } catch (Throwable e) {
       throw new IllegalStateException(e);
     }
@@ -153,10 +147,6 @@ public final class ConnectorLibrary implements AutoCloseable {
     if (!closed.compareAndSet(false, true)) {
       return;
     }
-    if (!initialized) {
-      release(libraryArena);
-      return;
-    }
     try {
       functions.check((MemorySegment) functions.libraryShutdown.invokeExact());
     } catch (ConnectorException e) {
@@ -182,8 +172,8 @@ public final class ConnectorLibrary implements AutoCloseable {
 
   /** Downcall handles of the function table entries this binding calls. */
   static final class Functions {
-    /** The table holds 36 function pointers. */
-    static final long TABLE_SIZE = 36L * 8;
+    /** The table holds 37 function pointers. */
+    static final long TABLE_SIZE = 37L * 8;
 
     private static final Linker LINKER = Linker.nativeLinker();
 
