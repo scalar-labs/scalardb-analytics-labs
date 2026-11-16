@@ -50,6 +50,19 @@ neither their URN nor their content is returned, only the fact that a hidden ref
 Withholding URNs keeps the existence and names of hidden objects from leaking, without making the
 rest of the knowledge unusable.
 
+**[Planned]** **Language.** A read takes, optionally, the language to read in, one of the domain's
+declared languages (see [`languages.md`](languages.md#reading-in-a-language)). The application fills it
+in from the using party's preferred language when the caller names none, and without either the
+domain's primary language is used; a language the domain does not declare is invalid input. Every
+text a read returns, in Fact values, scopes, evaluations, answers, and feedback, comes as its
+original with the language it was written in. When that differs from the language read in, the
+text comes with its translation, marked as a translation, or marked as pending when the translation
+task has not run yet (see [`languages.md`](languages.md#translations)). A translation never
+replaces the original, so a caller can always show which wording was judged. Business-term names
+are not translated: each language's name is returned at its own Fact Address. Reading the domain's
+languages returns the declared languages and the primary one, so an agent can map a reader's
+request, such as "show it in English", to a language it can pass.
+
 **[Planned]** **Authority check.** Submitting answers and resolving a conflict take a reference to the result
 of checking the deciding party's authority. The value is opaque, recorded without interpretation,
 and required to be present. The application issues it (see
@@ -219,6 +232,9 @@ Finding elements returns the URN and kind of elements whose existence Fact is se
 optionally filtered by element kind, by parent element (the Fields of a Dataset), or by the written
 form of a business term, which returns the elements its selected referenced-element Facts point to.
 It does not interpret question wording; finding elements from a question is the Query Agent's work.
+**[Planned]** A written form matches the names of every declared language unless the call names
+one, because a reader may use a name from a language other than the one they read in. Each result
+says which language's name matched and carries the term's names in the other languages.
 
 ### Requesting knowledge
 
@@ -242,6 +258,8 @@ undirected), each end as the URNs of all its elements in any order, without its 
    them, does not overlap, or is unrestricted. Non-overlapping Fact Addresses are still returned.
 
 Requesting all predicates of an element judges every closed-core predicate of its kind as above.
+**[Planned]** A language-qualified predicate is judged once per declared language, so a business
+term without an English name reports its written form as missing knowledge for `en`.
 It also returns every other Fact Address of the element, such as those of free-description and
 Generator-declared predicates, which cannot be listed in advance.
 

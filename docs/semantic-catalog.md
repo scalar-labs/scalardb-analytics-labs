@@ -79,6 +79,11 @@ consent. A confirmed Fact is adopted knowledge, not proven knowledge. See
 [`semantic-catalog/construction.md`](semantic-catalog/construction.md) and
 [`semantic-catalog/generators.md`](semantic-catalog/generators.md).
 
+One catalog serves readers of several languages. A domain declares its languages; a business
+term's name is knowledge in each of them, while every other text has one original, recorded with its
+language, and reaches readers of other languages as an unreviewed translation. See
+[`semantic-catalog/languages.md`](semantic-catalog/languages.md).
+
 ## Responsibilities and boundaries
 
 The Semantic Catalog owns semantic state and its construction: the log, the Catalog Snapshot rules,

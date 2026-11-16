@@ -43,7 +43,7 @@ The glossary keeps names and definitions consistent and does not override the do
 | domain model | — | — | The types, and the relationships between them, held by the code of the `semantic-catalog` module. Distinct from the business domain model. | [`architecture.md`](architecture.md) |
 | identifier correspondence | — | `IdentityLink` | The conditions under which values of two Field sets, in one data source or in different ones, represent the same object, and the relationship between the sets of objects each side represents. Its matching condition may normalize values with steps from a closed list. The set relationship distinguishes equal, subset, superset, partially overlapping, and disjoint. Joining Datasets correctly rests on it; there is no separate join element, and a foreign key is a declaration that supports one. | [`semantic-catalog/record-model.md`](semantic-catalog/record-model.md) |
 | Measure | — | `Measure` | The definition of a business quantity: its meaning, base Dataset, aggregation rule, filter conditions, reference time Field, and default time granularity. A period that changes per question belongs to the question, not to the Measure. | [`semantic-catalog.md`](semantic-catalog.md) |
-| business term | — | `Term` | A word used in the business, recorded as its written form and the element it refers to (a Field, Measure, concept, or other element). | [`semantic-catalog.md`](semantic-catalog.md) |
+| business term | — | `Term` | Something the business names, recorded with its written form in each of the domain's languages and the element it refers to (a Field, Measure, concept, or other element). | [`semantic-catalog.md`](semantic-catalog.md) |
 
 ## Statements and records
 

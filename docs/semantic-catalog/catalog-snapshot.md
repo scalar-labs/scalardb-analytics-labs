@@ -121,6 +121,10 @@ each Fact Address whether the applicability scope overlaps them, does not overla
 unrestricted, and the Query Agent decides which to use in light of the question's intent, asking the
 user when unsure.
 
+**[Planned]** The names of one business term in different languages are likewise separate Fact
+Addresses (see [`languages.md`](languages.md#names-one-fact-per-language)): each language has its own selected
+name, and only two names in one language conflict.
+
 For each returned Fact the Query Agent can see its state; its checks as signals, with their bases
 and the content of what they reference; whether it was confirmed by machine judgement or by
 consent; the applicability scope and dependencies, with rejected or retired Facts among its inputs

@@ -48,7 +48,7 @@ the field is aggregated.
 | Concept | Meaning |
 | Measure | Meaning, base Dataset, aggregation rule, filter conditions, reference time Field, default time granularity |
 | Dimension | Meaning, Dimension kind, source Field and classification expression, source time Field, hierarchy, calendar rule |
-| Business term | Written form, referenced element |
+| Business term | Written form in each declared language (see [`languages.md`](languages.md)), referenced element |
 
 | Edge element | Ends and direction | Identifying part | Predicates |
 | --- | --- | --- | --- |
@@ -231,7 +231,7 @@ The record kind and identifier of each record, with full URNs for a domain `sale
 | Field | `field` | Its table's identifier and `.<column>` | `urn:scalardb:analytics:sales:field:shop.public.orders.amount` | When a Fact stating its existence is first accepted |
 | Concept, Measure, Dimension, business term | `concept`, `measure`, `dimension`, `business-term` | The slug the proposing Generator gives | `urn:scalardb:analytics:sales:measure:ec-sales` | When a Fact stating its existence is first accepted |
 | Edge element | `identifier-correspondence`, `concept-relationship` | `<one end>,<other end>`, each end the identifiers of its elements, sorted and joined by `+`; an undirected edge's ends in a fixed order | `urn:scalardb:analytics:sales:identifier-correspondence:shop.public.orders.customer_id,shop.public.customers.id` | When no existing one is the same under the rules below |
-| Fact Address | `fact-address` | `<element kind>:<element identifier>/<predicate>` | `urn:scalardb:analytics:sales:fact-address:field:shop.public.orders.amount/meaning` | When no existing one is the same under the rules below |
+| Fact Address | `fact-address` | `<element kind>:<element identifier>/<predicate>`, followed by `;<language tag>` for a language-qualified predicate | `urn:scalardb:analytics:sales:fact-address:field:shop.public.orders.amount/meaning`, `urn:scalardb:analytics:sales:fact-address:business-term:ec-sales/written-form;ja` | When no existing one is the same under the rules below |
 | Fact | `fact` | `<Fact Address identifier>/<sequence number from 1>` | `urn:scalardb:analytics:sales:fact:field:shop.public.orders.amount/meaning/1` | When no existing one is the same under the rules below |
 | Fact Revision | `fact-revision` | `<Fact identifier>@<log position of the producing Fact Event>` | `urn:scalardb:analytics:sales:fact-revision:field:shop.public.orders.amount/meaning/1@c2.32` | Each time a Fact Event applies |
 | Input Resource, Input Observation | `input-resource`, `input-observation` | Log position of the creating record | `urn:scalardb:analytics:sales:input-observation:c2.10` | On a new source, on each observation |
@@ -242,13 +242,13 @@ from 2, in log order: a second Measure proposed with the slug `ec-sales` is
 `urn:scalardb:analytics:sales:measure:ec-sales~2`, and a third, in a later commit, `~3`. Two edges
 between the same ends with different identifying parts are told apart the same way. A Fact Address
 with a non-empty applicability scope, or of a free-description predicate, always has one
-(`…/meaning~2`), so the plain identifier stays with the Fact Address found by element and
-predicate. A Fact Address carries its element's kind as well as its identifier, because elements of
+(`…/meaning~2`), so the plain identifier stays with the Fact Address found by element,
+predicate, and language. A Fact Address carries its element's kind as well as its identifier, because elements of
 different kinds may share a slug: `concept:ec-sales` and `measure:ec-sales` have different Fact
 Addresses. Facts at one Fact Address are numbered in log order, across commits.
 
 Names are percent-encoded as UTF-8 bytes, leaving only ASCII letters, digits, `-`, and `_` as
-written, so a name never contains a separator (`.`, `/`, `~`, `@`, `,`, `+`, `:`). A column
+written, so a name never contains a separator (`.`, `/`, `~`, `@`, `,`, `+`, `:`, `;`). A column
 `unit price` gives `field:shop.public.orders.unit%20price`, a column `売上` gives
 `field:shop.public.orders.%E5%A3%B2%E4%B8%8A`, and a table `sales.v2` gives
 `dataset:shop.public.sales%2Ev2`. A slug is lowercase words of letters and digits joined by single
@@ -278,10 +278,11 @@ are limited to cases that are easy to identify:
   one edge.
   A proposal that changes the ends or the identifying part becomes a new edge plus a retirement
   proposal for the old one.
-- A **Fact Address** is an element, a predicate, and an applicability scope. An applicability scope
+- A **Fact Address** is an element, a predicate, an applicability scope, and, for a
+  language-qualified predicate, a language (see [`languages.md`](languages.md#names-one-fact-per-language)). An applicability scope
   pairs a natural-language description with the URNs of the entities it mentions, and an
-  unrestricted statement has an empty scope. A Fact Address with an empty scope is found by element
-  and predicate. One with a description is the same only when the proposer points to it.
+  unrestricted statement has an empty scope. A Fact Address with an empty scope is found by
+  element, predicate, and language. One with a description is the same only when the proposer points to it.
 - A **Fact** with a closed-range predicate is the same when its value matches at the same Fact
   Address. Other Facts are the same only when the proposer points to them.
 
@@ -291,7 +292,8 @@ Wording differences that these rules miss are caught by the duplicate check befo
 Separate Facts at one Fact Address are different answers to the same point and therefore
 incompatible. Values that hold at the same time in different applicability scopes, such as the
 posting date for accounting's monthly report and the order date for promotion analysis, belong to
-different Fact Addresses and do not conflict. Whether overlapping scopes disagree is not decided by
+different Fact Addresses and do not conflict, as do the names of one business term in different
+languages. Whether overlapping scopes disagree is not decided by
 rule; a Generator can propose that they are incompatible, and that proposal is judged like any
 other.
 

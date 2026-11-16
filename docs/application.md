@@ -63,6 +63,9 @@ hold:
 
 - the semantics owners, and the Query Agents an administrator permits (see
   [Callers and authority](#callers-and-authority));
+- the languages the domain's readers use and which of them is primary (see
+  [`semantic-catalog/languages.md`](semantic-catalog/languages.md#declared-languages)), and the
+  language each principal prefers to read in, which the application passes on reads that name none;
 - whether value distributions (off by default) and usage feedback (on by default) reach models;
 - whether data checks run (on by default).
 
@@ -216,6 +219,15 @@ planning, or SQL-generation prompt.
 
 In both, only the owner's answer consents. The agent never answers for the owner, and stops at a
 consent when the user is not one (see [Callers and authority](#callers-and-authority)).
+
+**[Planned]** Both workflows follow the reader's language. When the user asks, in whatever words,
+to read in another language, the agent maps the request to one of the domain's declared languages
+and passes it on every later read of the session; the principal's preferred language changes only
+when the user asks for it to change from then on. The agent shows the translations the Semantic
+Catalog returns and never translates knowledge itself, so a reader can always tell a translation
+from the wording that was judged, and writes its own explanations in the reader's language. When
+answering a question, it composes SQL from original text and requests translations only for text it
+shows the user, such as a definition it cites, so an unreviewed translation never shapes a query.
 
 **[Planned]** The first distribution of the Agent Skill for an agent host is a Claude Code plugin in
 the distribution. A user starts Claude Code with the plugin directory (`claude --plugin-dir`), and

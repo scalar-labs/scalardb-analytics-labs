@@ -518,6 +518,10 @@ instructions, named and hashed, so changing either makes a new version.
 product owns, such as one built on Pi or on a DeepSeek harness. The adapter boundary is what keeps
 that change away from the Generators.
 
+**[Planned]** Every caller instructs the model to write in the domain's primary language and
+records that language on what it writes, and analytical semantics inference proposes a business
+term's name for each declared language (see [`languages.md`](languages.md)).
+
 An unavailable model fails the build task, which can be resumed. So do a model that gives no answer
 in time and an answer not in the form the caller asked for: the policy evaluation model fails rather
 than reading such an answer as a consent request, so a model that misreads its instructions is
