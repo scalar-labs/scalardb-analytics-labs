@@ -37,6 +37,9 @@ public interface Generator {
     /** A new physical schema observation creates a build task. */
     record PhysicalSchema() implements Input {}
 
+    /** A new document observation creates a build task. */
+    record Document() implements Input {}
+
     /**
      * The confirmation of a Fact of a predicate of an element kind creates a build task. The
      * predicate {@link Vocabulary#UNIQUENESS_PREFIX} stands for the uniqueness of every Field set.

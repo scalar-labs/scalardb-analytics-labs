@@ -91,8 +91,8 @@ final class BuildTasks {
 
   /**
    * The Generators an observation calls for: a physical schema calls for those that read physical
-   * schemas, and usage feedback with related Facts for those that read it. Feedback without related
-   * Facts calls for none yet.
+   * schemas, a document for those that read documents, and usage feedback with related Facts for
+   * those that read it. Feedback without related Facts calls for none yet.
    */
   private static List<Generator> observationReaders(
       Projection projection, LogRecord.InputObservation observation) {
@@ -103,6 +103,7 @@ final class BuildTasks {
     }
     return switch (kind.get()) {
       case PHYSICAL_SCHEMA -> Generators.readingPhysicalSchema();
+      case DOCUMENT -> Generators.readingDocuments();
       case USAGE_FEEDBACK -> {
         var content = observation.content();
         var related = content == null ? null : content.get("relatedFacts");

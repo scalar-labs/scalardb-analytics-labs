@@ -145,6 +145,30 @@ final class DocumentSections {
   }
 
   /**
+   * Whether a text names one of the names, matched as {@link #choose} matches them.
+   *
+   * @param names such as the table and column names of a Dataset
+   */
+  static boolean names(String text, Collection<String> names) {
+    return patterns(names).stream().anyMatch(name -> name.matcher(text).find());
+  }
+
+  /**
+   * The patterns of names: each matched regardless of case where no ASCII letter, digit, or
+   * underscore adjoins it.
+   */
+  private static List<Pattern> patterns(Collection<String> names) {
+    return names.stream()
+        .filter(name -> !name.isBlank())
+        .map(
+            name ->
+                Pattern.compile(
+                    "(?<![A-Za-z0-9_])" + Pattern.quote(name) + "(?![A-Za-z0-9_])",
+                    Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE))
+        .toList();
+  }
+
+  /**
    * Chooses the sections one call reads: every section when all fit within the bound, otherwise the
    * sections naming one of the names, in document order, as far as the bound allows.
    *
@@ -158,15 +182,7 @@ final class DocumentSections {
     if (total <= bound) {
       return new Chosen(all, List.of());
     }
-    var named =
-        names.stream()
-            .filter(name -> !name.isBlank())
-            .map(
-                name ->
-                    Pattern.compile(
-                        "(?<![A-Za-z0-9_])" + Pattern.quote(name) + "(?![A-Za-z0-9_])",
-                        Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE))
-            .toList();
+    var named = patterns(names);
     var chosen = new ArrayList<Section>();
     var leftOut = new LinkedHashSet<DocumentObservation>();
     var used = 0L;

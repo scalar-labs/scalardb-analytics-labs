@@ -11,8 +11,9 @@ counts that are expected to be tuned from use of the product.
 
 ## One rule per Generator
 
-The schema-interpretation and data-check Generators, and row and Field meaning inference, are
-implemented. **[Planned]** The other meaning-inference Generators are not.
+The schema-interpretation and data-check Generators, and row and Field meaning inference, concept
+inference, and correction interpretation, are implemented. **[Planned]** Analytical semantics
+inference and identifier correspondence inference are not.
 
 Each interpretation or check rule is its own Generator. The rule that derives a key from a primary
 key and the rule that derives an identifier correspondence from a foreign key are separate
@@ -59,9 +60,10 @@ never by itself a basis for derivation.
 **Input kinds.** Each Generator declares what it may read, and build tasks are created from these
 declarations. A commit that records a new observation, a confirmation, or an acceptance creates, in
 the same transaction, a run of each Generator that reads it, or adds the commit's log record as a
-trigger to the run of that Generator not started yet. **[Planned]** No Generator declares document
-input or usage feedback without related Facts yet, so those observations create no build tasks; row
-and Field meaning inference read the domain's current documents when their other inputs start them.
+trigger to the run of that Generator not started yet. Concept inference declares document input.
+**[Planned]** No Generator declares usage feedback without related Facts yet, so that feedback
+creates no build tasks. Row and Field meaning inference read the domain's current documents when
+their other inputs start them.
 
 | Input kind | Creates build tasks when |
 | --- | --- |
@@ -302,10 +304,10 @@ coincidental correspondence. For the same reason, keys from candidate key discov
 
 ## Meaning inference
 
-Row and Field meaning inference, with documents as input and `document` checks, and correction
-interpretation are implemented. **[Planned]** Concept inference, analytical semantics inference,
-identifier correspondence inference, and the triggers of documents and of feedback without related
-Facts are not.
+Row and Field meaning inference, with documents as input and `document` checks, concept inference,
+with the trigger of documents, and correction interpretation are implemented. **[Planned]**
+Analytical semantics inference, identifier correspondence inference, and the trigger of feedback
+without related Facts are not.
 
 Meaning inference uses a model for predicates that declarations and data cannot decide. For a target
 element it passes names and types, the table's source metadata with the source metadata schema it
@@ -320,7 +322,7 @@ each.
 | --- | --- |
 | Row meaning inference | Confirmed Dataset existence, documents, feedback without related Facts |
 | Field meaning inference | Confirmed Field existence, documents, feedback without related Facts |
-| Concept inference | Confirmed row meaning and Field meaning, documents, feedback without related Facts |
+| Concept inference | Confirmed row kind and Field meaning, documents, feedback without related Facts |
 | Analytical semantics inference | Documents, feedback without related Facts, confirmed Field meaning |
 | Identifier correspondence inference | Confirmed Field meaning and represented concept, documents, feedback without related Facts |
 | Correction interpretation | Feedback with related Facts, including corrections from review |
@@ -335,6 +337,19 @@ customers and POS members, needs several Datasets in view at once, and Concepts 
 several Generators would duplicate one another. The relationships between concepts, including the
 multiplicity the business allows, likewise need the confirmed meanings of several Datasets. Fewer
 model calls come from passing several targets in one call, not from merging rules.
+
+Concept inference targets a Dataset's row concept once its row kind is confirmed, and a Field's
+represented concept once its meaning is confirmed. One call passes the targets of several Datasets
+with their confirmed Facts, the Concepts in use (candidates and confirmed ones) with their meaning,
+the relationships between them, every slug taken, and the relevant document parts. The model refers
+to a Concept in use or declares a new one with a slug, so registering the POS database after the
+e-commerce one refers members to the customer concept the customers table already has. A new
+Concept is created only when a row, a Field, or a relationship refers to it; a slug declared again in
+a later call of the same run refers to the Concept the earlier call created, and a slug already
+taken, even by a rejected Concept, creates nothing. Calls of one run cannot see one another's new
+Concepts otherwise, so two calls may still create two Concepts for one business object; the
+duplicate check is expected to catch them. A reference to a Concept depends on the Concept's
+existence, and a relationship on the existence of both ends.
 
 Apart from correction interpretation, meaning inference does not propose uniqueness or set
 relationships, which data checks decide. It also does not propose a Fact
@@ -379,9 +394,9 @@ What concerns deterministic Generators is implemented: order through declared in
 observations and confirmations, and producing for every target. The conditions and bounds for
 non-deterministic Generators are implemented for row and Field meaning inference, which confirmations
 trigger, and for correction interpretation, which feedback with related Facts triggers.
-**[Planned]** The other triggers of non-deterministic Generators are not: feedback without related
-Facts, a Fact no longer selected, an impact judgement, a rejection, retirement, or cascade, and a
-document.
+Concept inference also runs on a new document observation. **[Planned]** The other triggers of
+non-deterministic Generators are not: feedback without related Facts, a Fact no longer selected, an
+impact judgement, and a rejection, retirement, or cascade.
 
 **Order.** The strategy defines no global order. Order emerges because a later Generator declares as
 input the confirmation of what an earlier one produces. When the e-commerce database is registered:
@@ -410,7 +425,8 @@ candidates that could not reach the deciding party anyway.
 | A Fact no longer selected | The Fact Addresses of Facts that depended on it |
 | An impact judgement | The Fact Addresses of Facts selected for re-examination |
 | A rejection, retirement, or cascade | That Fact's Fact Address |
-| A document or feedback without related Facts | The Generator's predicates for elements the model selects from the content |
+| A document | For concept inference, the confirmed Datasets the document names by table or column, matched as the relevant parts of documents are, with their Fields |
+| Feedback without related Facts | **[Planned]** The Generator's predicates for elements the model selects from the content |
 
 A deterministic Generator produces for every target. Identical acceptances record nothing, so
 producing again costs no records. It outputs a previously rejected value again only when the
@@ -444,8 +460,9 @@ recorded. Without new input, construction therefore produces no new records. Non
 Generators are bounded by initial behavior:
 
 - One candidate per Fact Address per run.
-- One model call asks about the targets of one table, at most 25 of them, so a large catalog becomes
-  several calls a model can answer in time rather than one that fails each time it is resumed.
+- One model call asks about at most 25 targets, those of one table for row and Field meaning
+  inference and of several Datasets for concept inference, so a large catalog becomes several calls
+  a model can answer in time rather than one that fails each time it is resumed.
 - After a rejection, as opposed to a correction, at most one further candidate with another value
   until a depended-on input gets a newer observation.
 - One candidate per correction.
@@ -474,8 +491,9 @@ and a Physical Catalog reference never moves; a renamed table likewise becomes a
 The policy evaluation model (see
 [`construction.md`](construction.md#choosing-the-confirmation-path)) calls a language model through
 an **adapter**, the only part of the Semantic Catalog that knows how a model is reached.
-Row and Field meaning inference call it the same way. **[Planned]** So will the other
-meaning-inference Generators, impact judgement, and the duplicate check. A
+Row and Field meaning inference, concept inference, and correction interpretation call it the same
+way. **[Planned]** So will the other meaning-inference Generators, impact judgement, and the
+duplicate check. A
 caller passes a prompt and receives the model's answer; it never depends on a particular provider,
 so the provider can change without changing a Generator.
 
@@ -530,7 +548,10 @@ noticed.
 ## Input passed to external models
 
 Row and Field meaning inference apply the settings for data count statistics and value samples, pass
-the relevant parts of documents, and record what they pass as inputs read.
+the relevant parts of documents, and record what they pass as inputs read. Concept inference reads
+no data values; besides confirmed Facts and documents, it passes the Concepts in use and their
+relationships, candidates included, because a Concept another call proposed must be visible to be
+referred to rather than created again.
 
 The source metadata schema is the one the latest derived record names, so the model reads each
 document with the schema it was written against. A candidate records the schema's URN as read but

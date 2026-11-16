@@ -146,8 +146,18 @@ Some values deserve note:
   other's and superset that the other's are among that end's. The values are `equal`, `subset`,
   `superset`, `partial-overlap`, and `disjoint`. Without it, nobody can tell whether an inner join
   drops members who appear on one side only.
-- A concept relationship's **multiplicity** is what the business allows, such as a member making any
-  number of purchases. Data can only show what holds now: if every member has bought once so far,
+- The **concept a row represents** (`row-concept`) and a Field's **represented concept** are the
+  URN of a Concept, compared as a reference.
+- A concept relationship's **relationship kind** is `same-object` for an undirected edge between two
+  Concepts that denote the same object, or `association` for a directed edge between different
+  objects related in the business, such as a customer placing orders. The list is closed because the
+  kind is part of the edge's identity, and free wording would make one relationship two edges.
+- A concept relationship's **multiplicity** is `{"from": <bound>, "to": <bound>}`, each bound one of
+  `zero-or-one`, `exactly-one`, `zero-or-more`, and `one-or-more`: `to` is how many instances of the
+  end the edge goes to one instance of the end it starts from relates to, and `from` the reverse. A
+  customer placing orders is `{"from": "exactly-one", "to": "zero-or-more"}` from customer to order.
+  It is what the business allows, such as a member making any number of purchases. Data can only
+  show what holds now: if every member has bought once so far,
   the purchase rows' member IDs do not repeat, yet a query that relies on that double-counts as soon
   as a member buys again. The uniqueness of Field sets records what the data shows; concept
   multiplicity records the rule.

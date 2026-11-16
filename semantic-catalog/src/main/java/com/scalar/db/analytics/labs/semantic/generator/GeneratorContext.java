@@ -485,7 +485,28 @@ public final class GeneratorContext {
 
   /** The identifier correspondence with exactly this identity, if one exists. */
   public Optional<String> correspondence(ElementIdentity.IdentifierCorrespondence identity) {
+    return edge(identity);
+  }
+
+  /** The edge with exactly this identity, if one exists. Every end must be resolved to a URN. */
+  public Optional<String> edge(ElementIdentity.Edge identity) {
     return lookup.edge(identity.kind(), Projection.edgeIdentity(identity));
+  }
+
+  /** Every element of a kind, whatever its Facts' states, oldest first. */
+  public List<String> elements(ElementKind kind) {
+    return transaction.elementsOfKind(domain, kind);
+  }
+
+  /** The identity of a concept relationship, if the edge is one. */
+  public Optional<ElementIdentity.ConceptRelationship> conceptRelationship(String edge) {
+    return projection
+        .element(edge)
+        .filter(row -> row.kind() == ElementKind.CONCEPT_RELATIONSHIP)
+        .flatMap(row -> Optional.ofNullable(row.edge()))
+        .map(found -> LogRecordJson.fromStored(found.identifyingPart(), ElementIdentity.class))
+        .filter(ElementIdentity.ConceptRelationship.class::isInstance)
+        .map(ElementIdentity.ConceptRelationship.class::cast);
   }
 
   // Facts

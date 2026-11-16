@@ -4,6 +4,8 @@
  */
 package com.scalar.db.analytics.labs.semantic.projection;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.scalar.db.analytics.labs.semantic.model.Check;
 import com.scalar.db.analytics.labs.semantic.model.CommitRejectedException;
 import com.scalar.db.analytics.labs.semantic.model.Dependency;
@@ -428,11 +430,10 @@ public final class CommitResolver {
               address.predicate(),
               address.scope().mapRefs(toRecord),
               address.predicateDefinition());
-      case LogRecord.Fact fact ->
-          new LogRecord.Fact(
-              toRecord.apply(fact.address()),
-              fact.value(),
-              fact.identityKey() == null ? null : fact.identityKey().mapRefs(toRecord));
+      case LogRecord.Fact fact -> {
+        var key = fact.identityKey() == null ? null : fact.identityKey().mapRefs(toRecord);
+        yield new LogRecord.Fact(toRecord.apply(fact.address()), referenceValue(fact, key), key);
+      }
       case LogRecord.InputResource resource -> resource;
       case LogRecord.InputObservation observation -> {
         if (observation.previous() != null) {
@@ -500,6 +501,25 @@ public final class CommitResolver {
               resolution.wording(),
               resolution.reviewPresentation());
     };
+  }
+
+  /**
+   * The value a Fact is written with. A Fact whose value is one record, such as the Concept a row
+   * represents, may be proposed with a null value and an identity key of that one reference: its
+   * value is then the URN the reference resolves to, so a proposer can refer to a record of the
+   * same request, whose URN is issued only now.
+   */
+  private static JsonNode referenceValue(LogRecord.Fact fact, @Nullable IdentityKey key) {
+    if (!fact.value().isNull()) {
+      return fact.value();
+    }
+    if (key == null
+        || key.parts().size() != 1
+        || !(key.parts().getFirst() instanceof IdentityKey.Part.Reference reference)) {
+      throw new IllegalArgumentException(
+          "A Fact without a value needs an identity key of one reference to take it from");
+    }
+    return JsonNodeFactory.instance.textNode(reference.record().urnValue());
   }
 
   private List<Dependency> dependencies(List<Dependency> dependencies) {

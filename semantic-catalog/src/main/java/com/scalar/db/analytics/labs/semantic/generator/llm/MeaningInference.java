@@ -18,27 +18,20 @@ import com.scalar.db.analytics.labs.semantic.generator.ModelGenerator;
 import com.scalar.db.analytics.labs.semantic.generator.Output;
 import com.scalar.db.analytics.labs.semantic.generator.Proposals;
 import com.scalar.db.analytics.labs.semantic.llm.LanguageModelException;
-import com.scalar.db.analytics.labs.semantic.model.Check;
 import com.scalar.db.analytics.labs.semantic.model.Dependency;
-import com.scalar.db.analytics.labs.semantic.model.Document;
 import com.scalar.db.analytics.labs.semantic.model.IdentityKey;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
-import com.scalar.db.analytics.labs.semantic.model.LogRecordJson;
 import com.scalar.db.analytics.labs.semantic.model.PhysicalCatalogReference;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
 import com.scalar.db.analytics.labs.semantic.model.Scope;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
-import com.scalar.db.analytics.labs.semantic.model.Vocabulary.CheckResult;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
-import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ValidationMethod;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
@@ -202,7 +195,7 @@ abstract class MeaningInference implements ModelGenerator {
    * Whether a Fact Address takes a new candidate: no Fact is selected there, none is pending, and
    * fewer than two rejected candidates rest on inputs that are still current.
    */
-  private static boolean open(GeneratorContext context, List<Fact> facts) {
+  static boolean open(GeneratorContext context, List<Fact> facts) {
     var rejectedOnCurrentInput = 0;
     for (var fact : facts) {
       switch (fact.state()) {
@@ -386,7 +379,7 @@ abstract class MeaningInference implements ModelGenerator {
    * and the Physical Catalog reference, which the reference it is named by already states. Each is
    * an input read and a dependency of the target's candidates.
    */
-  private static List<Fact> passedFacts(GeneratorContext context, String element) {
+  static List<Fact> passedFacts(GeneratorContext context, String element) {
     var kind = context.elementKind(element);
     if (kind.isEmpty()) {
       return List.of();
@@ -616,7 +609,7 @@ abstract class MeaningInference implements ModelGenerator {
         }
       }
     }
-    var cited = new CitedDocuments(context);
+    var cited = new Supported.CitedDocuments(context);
     for (var answered : answers) {
       var given = answers(answered.answer());
       var table = answered.ask().input().path("tables").path(0).path("ref").asText();
@@ -644,8 +637,8 @@ abstract class MeaningInference implements ModelGenerator {
       Output output,
       Ask ask,
       Target target,
-      @Nullable Map<String, Given> values,
-      CitedDocuments cited,
+      @Nullable Map<String, Supported.Given> values,
+      Supported.CitedDocuments cited,
       List<DataObservations.Observed> observations,
       DataObservations.@Nullable Observed statistics) {
     var located = locate(context, target.element());
@@ -700,7 +693,7 @@ abstract class MeaningInference implements ModelGenerator {
       Target target,
       String predicate,
       Valued.Value value,
-      Given given,
+      Supported.Given given,
       @Nullable String quoted,
       List<DataObservations.Observed> observations,
       DataObservations.@Nullable Observed statistics) {
@@ -712,24 +705,7 @@ abstract class MeaningInference implements ModelGenerator {
       }
     }
     var check =
-        quoted == null
-            ? new Check(
-                ValidationMethod.INFERENCE,
-                JSON.textNode(Vocabulary.VALUE_ITEM),
-                CheckResult.SUPPORTED,
-                null,
-                statistics == null ? null : statistics.observation(),
-                DataObservations.stored(JSON.objectNode().put("basis", given.basis())))
-            : new Check(
-                ValidationMethod.DOCUMENT,
-                JSON.textNode(Vocabulary.VALUE_ITEM),
-                CheckResult.SUPPORTED,
-                null,
-                Ref.urn(quoted),
-                DataObservations.stored(
-                    JSON.objectNode()
-                        .put("quotation", Objects.requireNonNull(given.citation()).quotation())
-                        .put("basis", given.basis())));
+        Supported.check(given, quoted, statistics == null ? null : statistics.observation());
     var inputsRead = JSON.arrayNode();
     ask.read().forEach(inputsRead::add);
     for (var observation : observations) {
@@ -748,108 +724,27 @@ abstract class MeaningInference implements ModelGenerator {
   }
 
   /**
-   * The documents a run's answers cite, each read once in the recording transaction and kept in the
-   * form a quotation is checked against.
-   */
-  private static final class CitedDocuments {
-    private final GeneratorContext context;
-    private final Map<String, String> texts = new HashMap<>();
-
-    CitedDocuments(GeneratorContext context) {
-      this.context = context;
-    }
-
-    /**
-     * The Input Observation a citation quotes, when the call read the cited document and the
-     * quotation is in that observation's text; null otherwise, so the value is only an inference.
-     */
-    @Nullable String verified(Ask ask, @Nullable Citation citation) {
-      if (citation == null) {
-        return null;
-      }
-      var observation = passedObservation(ask, citation.document());
-      if (observation == null) {
-        return null;
-      }
-      var text =
-          texts.computeIfAbsent(
-              observation,
-              urn ->
-                  Quotations.collapsed(
-                      context
-                          .observationContent(urn)
-                          .map(content -> LogRecordJson.fromStored(content, Document.class).text())
-                          .orElse("")));
-      return Quotations.found(citation.quotation(), text) ? observation : null;
-    }
-
-    /**
-     * The observation of a document the call read: a document among the call's input whose
-     * observation the targets' premises name.
-     */
-    private static @Nullable String passedObservation(Ask ask, String document) {
-      var passed = false;
-      for (var section : ask.input().path("documents")) {
-        if (section.path("document").asText().equals(document)) {
-          passed = true;
-          break;
-        }
-      }
-      if (!passed) {
-        return null;
-      }
-      for (var target : ask.targets()) {
-        for (var premise : target.premises()) {
-          if (premise instanceof Dependency.OnInput input
-              && input.inputResource().urnValue().equals(document)) {
-            return input.observation().urnValue();
-          }
-        }
-      }
-      return null;
-    }
-  }
-
-  /** A predicate value the model gave, with the basis it stated and the document it cited. */
-  private record Given(JsonNode value, String basis, @Nullable Citation citation) {}
-
-  /** A document a model cites for a value, by its Input Resource, with the text it quotes. */
-  private record Citation(String document, String quotation) {}
-
-  /**
    * Reads the answer: {@code {"targets": [{"ref": ..., "values": {predicate: {"value": ...,
    * "basis": ..., "citation": {"document": ..., "quotation": ...}}}}]}}, the citation optional. An
    * answer not in this form fails the run, so a model that misreads the instructions is noticed.
    */
-  private Map<String, Map<String, Given>> answers(JsonNode answer) {
+  private Map<String, Map<String, Supported.Given>> answers(JsonNode answer) {
     var targets = answer.path("targets");
     if (!targets.isArray()) {
       throw unreadable("it has no targets list");
     }
-    var answers = new LinkedHashMap<String, Map<String, Given>>();
+    var answers = new LinkedHashMap<String, Map<String, Supported.Given>>();
     for (var target : targets) {
       var reference = target.path("ref");
       var values = target.path("values");
       if (!reference.isTextual() || !values.isObject()) {
         throw unreadable("a target has no ref or no values object");
       }
-      var given = new LinkedHashMap<String, Given>();
+      var given = new LinkedHashMap<String, Supported.Given>();
       for (var entry : values.properties()) {
-        var item = entry.getValue();
-        if (item.isNull()) {
-          continue;
-        }
-        var basis = item.path("basis");
-        if (!item.isObject()
-            || !item.has("value")
-            || !basis.isTextual()
-            || basis.asText().isBlank()) {
-          throw unreadable("the value of " + entry.getKey() + " has no value or no basis");
-        }
-        if (!item.get("value").isNull()) {
-          given.put(
-              entry.getKey(),
-              new Given(item.get("value"), basis.asText(), citation(entry.getKey(), item)));
+        var item = Supported.given(entry.getKey(), entry.getValue(), this::unreadable);
+        if (item != null) {
+          given.put(entry.getKey(), item);
         }
       }
       answers.merge(
@@ -862,20 +757,6 @@ abstract class MeaningInference implements ModelGenerator {
           });
     }
     return answers;
-  }
-
-  /** The citation of a value, if the model gave one; an object without both parts is unreadable. */
-  private @Nullable Citation citation(String predicate, JsonNode item) {
-    var citation = item.path("citation");
-    if (citation.isMissingNode() || citation.isNull()) {
-      return null;
-    }
-    var document = citation.path("document");
-    var quotation = citation.path("quotation");
-    if (!document.isTextual() || !quotation.isTextual()) {
-      throw unreadable("the citation of " + predicate + " has no document or no quotation");
-    }
-    return new Citation(document.asText(), quotation.asText());
   }
 
   private LanguageModelException unreadable(String why) {

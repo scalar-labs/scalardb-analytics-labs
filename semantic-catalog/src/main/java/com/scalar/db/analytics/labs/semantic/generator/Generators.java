@@ -43,6 +43,13 @@ public final class Generators {
         .toList();
   }
 
+  /** The Generators that read new document observations. */
+  public static List<Generator> readingDocuments() {
+    return ALL.stream()
+        .filter(generator -> generator.inputs().contains(new Generator.Input.Document()))
+        .toList();
+  }
+
   /** The Generators that read usage feedback with related Facts. */
   public static List<Generator> readingFeedbackWithRelatedFacts() {
     return ALL.stream()

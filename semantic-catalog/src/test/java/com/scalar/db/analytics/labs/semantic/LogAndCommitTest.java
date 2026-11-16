@@ -10,6 +10,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.NullNode;
 import com.scalar.db.analytics.labs.semantic.model.ElementIdentity;
+import com.scalar.db.analytics.labs.semantic.model.IdentityKey;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.MatchingCondition;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
@@ -93,6 +94,38 @@ class LogAndCommitTest extends StoreScenarioTest {
     assertThat(next.urn(second)).isEqualTo(prefix + "input-observation:c3.1");
     String snapshot = s.latest(CatalogSnapshot::urn);
     assertThat(snapshot).isEqualTo(prefix + "catalog-snapshot:3");
+  }
+
+  @Test
+  void aFactWhoseValueIsOneRecordTakesTheUrnIssuedForARecordOfTheSameCommit() {
+    var s = scenario();
+    var c = s.begin();
+    var orders = c.dataset("shop.public.orders");
+    // Two concepts asking for one slug: the second is told apart by a sequence number.
+    c.concept("order");
+    var concept = c.concept("order");
+    var rowConcept =
+        c.add(
+            new LogRecord.Fact(
+                c.address(orders, Vocabulary.ROW_CONCEPT),
+                JsonNodeFactory.instance.nullNode(),
+                IdentityKey.of(new IdentityKey.Part.Reference(concept))));
+    c.accept(rowConcept);
+    var written = s.write(c);
+
+    var urn = written.urn(concept);
+    assertThat(urn).isEqualTo("urn:scalardb:analytics:" + s.domain + ":concept:order~2");
+    assertThat(s.revision(written.urn(rowConcept)).value().asText()).isEqualTo(urn);
+
+    // A Fact without a value needs an identity key of one reference to take it from.
+    var refused = s.begin();
+    refused.add(
+        new LogRecord.Fact(
+            refused.address(Ref.urn(written.urn(orders)), Vocabulary.ROW_KIND),
+            JsonNodeFactory.instance.nullNode(),
+            IdentityKey.choice("event")));
+    assertThatThrownBy(() -> s.write(refused))
+        .hasMessageContaining("identity key of one reference");
   }
 
   @Test

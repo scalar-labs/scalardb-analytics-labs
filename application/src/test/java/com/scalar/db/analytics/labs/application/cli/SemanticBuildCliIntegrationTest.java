@@ -247,8 +247,16 @@ class SemanticBuildCliIntegrationTest {
     assertThat(changed.get("inputResource").textValue()).isEqualTo(resource);
     assertThat(changed.get("inputObservation").textValue())
         .isNotEqualTo(registered.get("inputObservation").textValue());
-    // A document starts no build task.
-    assertThat(buildTasks()).isEmpty();
+    // Each new observation triggers the one concept-inference run not started yet.
+    assertThat(buildTasks())
+        .singleElement()
+        .satisfies(
+            task -> {
+              assertThat(isState(task, BuildTask.State.CREATED)).isTrue();
+              assertThat(task.work())
+                  .isEqualTo(new BuildTask.Work.GeneratorRun("concept-inference"));
+              assertThat(task.triggers()).hasSize(2);
+            });
 
     var prompts = temporaryDirectory.resolve("prompts.txt");
     configureLanguageModel("cat >> '" + prompts + "'; echo '{\"targets\": []}'");

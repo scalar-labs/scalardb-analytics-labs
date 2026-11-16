@@ -481,6 +481,16 @@ public final class StoreTransaction {
         .list();
   }
 
+  /** The URNs of every element of a kind in a domain, whatever its Facts' states, oldest first. */
+  public List<String> elementsOfKind(String domain, ElementKind kind) {
+    return jdbc.sql(
+            "SELECT element FROM semantic_catalog.elements"
+                + " WHERE domain = ? AND kind = ? ORDER BY created_commit, element")
+        .params(domain, kind.name())
+        .query((rs, row) -> java.util.Objects.requireNonNull(rs.getString(1)))
+        .list();
+  }
+
   /** The URNs of the elements whose parent is an element, such as the Fields of a Dataset. */
   public List<String> childElements(String domain, String parent) {
     return jdbc.sql(

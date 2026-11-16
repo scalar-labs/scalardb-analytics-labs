@@ -372,8 +372,9 @@ public final class SemanticCatalogStore implements AutoCloseable {
    * <p>Without an Input Resource the document is new, and its Input Resource is created with its
    * first observation. With one, the text becomes a new observation of that document unless it
    * equals the latest one, which records nothing. Registrations of one document run one at a time.
-   * A document observation creates no build task: meaning inference reads the domain's documents
-   * when it runs for its other inputs.
+   * A new observation creates or triggers a run of each Generator that reads documents, in the same
+   * transaction; meaning inference also reads the domain's documents when it runs for its other
+   * inputs.
    *
    * @param author the person or agent behind the call, kept on the commit
    * @param inputResource the URN of the document's Input Resource, or null for a new document

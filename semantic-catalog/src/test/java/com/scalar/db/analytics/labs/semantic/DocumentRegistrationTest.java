@@ -9,9 +9,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.scalar.db.analytics.labs.semantic.DocumentRegistration.Observed;
 import com.scalar.db.analytics.labs.semantic.DocumentRegistration.Unchanged;
+import com.scalar.db.analytics.labs.semantic.model.BuildTask;
 import com.scalar.db.analytics.labs.semantic.model.Document;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.SemanticCatalogException;
+import com.scalar.db.analytics.labs.semantic.model.Urns;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -39,9 +41,17 @@ class DocumentRegistrationTest extends StoreScenarioTest {
               assertThat(content.path("name").asText()).isEqualTo("glossary.md");
               assertThat(content.path("text").asText()).isEqualTo(GLOSSARY.text());
             });
-    // Meaning inference reads documents when it runs for its other inputs; a document starts no
-    // build task.
-    assertThat(store.buildTasks(s.domain)).isEmpty();
+    // The observation starts a run of each Generator that reads documents, triggered by it.
+    assertThat(store.buildTasks(s.domain))
+        .singleElement()
+        .satisfies(
+            task -> {
+              assertThat(task.work())
+                  .isEqualTo(new BuildTask.Work.GeneratorRun("concept-inference"));
+              assertThat(task.triggers())
+                  .containsExactly(
+                      Urns.logRecord(s.domain, Urns.position(observed.inputObservation())));
+            });
   }
 
   @Test

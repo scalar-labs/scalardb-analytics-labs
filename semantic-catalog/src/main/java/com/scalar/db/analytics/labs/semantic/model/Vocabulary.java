@@ -96,7 +96,25 @@ public final class Vocabulary {
 
   public static final String SET_RELATIONSHIP = "set-relationship";
   public static final String BUSINESS_DEFINITION = "business-definition";
+
+  /**
+   * A concept relationship's multiplicity, whose value is {@code {"from": <bound>, "to": <bound>}},
+   * each one of {@link #MULTIPLICITY_BOUNDS}: {@code to} is how many instances of the end the
+   * relationship's identity goes to one instance of the end it starts from relates to, and {@code
+   * from} the reverse. A customer placing orders is {@code {"from": "exactly-one", "to":
+   * "zero-or-more"}} from customer to order.
+   */
   public static final String MULTIPLICITY = "multiplicity";
+
+  /** The bounds of a concept relationship's multiplicity at each end. */
+  public static final List<String> MULTIPLICITY_BOUNDS =
+      List.of("zero-or-one", "exactly-one", "zero-or-more", "one-or-more");
+
+  /** The relationship kind of an undirected concept relationship: both denote the same object. */
+  public static final String SAME_OBJECT = "same-object";
+
+  /** The relationship kind of a directed concept relationship between different objects. */
+  public static final String ASSOCIATION = "association";
 
   /** The validation item of a predicate whose value is not made of parts: the value itself. */
   public static final String VALUE_ITEM = "value";

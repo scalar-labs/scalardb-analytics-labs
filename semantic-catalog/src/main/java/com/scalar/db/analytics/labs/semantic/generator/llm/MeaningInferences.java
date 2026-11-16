@@ -13,6 +13,9 @@ public final class MeaningInferences {
 
   public static List<Generator> generators() {
     return List.of(
-        new RowMeaningInference(), new FieldMeaningInference(), new CorrectionInterpretation());
+        new RowMeaningInference(),
+        new FieldMeaningInference(),
+        new ConceptInference(),
+        new CorrectionInterpretation());
   }
 }
