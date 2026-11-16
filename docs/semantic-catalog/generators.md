@@ -59,14 +59,15 @@ never by itself a basis for derivation.
 **Input kinds.** Each Generator declares what it may read, and build tasks are created from these
 declarations. A commit that records a new observation, a confirmation, or an acceptance creates, in
 the same transaction, a run of each Generator that reads it, or adds the commit's log record as a
-trigger to the run of that Generator not started yet. **[Planned]** Document and usage-feedback
-inputs have no Generator yet.
+trigger to the run of that Generator not started yet. **[Planned]** Document inputs and usage
+feedback without related Facts have no Generator yet.
 
 | Input kind | Creates build tasks when |
 | --- | --- |
 | Physical schema | Registering an observation records a new physical schema observation |
 | Document | Registering an observation records a new document observation |
-| Usage feedback | Registering an observation records it under a new Input Resource |
+| Usage feedback with related Facts | Registering an observation records it under a new Input Resource |
+| Usage feedback without related Facts | **[Planned]** Registering an observation records it under a new Input Resource |
 | Confirmed Fact, per predicate | A Fact of that predicate is confirmed |
 | Accepted Fact, per predicate | An acceptance of a Fact of that predicate is recorded |
 | Data observation | Never; data observations are written with the results that read them |
@@ -105,11 +106,13 @@ provenance.
   dependency stated while the replaced Fact was confirmed is the exception: it is kept after that
   Fact is retired, so producing again does not change a candidate already judged.
 
+A deciding party's wording is never support for a new candidate. Correction interpretation reads a
+correction through the usage feedback it registers: the feedback's observation is an input read and
+a dependency, but never a check reference. A candidate made from a correction is therefore never
+adopted inline, and the original correction can be traced and shown from its inputs read.
 **[Planned]** No implemented Generator reads answers or proposes new nodes yet. An answer is an
-input read, referenced by its log record. It is neither a dependency, because it
-never changes, nor a check reference, so a deciding party's wording never counts as support for a
-new candidate. A candidate made from a correction is therefore never adopted inline, and the
-original correction can be traced and shown from its inputs read.
+input read, referenced by its log record. It is neither a dependency, because it never changes, nor
+a check reference.
 
 A Generator that proposes a new Concept, Measure, Dimension, or business term gives it a slug, a
 short business name from which its URN is built, and is given the slugs in use so it avoids them
@@ -298,9 +301,9 @@ coincidental correspondence. For the same reason, keys from candidate key discov
 
 ## Meaning inference
 
-Row and Field meaning inference are implemented. **[Planned]** Concept inference, analytical
-semantics inference, identifier correspondence inference, correction interpretation, `document`
-checks, and the document and feedback triggers are not.
+Row and Field meaning inference and correction interpretation are implemented. **[Planned]**
+Concept inference, analytical semantics inference, identifier correspondence inference, `document`
+checks, and the triggers of documents and of feedback without related Facts are not.
 
 Meaning inference uses a model for predicates that declarations and data cannot decide. For a target
 element it passes names and types, confirmed Facts, relevant document parts, feedback, and permitted
@@ -335,7 +338,11 @@ relationships, which data checks decide. It also does not propose a Fact
 Address that schema interpretation is filling from a current declaration, or the key of a Dataset
 without a primary key, which candidate key discovery proposes. An inferred candidate beside a
 checked one would add judgement and, if both were confirmed, a conflict. Correction interpretation
-can reach any predicate, because a correction may revise any value.
+can reach any predicate, because a correction may revise any value. It interprets corrections of
+the predicates whose values an implemented Generator defines: row meaning, Field meaning, set
+relationships, and uniqueness. **[Planned]** Corrections of other predicates are recorded on the
+build task as not interpreted yet, because each Generator owns the value form and identity key of
+its predicates and no shared definition covers the rest.
 
 Undeclared identifier correspondences are central to combining sources. Identifier correspondence
 inference proposes, for example, that e-commerce customers and POS members correspond through the
@@ -352,18 +359,26 @@ Correction interpretation gives the model the feedback's content and context and
 content, and asks for a revised value or applicability scope for the same element and predicate. Its
 candidate always depends on the feedback observation. If the related Fact was a rejected candidate,
 the new candidate does not depend on it, since a rejected candidate is nothing to replace, but it
-carries over the dependencies it still needs, such as the correspondence's existence. If the related
-Fact is the selected confirmed Fact, the new candidate depends on it and replaces it once confirmed.
-When the wording yields no value or scope, the build task records that and the unreadable
-correction.
+carries over the dependencies it still needs, such as the correspondence's existence: the Facts it
+rested on at other Fact Addresses that are neither rejected nor retired. Its dependencies on inputs
+stay behind, because the revision rests on the deciding party's wording rather than on what produced
+the corrected value. If the related Fact is the selected confirmed Fact, the new candidate depends
+on it and replaces it once confirmed. A revised value goes to the related Fact's Fact Address and
+depends on every confirmed Fact there; a revised scope goes to a new Fact Address with that scope's
+description. When the wording yields no value or scope, the build task records that and the
+unreadable correction. **[Planned]** A revised scope for a confirmed Fact, which a candidate at
+another Fact Address cannot replace, and a correction of a Fact at a scoped Fact Address are
+recorded on the build task as not interpreted yet.
 
 ## Generation strategy
 
 What concerns deterministic Generators is implemented: order through declared inputs, targets from
 observations and confirmations, and producing for every target. The conditions and bounds for
 non-deterministic Generators are implemented for row and Field meaning inference, which confirmations
-trigger. **[Planned]** The other triggers of non-deterministic Generators are not: feedback, a Fact
-no longer selected, an impact judgement, a rejection, retirement, or cascade, and a document.
+trigger, and for correction interpretation, which feedback with related Facts triggers.
+**[Planned]** The other triggers of non-deterministic Generators are not: feedback without related
+Facts, a Fact no longer selected, an impact judgement, a rejection, retirement, or cascade, and a
+document.
 
 **Order.** The strategy defines no global order. Order emerges because a later Generator declares as
 input the confirmation of what an earlier one produces. When the e-commerce database is registered:

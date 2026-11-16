@@ -13,6 +13,7 @@ import com.scalar.db.analytics.labs.semantic.model.LogRecordJson;
 import com.scalar.db.analytics.labs.semantic.model.MatchingCondition;
 import com.scalar.db.analytics.labs.semantic.model.PhysicalCatalogReference;
 import com.scalar.db.analytics.labs.semantic.model.Urns;
+import com.scalar.db.analytics.labs.semantic.model.UsageFeedback;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
@@ -282,6 +283,15 @@ public final class GeneratorContext {
         .map(record -> ((LogRecord.InputObservation) record).content());
   }
 
+  /** The usage feedback an observed Input Resource holds, if it is usage feedback. */
+  public Optional<UsageFeedback> usageFeedback(Trigger.Observed observed) {
+    if (inputKind(observed.inputResource()).orElse(null) != InputKind.USAGE_FEEDBACK) {
+      return Optional.empty();
+    }
+    return observationContent(observed.observation())
+        .map(content -> LogRecordJson.fromStored(content, UsageFeedback.class));
+  }
+
   // Elements
 
   /** The kind of an element, if it exists. */
@@ -482,6 +492,23 @@ public final class GeneratorContext {
         .map(this::fact)
         .flatMap(Optional::stream)
         .toList();
+  }
+
+  /** The URN of a Fact's Fact Address. */
+  public Optional<String> factAddressOf(String fact) {
+    return projection.factAddress(fact);
+  }
+
+  /**
+   * Whether a Fact's Fact Address is found by element and predicate alone, the one {@link #factsAt}
+   * reads: its applicability scope is empty and its predicate is not free-description.
+   */
+  public boolean atMatchableAddress(String fact) {
+    return projection
+        .factAddress(fact)
+        .flatMap(projection::address)
+        .map(address -> address.row().matchable())
+        .orElse(false);
   }
 
   /** The predicates of an element's empty-scope Fact Addresses, such as its uniqueness ones. */

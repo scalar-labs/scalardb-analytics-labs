@@ -17,8 +17,11 @@ import com.scalar.db.analytics.labs.semantic.model.FactRevision;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
 import com.scalar.db.analytics.labs.semantic.model.Urns;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.AnswerType;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Preset;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Transition;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ValidationMethod;
 import com.scalar.db.analytics.labs.semantic.policy.PolicyEvaluationModel;
 import java.sql.SQLException;
@@ -28,6 +31,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.StreamSupport;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -42,6 +46,7 @@ class MeaningInferenceTest extends StoreScenarioTest {
   private static final AtomicLong VERSIONS = new AtomicLong();
   private static final String ROW = "row-meaning-inference";
   private static final String FIELD = "field-meaning-inference";
+  private static final String CORRECTION = "correction-interpretation";
 
   private final List<DuckDbConstructionSql> engines = new ArrayList<>();
 
@@ -571,6 +576,214 @@ class MeaningInferenceTest extends StoreScenarioTest {
                 content -> content.path("sourceMetadata").path("document").path("comment").asText())
             .toList();
     assertThat(comments).containsExactly("One row per customer order");
+  }
+
+  // Correction interpretation
+
+  /** Answers correction interpretation with a revision of the first related Fact. */
+  private static String revision(JsonNode input, @Nullable String value, @Nullable String scope) {
+    var answer = JSON.objectNode();
+    var target =
+        answer
+            .putArray("targets")
+            .addObject()
+            .put("ref", input.path("facts").get(0).path("ref").asText());
+    target.put("value", value);
+    target.put("scope", scope);
+    target.put("basis", "the deciding party said so");
+    return answer.toString();
+  }
+
+  private static Answers.Outcomes correct(
+      Scenario s, String fact, Transition transition, String wording) {
+    return store.submitAnswers(
+        s.domain,
+        new Answers.Submission(
+            "owner",
+            "authority-check",
+            List.of(
+                new Answers.Answer(
+                    fact,
+                    transition,
+                    AnswerType.CORRECTION,
+                    wording,
+                    "the value presented for shop.public.orders.amount",
+                    null))));
+  }
+
+  private static String existence(String element) {
+    return Urns.fact(Urns.factAddress(element, Vocabulary.EXISTENCE), 1);
+  }
+
+  private static List<String> factsDependedOn(FactRevision revision) {
+    return revision.dependencies().stream()
+        .filter(Dependency.OnFact.class::isInstance)
+        .map(dependency -> ((Dependency.OnFact) dependency).fact().urnValue())
+        .toList();
+  }
+
+  @Test
+  void aCorrectionYieldsOneRevisedCandidateThatThePolicyEvaluationModelDecides() {
+    var s = scenario();
+    register(s);
+    var policy = new AskingConsent();
+    var model = ordersModel();
+    drain(s, policy, orders(), model);
+    var amount = field(s, "amount");
+    var presented = only(s, amount, Vocabulary.VALUE_KIND);
+
+    var outcome = correct(s, presented.fact(), Transition.CONFIRM, "金額ではなく数量です");
+
+    // The correction calls for correction interpretation in the same commit.
+    var feedback = outcome.outcomes().getFirst().feedback();
+    assertThat(outcome.buildTasks())
+        .map(number -> store.buildTask(s.domain, number).orElseThrow().work())
+        .contains(new BuildTask.Work.GeneratorRun(CORRECTION));
+
+    model.answering(CORRECTION, input -> revision(input, "quantity", null));
+    var summary = drain(s, policy, orders(), model);
+
+    var input = inputOf(model, CORRECTION);
+    assertThat(input.path("feedback").path("content").asText()).isEqualTo("金額ではなく数量です");
+    assertThat(input.path("facts").get(0).path("ref").asText()).isEqualTo(presented.fact());
+    var kinds = facts(s, amount, Vocabulary.VALUE_KIND);
+    assertThat(kinds).hasSize(2);
+    assertThat(kinds.getFirst().state()).isEqualTo(FactState.REJECTED);
+    var revised = kinds.get(1);
+    assertThat(revised.value().asText()).isEqualTo("quantity");
+    // An inference only: the policy evaluation model decides it; it is never adopted inline.
+    assertThat(revised.state()).isEqualTo(FactState.CANDIDATE);
+    assertThat(revised.checks())
+        .singleElement()
+        .satisfies(check -> assertThat(check.method()).isEqualTo(ValidationMethod.INFERENCE));
+    assertThat(policy.asked).contains(revised.fact());
+    // It rests on the feedback and on the Field's existence, never on the rejected candidate.
+    assertThat(revised.dependencies())
+        .anySatisfy(
+            dependency -> {
+              assertThat(dependency).isInstanceOf(Dependency.OnInput.class);
+              assertThat(((Dependency.OnInput) dependency).inputResource().urnValue())
+                  .isEqualTo(feedback);
+            });
+    assertThat(factsDependedOn(revised)).containsExactly(existence(amount));
+    // The corrected candidate is read, at its latest acceptance.
+    assertThat(revised.inputsRead().toString())
+        .contains(presented.fact().replace(":fact:", ":fact-revision:") + "@");
+    assertThat(generated(summary, CORRECTION).missingInputs()).isEmpty();
+
+    // Running again for the same feedback yields no second candidate and asks nothing.
+    var task =
+        outcome.buildTasks().stream()
+            .map(number -> store.buildTask(s.domain, number).orElseThrow())
+            .filter(found -> found.work().equals(new BuildTask.Work.GeneratorRun(CORRECTION)))
+            .findFirst()
+            .orElseThrow();
+    store.requestGeneratorRun(s.domain, CORRECTION, task.triggers().getFirst());
+    drain(s, policy, orders(), model);
+    assertThat(model.calls.stream().filter(call -> call.generator().equals(CORRECTION))).hasSize(1);
+    assertThat(facts(s, amount, Vocabulary.VALUE_KIND)).hasSize(2);
+  }
+
+  @Test
+  void aCorrectionThatLimitsWhereAStatementHoldsYieldsACandidateAtAScopedFactAddress() {
+    var s = scenario();
+    register(s);
+    var policy = new AskingConsent();
+    var model = ordersModel();
+    drain(s, policy, orders(), model);
+    var amount = field(s, "amount");
+    var presented = only(s, amount, Vocabulary.MEANING);
+
+    correct(s, presented.fact(), Transition.CONFIRM, "法人注文では税抜きの合計金額です");
+    model.answering(CORRECTION, input -> revision(input, "税抜きの合計金額", "法人注文"));
+    drain(s, policy, orders(), model);
+
+    var scoped =
+        s.knowledge(s.lastCommit(), amount, Vocabulary.MEANING).stream()
+            .filter(address -> "法人注文".equals(address.scopeDescription()))
+            .toList();
+    assertThat(scoped).singleElement();
+    var address = scoped.getFirst().factAddress();
+    assertThat(address).isEqualTo(Urns.numbered(Urns.factAddress(amount, Vocabulary.MEANING), 2));
+    var revised = s.revision(Urns.fact(address, 1));
+    assertThat(revised.value().asText()).isEqualTo("税抜きの合計金額");
+    assertThat(revised.state()).isEqualTo(FactState.CANDIDATE);
+    assertThat(factsDependedOn(revised)).containsExactly(existence(amount));
+  }
+
+  @Test
+  void aCorrectionOfARetirementProposalYieldsACandidateThatReplacesTheConfirmedFact() {
+    var s = scenario();
+    register(s);
+    var policy = new AskingConsent();
+    var model = ordersModel();
+    drain(s, policy, orders(), model);
+    var amount = field(s, "amount");
+    var confirmed = only(s, amount, Vocabulary.VALUE_KIND).fact();
+    Judgement.submit(s, Judgement.answer(confirmed, AnswerType.CONSENT));
+    Judgement.setPolicy(s, Preset.MANUAL);
+    var commit = s.begin();
+    Judgement.proposeRetire(commit, Ref.urn(confirmed));
+    s.judge(commit);
+
+    correct(s, confirmed, Transition.RETIRE, "金額ではなく数量です");
+    model.answering(CORRECTION, input -> revision(input, "quantity", null));
+    drain(s, policy, orders(), model);
+
+    assertThat(s.state(confirmed)).contains(FactState.CONFIRMED);
+    var kinds = facts(s, amount, Vocabulary.VALUE_KIND);
+    assertThat(kinds).hasSize(2);
+    var revised = kinds.get(1);
+    assertThat(revised.value().asText()).isEqualTo("quantity");
+    assertThat(revised.state()).isEqualTo(FactState.CANDIDATE);
+    assertThat(factsDependedOn(revised)).containsExactlyInAnyOrder(existence(amount), confirmed);
+  }
+
+  @Test
+  void aCorrectionWhoseWordingGivesNoRevisionIsRecordedOnTheBuildTask() {
+    var s = scenario();
+    register(s);
+    var policy = new AskingConsent();
+    var model = ordersModel();
+    drain(s, policy, orders(), model);
+    var amount = field(s, "amount");
+    var presented = only(s, amount, Vocabulary.VALUE_KIND);
+
+    correct(s, presented.fact(), Transition.CONFIRM, "違います");
+    var summary = drain(s, policy, orders(), model);
+
+    assertThat(facts(s, amount, Vocabulary.VALUE_KIND)).hasSize(1);
+    assertThat(generated(summary, CORRECTION).missingInputs())
+        .singleElement()
+        .satisfies(
+            missing ->
+                assertThat(missing).contains("whose wording gave neither").endsWith(": 違います"));
+  }
+
+  @Test
+  void aCorrectionOfAPredicateItDoesNotInterpretIsRecordedWithoutAskingTheModel() {
+    var s = scenario();
+    register(s);
+    var policy = new AskingConsent();
+    var model = ordersModel();
+    drain(s, policy, orders(), model);
+    var existence = existence(field(s, "amount"));
+    Judgement.setPolicy(s, Preset.MANUAL);
+    var commit = s.begin();
+    Judgement.proposeRetire(commit, Ref.urn(existence));
+    s.judge(commit);
+
+    correct(s, existence, Transition.RETIRE, "列名が変わっただけです");
+    var summary = drain(s, policy, orders(), model);
+
+    assertThat(model.calls.stream().filter(call -> call.generator().equals(CORRECTION))).isEmpty();
+    assertThat(generated(summary, CORRECTION).missingInputs())
+        .singleElement()
+        .satisfies(
+            missing ->
+                assertThat(missing)
+                    .contains("whose predicate existence correction interpretation does not")
+                    .endsWith(": 列名が変わっただけです"));
   }
 
   /** Writes a meaning candidate on a Field, as another Generator would. */

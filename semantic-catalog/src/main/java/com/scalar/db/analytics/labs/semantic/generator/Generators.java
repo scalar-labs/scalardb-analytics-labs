@@ -43,6 +43,15 @@ public final class Generators {
         .toList();
   }
 
+  /** The Generators that read usage feedback with related Facts. */
+  public static List<Generator> readingFeedbackWithRelatedFacts() {
+    return ALL.stream()
+        .filter(
+            generator ->
+                generator.inputs().contains(new Generator.Input.FeedbackWithRelatedFacts()))
+        .toList();
+  }
+
   /** The Generators that read confirmed Facts of a predicate of an element kind. */
   public static List<Generator> readingConfirmed(ElementKind kind, String predicate) {
     return ALL.stream()

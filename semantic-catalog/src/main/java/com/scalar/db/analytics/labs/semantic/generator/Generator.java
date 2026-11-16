@@ -49,6 +49,12 @@ public interface Generator {
      */
     record Accepted(ElementKind kind, String predicate) implements Input {}
 
+    /**
+     * An observation of usage feedback with related Facts, such as the feedback a correction answer
+     * registers, creates a build task.
+     */
+    record FeedbackWithRelatedFacts() implements Input {}
+
     /** Whether an input declared for a predicate covers a Fact's predicate. */
     static boolean covers(String declared, String predicate) {
       return declared.equals(predicate)

@@ -343,9 +343,9 @@ A corrected candidate is rejected because it will never be confirmed with its or
 scope. Keeping it would make the deciding party judge one point twice. The same commit registers the
 correction's wording as usage feedback related to that candidate.
 
-**[Planned]** Correction interpretation then produces the corrected candidate, which is evaluated
-like any other. The correction's wording is among its inputs read, so the policy evaluation model
-and, if it is sent to a person, the deciding party see what was actually said, and a misread
+Correction interpretation then produces the corrected candidate, which is evaluated like any
+other. The correction's wording is among its inputs read, so the policy evaluation model and, if it
+is sent to a person, the deciding party see what was actually said, and a misread
 correction shows as a mismatch with it. When the answer to "every e-commerce customer is a POS
 member" is "correct, except for corporate members", the original candidate is rejected and a new
 candidate scoped to exclude corporate members follows.
@@ -371,7 +371,7 @@ No operation sets the selected Fact directly. Selection changes only as the rule
 | Register an observation | Input Observation and Observation Event | Content equals the previous observation, which records nothing; a physical schema whose source metadata is unchanged records only a derived record; a table metadata version no newer than one received records nothing | Generators that read that input kind; **[Planned]** an impact judgement for a new physical schema or document observation |
 | Record a Generator's results (inside a build task) | Data observations; acceptances, retirement proposals, inline evaluations, machine-judgement transitions, cascades | A data observation equal to its predecessor apart from when it was read, which is not recorded again; a dependency cycle, a missing referenced record, a check reference that is not a dependency, or an expression value that does not parse, which fails the task | Evaluations by the policy evaluation model; Generators that read the newly confirmed or accepted predicates |
 | Record an evaluation by the policy evaluation model (inside a build task) | Evaluation with its reason and review material, machine-judgement transitions, cascades; **[Planned]** data observations it read | The Fact no longer waits for the model, which records nothing; inline evaluation now decides it, which records that inline evaluation instead; or the material it read changed, which creates a new evaluation task | Evaluations of dependents left undecided; Generators that read the newly confirmed predicates |
-| Submit answers | Answers, resulting transitions, cascades, and feedback for each correction | An answer lacks an authority-check reference | Evaluations left undecided; Generators that read newly confirmed predicates; **[Planned]** Generators of rejected, corrected, retired, and cascaded Facts; Generators that read the feedback |
+| Submit answers | Answers, resulting transitions, cascades, and feedback for each correction | An answer lacks an authority-check reference | Evaluations left undecided; Generators that read newly confirmed predicates; Generators that read feedback with related Facts; **[Planned]** Generators of rejected, corrected, retired, and cascaded Facts |
 | Resolve a conflict | `resolve-conflict` | The chosen and passed-over Facts were not the eligible Facts at the previous commit, or no authority-check reference | **[Planned]** Generators of Facts depending on Facts no longer selected |
 | Set a user policy version | Policy version | None | A policy re-evaluation |
 | Re-evaluate the policy (inside a build task) | Evaluations, machine-judgement confirmations, cascades | None | Evaluations left undecided; Generators that read newly confirmed predicates |
@@ -458,7 +458,7 @@ behind an answer can still be traced afterwards, because the Query Agent cites t
 and Fact Revisions it used and every past Fact Revision stays retrievable by URN. Use is never
 evidence that knowledge is correct.
 
-A user organization can stop passing usage feedback to Generators. Feedback-triggered candidates
+**[Planned]** A user organization can stop passing usage feedback to Generators. Feedback-triggered candidates
 then stop, but the Query Agent still receives missing knowledge and conflicts, and the log,
 confirmation paths, and review presentation records remain. Which inputs reach Generators and models
 is set per domain and checked where the Semantic Catalog hands input to a Generator (see

@@ -9,7 +9,6 @@ import com.scalar.db.analytics.labs.semantic.generator.Generators;
 import com.scalar.db.analytics.labs.semantic.model.BuildTask;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.Urns;
-import com.scalar.db.analytics.labs.semantic.model.Vocabulary.InputKind;
 import com.scalar.db.analytics.labs.semantic.projection.PositionedRecord;
 import com.scalar.db.analytics.labs.semantic.projection.Projection;
 import com.scalar.db.analytics.labs.semantic.storage.StoreTransaction;
@@ -55,11 +54,12 @@ final class BuildTasks {
   /**
    * Creates or triggers the Generator runs a commit calls for (see {@code
    * docs/semantic-catalog/generators.md}, "The Generator contract"): each new physical schema
-   * observation triggers the Generators that read physical schemas, each confirmation triggers the
-   * Generators that read confirmed Facts of its predicate and element kind, and each acceptance
-   * written triggers those that read accepted ones. The trigger is the log record of the
-   * observation, the confirmation, or the acceptance. A data observation triggers nothing, because
-   * it is written with the results that read it.
+   * observation triggers the Generators that read physical schemas, each observation of usage
+   * feedback with related Facts those that read it, each confirmation triggers the Generators that
+   * read confirmed Facts of its predicate and element kind, and each acceptance written triggers
+   * those that read accepted ones. The trigger is the log record of the observation, the
+   * confirmation, or the acceptance. A data observation triggers nothing, because it is written
+   * with the results that read it.
    *
    * @param records the commit's log records
    * @return the numbers of the tasks, each once
@@ -75,12 +75,7 @@ final class BuildTasks {
       var generators =
           switch (positioned.record()) {
             case LogRecord.InputObservation observation ->
-                projection
-                        .inputResource(observation.inputResource().urnValue())
-                        .filter(row -> row.kind() == InputKind.PHYSICAL_SCHEMA)
-                        .isPresent()
-                    ? Generators.readingPhysicalSchema()
-                    : List.<Generator>of();
+                observationReaders(projection, observation);
             case LogRecord.Confirm confirm -> confirmedReaders(projection, confirm);
             case LogRecord.Accept accept -> acceptedReaders(projection, accept);
             default -> List.<Generator>of();
@@ -92,6 +87,31 @@ final class BuildTasks {
       }
     }
     return List.copyOf(tasks);
+  }
+
+  /**
+   * The Generators an observation calls for: a physical schema calls for those that read physical
+   * schemas, and usage feedback with related Facts for those that read it. Feedback without related
+   * Facts calls for none yet.
+   */
+  private static List<Generator> observationReaders(
+      Projection projection, LogRecord.InputObservation observation) {
+    var kind =
+        projection.inputResource(observation.inputResource().urnValue()).map(row -> row.kind());
+    if (kind.isEmpty()) {
+      return List.of();
+    }
+    return switch (kind.get()) {
+      case PHYSICAL_SCHEMA -> Generators.readingPhysicalSchema();
+      case USAGE_FEEDBACK -> {
+        var content = observation.content();
+        var related = content == null ? null : content.get("relatedFacts");
+        yield related != null && related.isArray() && !related.isEmpty()
+            ? Generators.readingFeedbackWithRelatedFacts()
+            : List.of();
+      }
+      default -> List.of();
+    };
   }
 
   private static List<Generator> confirmedReaders(
