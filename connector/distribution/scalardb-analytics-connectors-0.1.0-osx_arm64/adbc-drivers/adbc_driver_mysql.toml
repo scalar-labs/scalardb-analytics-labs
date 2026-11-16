@@ -1,0 +1,6 @@
+manifest_version = 1
+name = "ADBC Driver Foundry Driver for MySQL"
+version = "0.8.0"
+
+[Driver]
+shared = "libadbc_driver_mysql.dylib"

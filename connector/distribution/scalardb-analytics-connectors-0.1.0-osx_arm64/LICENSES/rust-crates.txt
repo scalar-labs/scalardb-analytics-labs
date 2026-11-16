@@ -2997,6 +2997,7 @@ Used by:
 - connector-api 0.1.0
 - connector-sdk 0.1.0
 - connector-sql 0.1.0
+- connector-mysql 0.1.0
 - connector-postgresql 0.1.0
 - connector-salesforce 0.1.0
 - connector-salesforce-client 0.1.0
