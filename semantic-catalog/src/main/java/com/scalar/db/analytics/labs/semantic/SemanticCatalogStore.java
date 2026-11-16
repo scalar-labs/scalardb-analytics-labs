@@ -7,6 +7,7 @@ package com.scalar.db.analytics.labs.semantic;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.scalar.db.analytics.labs.semantic.model.BuildTask;
+import com.scalar.db.analytics.labs.semantic.model.Document;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.LogRecordJson;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
@@ -17,6 +18,7 @@ import com.scalar.db.analytics.labs.semantic.model.Urns;
 import com.scalar.db.analytics.labs.semantic.model.UsageFeedback;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.AnswerType;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.InputKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.SessionPurpose;
 import com.scalar.db.analytics.labs.semantic.projection.CommitResolver;
 import com.scalar.db.analytics.labs.semantic.projection.FactRecord;
@@ -360,6 +362,62 @@ public final class SemanticCatalogStore implements AutoCloseable {
               written.commit().orElseThrow(),
               existing.isEmpty(),
               written.buildTasks());
+        });
+  }
+
+  /**
+   * Registers a document the semantics owner wrote or changed as an observation of a document Input
+   * Resource (see {@code docs/semantic-catalog/public-api.md}, "Registering an observation").
+   *
+   * <p>Without an Input Resource the document is new, and its Input Resource is created with its
+   * first observation. With one, the text becomes a new observation of that document unless it
+   * equals the latest one, which records nothing. Registrations of one document run one at a time.
+   * A document observation creates no build task: meaning inference reads the domain's documents
+   * when it runs for its other inputs.
+   *
+   * @param author the person or agent behind the call, kept on the commit
+   * @param inputResource the URN of the document's Input Resource, or null for a new document
+   * @throws SemanticCatalogException when the domain does not exist, or the Input Resource does not
+   *     exist or is not a document; nothing is written then
+   */
+  public DocumentRegistration registerDocument(
+      String domain, String author, @Nullable String inputResource, Document document) {
+    return store.write(
+        transaction -> {
+          requireDomain(transaction, domain);
+          Ref resourceRef;
+          var request = CommitRequest.builder("register-observation", author);
+          if (inputResource == null) {
+            resourceRef = request.add(LogRecord.InputResource.document());
+          } else {
+            var kind = transaction.lockInputResource(domain, inputResource);
+            if (kind.isEmpty() || kind.get() != InputKind.DOCUMENT) {
+              throw new SemanticCatalogException(
+                  "No document Input Resource " + inputResource + " in domain " + domain);
+            }
+            var previous = transaction.latestObservationRecord(domain, inputResource);
+            if (previous.isPresent()
+                && previous.get().record() instanceof LogRecord.InputObservation held
+                && LogRecordJson.fromStored(held.content(), Document.class)
+                    .text()
+                    .equals(document.text())) {
+              return new DocumentRegistration.Unchanged(
+                  inputResource,
+                  Urns.of(domain, Urns.INPUT_OBSERVATION, previous.get().position()));
+            }
+            resourceRef = Ref.urn(inputResource);
+          }
+          var observed = request.add(LogRecord.InputObservation.of(resourceRef, document));
+          request.add(
+              new LogRecord.ObservationEvent(
+                  observed,
+                  JsonNodeFactory.instance.objectNode().put("document", document.name())));
+          var written = commit(transaction, domain, request.build(), true);
+          return new DocumentRegistration.Observed(
+              inputResource == null ? written.urn(resourceRef) : inputResource,
+              written.urn(observed),
+              written.commit().orElseThrow(),
+              inputResource == null);
         });
   }
 

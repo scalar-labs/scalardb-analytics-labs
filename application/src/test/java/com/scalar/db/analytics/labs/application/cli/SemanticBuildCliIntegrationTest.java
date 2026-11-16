@@ -42,7 +42,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
  * Running the Semantic Catalog build tasks that registering a data source creates, through {@code
- * semantic build}.
+ * semantic build}, and registering the documents those tasks read, through {@code semantic document
+ * register}.
  */
 @Testcontainers
 class SemanticBuildCliIntegrationTest {
@@ -211,6 +212,70 @@ class SemanticBuildCliIntegrationTest {
     assertThat(lines.getLast().get("succeeded").intValue())
         .isEqualTo(lines.size() - 1)
         .isPositive();
+  }
+
+  @Test
+  void aRegisteredDocumentIsObservedOnceForEachChangeAndReachesTheModel() throws Exception {
+    var glossary = temporaryDirectory.resolve("glossary.md");
+    Files.writeString(glossary, "# Glossary\n\n## orders\n\nAn order is one purchase.\n");
+
+    var first =
+        execute(
+            "semantic",
+            "document",
+            "register",
+            "--workspace",
+            workspace.toString(),
+            glossary.toString());
+
+    assertSuccessful(first);
+    var registered = lines(first).getFirst();
+    assertThat(registered.get("schema").textValue())
+        .isEqualTo("scalardb-analytics/document-registration");
+    assertThat(registered.get("recorded").booleanValue()).isTrue();
+    var resource = registered.get("inputResource").textValue();
+
+    var unchanged = lines(registerAgain(glossary, resource)).getFirst();
+    assertThat(unchanged.get("recorded").booleanValue()).isFalse();
+    assertThat(unchanged.get("inputObservation").textValue())
+        .isEqualTo(registered.get("inputObservation").textValue());
+
+    Files.writeString(
+        glossary, "# Glossary\n\n## orders\n\nAn order is one purchase; amounts are in JPY.\n");
+    var changed = lines(registerAgain(glossary, resource)).getFirst();
+    assertThat(changed.get("recorded").booleanValue()).isTrue();
+    assertThat(changed.get("inputResource").textValue()).isEqualTo(resource);
+    assertThat(changed.get("inputObservation").textValue())
+        .isNotEqualTo(registered.get("inputObservation").textValue());
+    // A document starts no build task.
+    assertThat(buildTasks()).isEmpty();
+
+    var prompts = temporaryDirectory.resolve("prompts.txt");
+    configureLanguageModel("cat >> '" + prompts + "'; echo '{\"targets\": []}'");
+    registerSource();
+    assertSuccessful(execute("semantic", "build", "--workspace", workspace.toString()));
+
+    assertThat(Files.readString(prompts)).contains("amounts are in JPY");
+  }
+
+  @Test
+  void aDocumentResourceThatDoesNotExistIsAnError() throws Exception {
+    var glossary = temporaryDirectory.resolve("glossary.md");
+    Files.writeString(glossary, "# Glossary\n");
+
+    assertError(registerAgain(glossary, "not-a-resource"), "DOCUMENT_REGISTRATION_FAILED");
+  }
+
+  private Result registerAgain(Path document, String resource) {
+    return execute(
+        "semantic",
+        "document",
+        "register",
+        "--workspace",
+        workspace.toString(),
+        "--resource",
+        resource,
+        document.toString());
   }
 
   private void awaitNoCreatedTask() throws InterruptedException {

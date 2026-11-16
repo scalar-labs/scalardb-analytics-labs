@@ -24,7 +24,8 @@ Construction starts from new or changed input, not from questions:
   change only in the connector's mapping adds a derived record and no observation. The derived
   record holds the table metadata only until the Physical Catalog keeps the table metadata it is
   built from; the Semantic Catalog then reads it there.
-- **[Planned]** Documents the semantics owner registers or changes.
+- Documents the semantics owner registers or changes. A document observation creates no build task
+  yet; meaning inference reads the domain's documents when its other inputs start it.
 - Usage feedback: corrections given in review. **[Planned]** Missing knowledge and statements from a
   user's LLM session.
 

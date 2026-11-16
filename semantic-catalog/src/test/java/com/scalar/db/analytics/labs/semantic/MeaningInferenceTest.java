@@ -13,7 +13,9 @@ import com.scalar.db.analytics.labs.semantic.TableMetadataObservation.Read;
 import com.scalar.db.analytics.labs.semantic.TableMetadataObservation.SourceMetadata;
 import com.scalar.db.analytics.labs.semantic.model.BuildTask;
 import com.scalar.db.analytics.labs.semantic.model.Dependency;
+import com.scalar.db.analytics.labs.semantic.model.Document;
 import com.scalar.db.analytics.labs.semantic.model.FactRevision;
+import com.scalar.db.analytics.labs.semantic.model.Knowledge;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
 import com.scalar.db.analytics.labs.semantic.model.Urns;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
@@ -77,6 +79,7 @@ class MeaningInferenceTest extends StoreScenarioTest {
   /** A policy evaluation model that asks for consent and records what it was asked about. */
   private static final class AskingConsent implements PolicyEvaluationModel {
     final List<String> asked = new ArrayList<>();
+    final List<Subject> subjects = new ArrayList<>();
 
     @Override
     public JsonNode version() {
@@ -86,6 +89,7 @@ class MeaningInferenceTest extends StoreScenarioTest {
     @Override
     public synchronized Decision evaluate(Subject subject) {
       asked.add(subject.fact().revision().fact());
+      subjects.add(subject);
       return new Decision.RequestConsent("an inference only", JSON.objectNode());
     }
   }
@@ -784,6 +788,134 @@ class MeaningInferenceTest extends StoreScenarioTest {
                 assertThat(missing)
                     .contains("whose predicate existence correction interpretation does not")
                     .endsWith(": 列名が変わっただけです"));
+  }
+
+  // Documents
+
+  private static final String GLOSSARY =
+      """
+      # 販売ドメイン用語集
+
+      ## 注文ステータス (status)
+
+      | コード | 意味 |
+      | --- | --- |
+      | shipped | 出荷済み |
+      | ordered | 受注済み、未出荷 |
+      """;
+
+  private static String registerGlossary(Scenario s, String text) {
+    return ((DocumentRegistration.Observed)
+            store.registerDocument(s.domain, "owner", null, new Document("glossary.md", text)))
+        .inputObservation();
+  }
+
+  /** A value with a basis and a citation of the first document the model read. */
+  private static ObjectNode cited(JsonNode input, String value, String quotation) {
+    var item = JSON.objectNode().put("value", value).put("basis", "the glossary");
+    item.putObject("citation")
+        .put("document", input.path("documents").get(0).path("document").asText())
+        .put("quotation", quotation);
+    return item;
+  }
+
+  @Test
+  void aQuotationFoundInTheCitedDocumentIsADocumentCheckAndAnyOtherIsAnInference() {
+    var s = scenario();
+    register(s);
+    var glossary = registerGlossary(s, GLOSSARY);
+    var policy = new AskingConsent();
+    var model =
+        new ScriptedModel()
+            .answering(
+                FIELD,
+                input -> {
+                  var status = JSON.objectNode().put("ref", "shop.public.orders.status");
+                  // Line breaks and spacing the model did not copy do not fail a quotation.
+                  status
+                      .putObject("values")
+                      .set("meaning", cited(input, "注文の出荷状況", "| shipped |   出荷済み |\n| ordered |"));
+                  var amount = JSON.objectNode().put("ref", "shop.public.orders.amount");
+                  // The glossary says nothing about the currency.
+                  amount.putObject("values").set("unit", cited(input, "JPY", "金額はすべて円"));
+                  return answer(status, amount);
+                });
+
+    drain(s, policy, orders(), model);
+
+    var input = inputOf(model, FIELD);
+    assertThat(input.path("documents"))
+        .anySatisfy(
+            section -> {
+              assertThat(section.path("name").asText()).isEqualTo("glossary.md");
+              assertThat(section.path("heading").asText()).isEqualTo("注文ステータス (status)");
+            });
+
+    var meaning = only(s, field(s, "status"), Vocabulary.MEANING);
+    assertThat(meaning.checks())
+        .singleElement()
+        .satisfies(
+            check -> {
+              assertThat(check.method()).isEqualTo(ValidationMethod.DOCUMENT);
+              assertThat(check.reference()).isEqualTo(Ref.urn(glossary));
+              assertThat(check.details().path("quotation").asText())
+                  .isEqualTo("| shipped |   出荷済み |\n| ordered |");
+            });
+    assertThat(meaning.dependencies())
+        .anySatisfy(
+            dependency ->
+                assertThat(dependency)
+                    .isInstanceOfSatisfying(
+                        Dependency.OnInput.class,
+                        on -> assertThat(on.observation()).isEqualTo(Ref.urn(glossary))));
+    // A document check is no deterministic validation method, so the candidate is not adopted
+    // inline.
+    assertThat(meaning.state()).isEqualTo(FactState.CANDIDATE);
+    assertThat(policy.asked).contains(meaning.fact());
+    // The policy evaluation model sees the quotation and the document's name, not its whole text.
+    var subject =
+        policy.subjects.stream()
+            .filter(asked -> asked.fact().revision().fact().equals(meaning.fact()))
+            .findFirst()
+            .orElseThrow();
+    assertThat(subject.fact().referenced())
+        .filteredOn(referenced -> referenced.urn().equals(glossary))
+        .singleElement()
+        .isInstanceOfSatisfying(
+            Knowledge.Referenced.Observation.class,
+            observation -> {
+              assertThat(observation.content().path("name").asText()).isEqualTo("glossary.md");
+              assertThat(observation.content().has("text")).isFalse();
+            });
+
+    var unit = only(s, field(s, "amount"), Vocabulary.UNIT);
+    assertThat(unit.value().asText()).isEqualTo("JPY");
+    assertThat(unit.checks())
+        .singleElement()
+        .satisfies(
+            check -> {
+              assertThat(check.method()).isEqualTo(ValidationMethod.INFERENCE);
+              assertThat(check.details().path("basis").asText()).isEqualTo("the glossary");
+            });
+  }
+
+  @Test
+  void documentsOverTheBoundPassOnlySectionsNamingWhatIsAskedAboutAndTheRestIsMissing() {
+    var s = scenario();
+    register(s);
+    // Line breaks written as CRLF still separate sections.
+    registerGlossary(s, (GLOSSARY + "\n## 配送\n\n" + "配送業者の一覧。".repeat(3000)).replace("\n", "\r\n"));
+    var model = ordersModel();
+
+    var summary = drain(s, new AskingConsent(), orders(), model);
+
+    var headings =
+        StreamSupport.stream(inputOf(model, FIELD).path("documents").spliterator(), false)
+            .map(section -> section.path("heading").asText())
+            .toList();
+    assertThat(headings).containsExactly("注文ステータス (status)");
+    assertThat(generated(summary, FIELD).missingInputs())
+        .anyMatch(missing -> missing.startsWith("parts of document glossary.md"));
   }
 
   /** Writes a meaning candidate on a Field, as another Generator would. */

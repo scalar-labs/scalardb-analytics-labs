@@ -44,7 +44,7 @@ public final class ScalarDbAnalyticsCli implements AutoCloseable {
     commandLine.addSubcommand("source", SourceCommand.create(standardInput, environment));
     commandLine.addSubcommand("metadata", MetadataCommand.create(environment));
     buildCommand = new SemanticCommand.SemanticBuildCommand(environment);
-    commandLine.addSubcommand("semantic", SemanticCommand.create(buildCommand));
+    commandLine.addSubcommand("semantic", SemanticCommand.create(buildCommand, environment));
     commandLine.setOut(new java.io.PrintWriter(standardOutput, true, StandardCharsets.UTF_8));
     commandLine.setErr(new java.io.PrintWriter(standardError, true, StandardCharsets.UTF_8));
   }

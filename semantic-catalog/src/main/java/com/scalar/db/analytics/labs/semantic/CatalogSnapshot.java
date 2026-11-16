@@ -5,6 +5,7 @@
 package com.scalar.db.analytics.labs.semantic;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.scalar.db.analytics.labs.semantic.model.Dependency;
 import com.scalar.db.analytics.labs.semantic.model.ElementIdentity;
 import com.scalar.db.analytics.labs.semantic.model.FactRevision;
@@ -21,6 +22,7 @@ import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.CheckResult;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.InputKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Transition;
 import com.scalar.db.analytics.labs.semantic.policy.PolicyEvaluationModel;
 import com.scalar.db.analytics.labs.semantic.policy.PolicyEvaluator;
@@ -1151,6 +1153,7 @@ public final class CatalogSnapshot {
     private final Map<String, AddressSelectionRow> selections = new HashMap<>();
     private final Map<String, LogPosition> latestObservations = new HashMap<>();
     private final Set<String> loadedResources = new HashSet<>();
+    private final Map<String, @Nullable InputKind> resourceKinds = new HashMap<>();
     private final Map<String, FactAddressRow> addresses = new HashMap<>();
     private final Map<String, ElementRow> elements = new HashMap<>();
     private final Map<String, List<PositionedRecord>> logs = new HashMap<>();
@@ -1429,6 +1432,33 @@ public final class CatalogSnapshot {
       node.elements().forEachRemaining(child -> collectUrns(child, urns));
     }
 
+    /**
+     * The content of an Input Observation as a reader of a Fact that refers to it sees it. A
+     * document is shown by its name only: its text can be long, and what a candidate rests on is
+     * the quotation its {@code document} check holds, so expanding the text into every read and
+     * every policy evaluation subject would pass more of a document than the relevant parts (see
+     * {@code docs/semantic-catalog/generators.md}, "Input passed to external models").
+     */
+    private JsonNode referencedContent(String resource, JsonNode content) {
+      if (resourceKind(resource) != InputKind.DOCUMENT) {
+        return content;
+      }
+      return JsonNodeFactory.instance.objectNode().set("name", content.path("name"));
+    }
+
+    private @Nullable InputKind resourceKind(String resource) {
+      if (!resourceKinds.containsKey(resource)) {
+        resourceKinds.put(
+            resource,
+            transaction
+                .projectionSource(domain)
+                .inputResource(resource)
+                .map(row -> row.kind())
+                .orElse(null));
+      }
+      return resourceKinds.get(resource);
+    }
+
     /** The content of the records a prepared Fact Revision refers to, one level deep. */
     private List<Knowledge.Referenced> referencedBy(FactRevision revision) {
       var referenced = new ArrayList<Knowledge.Referenced>();
@@ -1441,9 +1471,10 @@ public final class CatalogSnapshot {
           case Urns.INPUT_OBSERVATION -> {
             if (logRecords.get(Urns.position(urn))
                 instanceof LogRecord.InputObservation observation) {
+              var resource = observation.inputResource().urnValue();
               referenced.add(
                   new Knowledge.Referenced.Observation(
-                      urn, observation.inputResource().urnValue(), observation.content()));
+                      urn, resource, referencedContent(resource, observation.content())));
             }
           }
           case Urns.LOG_RECORD -> {

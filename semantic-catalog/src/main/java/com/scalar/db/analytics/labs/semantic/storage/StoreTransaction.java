@@ -412,6 +412,30 @@ public final class StoreTransaction {
         .optional();
   }
 
+  /**
+   * The kind of an Input Resource, locked for the rest of the transaction so that registrations of
+   * one document run one at a time; a concurrent registration that already changed it fails this
+   * transaction, which is then retried.
+   */
+  public Optional<InputKind> lockInputResource(String domain, String inputResource) {
+    return jdbc.sql(
+            "SELECT kind FROM semantic_catalog.input_resources"
+                + " WHERE domain = ? AND input_resource = ? FOR UPDATE")
+        .params(domain, inputResource)
+        .query((rs, n) -> InputKind.valueOf(rs.getString("kind")))
+        .optional();
+  }
+
+  /** Every Input Resource of one kind in a domain, oldest first. */
+  public List<String> inputResources(String domain, InputKind kind) {
+    return jdbc.sql(
+            "SELECT input_resource FROM semantic_catalog.input_resources"
+                + " WHERE domain = ? AND kind = ? ORDER BY created_commit, input_resource")
+        .params(domain, kind.name())
+        .query((rs, n) -> rs.getString("input_resource"))
+        .list();
+  }
+
   /** The latest Input Observation of an Input Resource, with its URN. */
   public Optional<PositionedRecord> latestObservationRecord(String domain, String inputResource) {
     return jdbc.sql(

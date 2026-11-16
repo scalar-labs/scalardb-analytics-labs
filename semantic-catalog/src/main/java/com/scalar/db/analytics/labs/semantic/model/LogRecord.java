@@ -224,14 +224,19 @@ public sealed interface LogRecord {
    * @param inputResource the Input Resource observed
    * @param previous the previous observation of the same Input Resource; the store sets it when the
    *     commit is written, so a commit request leaves it absent
-   * @param content the content observed; for usage feedback, a {@link UsageFeedback} in its stored
-   *     JSON form
+   * @param content the content observed; for usage feedback, a {@link UsageFeedback}, and for a
+   *     document, a {@link Document}, each in its stored JSON form
    */
   record InputObservation(Ref inputResource, @Nullable Ref previous, JsonNode content)
       implements LogRecord {
     /** The observation of a usage-feedback Input Resource, for a commit request. */
     public static InputObservation of(Ref inputResource, UsageFeedback feedback) {
       return new InputObservation(inputResource, null, LogRecordJson.toStored(feedback));
+    }
+
+    /** An observation of a document Input Resource, for a commit request. */
+    public static InputObservation of(Ref inputResource, Document document) {
+      return new InputObservation(inputResource, null, LogRecordJson.toStored(document));
     }
   }
 

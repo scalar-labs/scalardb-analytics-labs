@@ -59,8 +59,9 @@ never by itself a basis for derivation.
 **Input kinds.** Each Generator declares what it may read, and build tasks are created from these
 declarations. A commit that records a new observation, a confirmation, or an acceptance creates, in
 the same transaction, a run of each Generator that reads it, or adds the commit's log record as a
-trigger to the run of that Generator not started yet. **[Planned]** Document inputs and usage
-feedback without related Facts have no Generator yet.
+trigger to the run of that Generator not started yet. **[Planned]** No Generator declares document
+input or usage feedback without related Facts yet, so those observations create no build tasks; row
+and Field meaning inference read the domain's current documents when their other inputs start them.
 
 | Input kind | Creates build tasks when |
 | --- | --- |
@@ -301,9 +302,10 @@ coincidental correspondence. For the same reason, keys from candidate key discov
 
 ## Meaning inference
 
-Row and Field meaning inference and correction interpretation are implemented. **[Planned]**
-Concept inference, analytical semantics inference, identifier correspondence inference, `document`
-checks, and the triggers of documents and of feedback without related Facts are not.
+Row and Field meaning inference, with documents as input and `document` checks, and correction
+interpretation are implemented. **[Planned]** Concept inference, analytical semantics inference,
+identifier correspondence inference, and the triggers of documents and of feedback without related
+Facts are not.
 
 Meaning inference uses a model for predicates that declarations and data cannot decide. For a target
 element it passes names and types, confirmed Facts, relevant document parts, feedback, and permitted
@@ -522,9 +524,9 @@ noticed.
 
 ## Input passed to external models
 
-Row and Field meaning inference apply the settings for data count statistics and value samples, and
-record what they pass as inputs read. **[Planned]** Length and shape distributions, the usage
-feedback setting, turning data checks off, and documents are not implemented.
+Row and Field meaning inference apply the settings for data count statistics and value samples, pass
+the relevant parts of documents, and record what they pass as inputs read. **[Planned]** Length and
+shape distributions, the usage feedback setting, and turning data checks off are not implemented.
 
 The policy evaluation model's subject holds Fact content and what the candidate's Generator recorded
 as read; it expands no observation content. The settings below apply wherever observation content is
@@ -542,6 +544,17 @@ far as the domain's settings allow:
 | Data count statistics | Row count, null ratio, distinct count, from a bounded sample | Passed; can be stopped |
 | Value distributions and samples | Length and shape distributions, some distinct values (up to five per column, each cut to 100 characters) | Not passed unless the domain opts in |
 | Usage feedback | Content, session purpose, context summary, related Facts | Passed; can be stopped |
+
+The relevant parts of documents are found without a model. A document is split into sections at its
+Markdown headings. When all the domain's documents fit within a bound on the text one model call
+reads, they are passed whole. Otherwise only the sections that name the table the call asks about or
+one of its columns are passed, as far as the bound allows, and the documents with parts left out are
+recorded as missing input. Each passed document's observation is an input read and a dependency of
+the call's candidates. A quotation counts as found when it appears in the cited observation's text
+with runs of white space treated as one space; a quotation that does not, or one citing a document
+the call did not read, leaves the value an `inference` with the basis the model stated. A read of
+the candidate, including the policy evaluation model's subject, shows the document by name only; the
+quotation is the part of the document the candidate rests on.
 
 Value distributions and samples are withheld by default because values that must not leave the
 organization could reach an external model before the organization decides, and even shape

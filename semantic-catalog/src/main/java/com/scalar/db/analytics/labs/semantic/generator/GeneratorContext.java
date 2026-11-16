@@ -6,6 +6,7 @@ package com.scalar.db.analytics.labs.semantic.generator;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.scalar.db.analytics.labs.semantic.model.Check;
+import com.scalar.db.analytics.labs.semantic.model.Document;
 import com.scalar.db.analytics.labs.semantic.model.ElementIdentity;
 import com.scalar.db.analytics.labs.semantic.model.IdentityKey;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
@@ -290,6 +291,36 @@ public final class GeneratorContext {
     }
     return observationContent(observed.observation())
         .map(content -> LogRecordJson.fromStored(content, UsageFeedback.class));
+  }
+
+  // Documents
+
+  /**
+   * The latest observation of one registered document.
+   *
+   * @param inputResource the URN of the document's Input Resource
+   * @param observation the URN of its latest Input Observation
+   */
+  public record DocumentObservation(String inputResource, String observation, Document document) {}
+
+  /** The latest observation of every document registered in the domain, oldest document first. */
+  public List<DocumentObservation> documents() {
+    var documents = new ArrayList<DocumentObservation>();
+    for (var resource : transaction.inputResources(domain, InputKind.DOCUMENT)) {
+      var observation = latestObservation(resource);
+      if (observation.isEmpty()) {
+        continue;
+      }
+      var content = observationContent(observation.get());
+      if (content.isPresent()) {
+        documents.add(
+            new DocumentObservation(
+                resource,
+                observation.get(),
+                LogRecordJson.fromStored(content.get(), Document.class)));
+      }
+    }
+    return documents;
   }
 
   // Elements

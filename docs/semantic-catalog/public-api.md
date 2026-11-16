@@ -100,7 +100,7 @@ the identifier of their target, and a reason:
 | Not accepted in this state | **[Planned]** A state condition of the operation is not met, such as running build tasks while another process runs them |
 | Storage failure | **[Planned]** Storage could not be read or written |
 
-**[Planned]** Registering an observation that records nothing because the content is unchanged is a success whose
+Registering an observation that records nothing because the content is unchanged is a success whose
 output says so.
 
 ## Operations
@@ -123,11 +123,14 @@ output says so.
   table back. A new version whose source metadata is unchanged records only a derived record. Each is a success, and the output says which was recorded, with the Input Resource
   and Input Observation URNs. The application passes unchanged tables at every retrieval, so a
   failure between the Physical Catalog's update and this call is repaired by the next retrieval.
-- **[Planned]** *Other observations*: documents and usage feedback. The input is the observation kind, the Input
-  Resource (an existing document's URN or none for a new one; always none for feedback), and the
-  content. Feedback also carries its session purpose and a summary of the session's context, and can
-  carry related Fact URNs. The output returns the Input Resource and Input Observation URNs and
-  whether anything was recorded.
+- *Documents*, which the semantics owner wrote. The input is the Input Resource (an existing
+  document's URN, or none for a new document) and the content: the document's name and text. Text
+  equal to the document's latest observation records nothing. The output returns the Input Resource
+  and the latest Input Observation URNs and whether anything was recorded.
+- **[Planned]** *Usage feedback*. The input is the content with its session purpose and a summary of
+  the session's context, and can carry related Fact URNs; feedback is always a new Input Resource.
+  The output returns the Input Resource and Input Observation URNs. Today feedback is registered
+  only as the wording of a correction when answers are submitted.
 
 ### Submitting answers
 

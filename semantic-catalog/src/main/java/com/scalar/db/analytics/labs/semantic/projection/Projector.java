@@ -7,6 +7,7 @@ package com.scalar.db.analytics.labs.semantic.projection;
 import com.scalar.db.analytics.labs.semantic.model.Check;
 import com.scalar.db.analytics.labs.semantic.model.CommitRejectedException;
 import com.scalar.db.analytics.labs.semantic.model.Dependency;
+import com.scalar.db.analytics.labs.semantic.model.Document;
 import com.scalar.db.analytics.labs.semantic.model.ElementIdentity;
 import com.scalar.db.analytics.labs.semantic.model.IdentityKey;
 import com.scalar.db.analytics.labs.semantic.model.LogPosition;
@@ -24,7 +25,6 @@ import com.scalar.db.analytics.labs.semantic.model.Vocabulary.AnswerType;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ConfirmationPath;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
-import com.scalar.db.analytics.labs.semantic.model.Vocabulary.InputKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.PolicyResult;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Transition;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.ElementRow;
@@ -337,8 +337,10 @@ public final class Projector {
     var resource = observation.inputResource().urnValue();
     if (validating) {
       var resourceRow = requireInputResource(observation.inputResource());
-      if (resourceRow.kind() == InputKind.USAGE_FEEDBACK) {
-        validateFeedback(observation);
+      switch (resourceRow.kind()) {
+        case USAGE_FEEDBACK -> validateFeedback(observation);
+        case DOCUMENT -> validateDocument(observation);
+        case PHYSICAL_SCHEMA, DATA_OBSERVATION -> {}
       }
       var previous = observation.previous();
       var expected = projection.latestObservation(resource);
@@ -373,6 +375,20 @@ public final class Projector {
     }
     for (var fact : feedback.relatedFacts()) {
       requireFact(fact);
+    }
+  }
+
+  /** Checks the observation of a document: its content is {@link Document}. */
+  private void validateDocument(LogRecord.InputObservation observation) {
+    var malformed = "A document observation has a name and text";
+    var content = observation.content();
+    if (content == null || !content.isObject()) {
+      throw reject(malformed);
+    }
+    try {
+      LogRecordJson.fromStored(content, Document.class);
+    } catch (SemanticCatalogException e) {
+      throw reject(malformed + ": " + e.getMessage());
     }
   }
 

@@ -134,6 +134,22 @@ build tasks at a time; another fails at once with `BUILD_RUN_IN_PROGRESS`. Witho
 `semanticCatalog.languageModel` it fails with `LANGUAGE_MODEL_NOT_CONFIGURED` before running any
 task.
 
+`semantic document register` registers a document the semantics owner wrote, such as a glossary,
+which meaning inference reads and can cite:
+
+```console
+scalardb-analytics semantic document register --workspace ./analytics-workspace glossary.md
+scalardb-analytics semantic document register --workspace ./analytics-workspace \
+  --resource <inputResource> glossary.md
+```
+
+It prints one `scalardb-analytics/document-registration` line with `recorded`, the document's
+`inputResource`, and its latest `inputObservation`. Without `--resource` it registers a new document;
+pass the `inputResource` it printed to register a changed version of the same document. Unchanged
+text records nothing and prints `recorded: false`. A `--resource` that names no document fails with
+`DOCUMENT_REGISTRATION_FAILED`. Registering a document starts no build task; the next build tasks of
+meaning inference read it.
+
 `query` accepts exactly one of `--sql`, `--file`, or `--stdin`. Successful commands and classified
 operational failures write versioned JSON to stdout and return exit code `0` or `1`, respectively.
 Invalid command usage returns exit code `2` through picocli. `SIGINT` cancels an active query.

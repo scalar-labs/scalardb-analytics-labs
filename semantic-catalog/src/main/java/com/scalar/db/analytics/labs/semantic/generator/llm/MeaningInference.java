@@ -20,8 +20,10 @@ import com.scalar.db.analytics.labs.semantic.generator.Proposals;
 import com.scalar.db.analytics.labs.semantic.llm.LanguageModelException;
 import com.scalar.db.analytics.labs.semantic.model.Check;
 import com.scalar.db.analytics.labs.semantic.model.Dependency;
+import com.scalar.db.analytics.labs.semantic.model.Document;
 import com.scalar.db.analytics.labs.semantic.model.IdentityKey;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
+import com.scalar.db.analytics.labs.semantic.model.LogRecordJson;
 import com.scalar.db.analytics.labs.semantic.model.PhysicalCatalogReference;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
 import com.scalar.db.analytics.labs.semantic.model.Scope;
@@ -31,10 +33,12 @@ import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ValidationMethod;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
@@ -45,10 +49,11 @@ import org.jspecify.annotations.Nullable;
  * docs/semantic-catalog/generators.md}, "Meaning inference").
  *
  * <p>The model reads each target table's metadata, the connector's source metadata as the connector
- * wrote it, the target elements' confirmed Facts and rejected values, and the data reads the
- * domain's settings allow. It names elements by their Physical Catalog references, and only the
- * targets the run asked about are read back from its answer. Every candidate is {@code inference},
- * with the basis the model stated, so none is adopted inline.
+ * wrote it, the target elements' confirmed Facts and rejected values, the relevant sections of the
+ * domain's documents, and the data reads the domain's settings allow. It names elements by their
+ * Physical Catalog references, and only the targets the run asked about are read back from its
+ * answer. A value whose quotation is found in the document it cites is {@code document}; any other
+ * is {@code inference}, with the basis the model stated. Neither is adopted inline.
  *
  * <p>A run produces only for a Fact Address with no Fact selected and no candidate pending, and
  * after two rejections there it waits for a newer observation of what they depended on: one
@@ -260,6 +265,10 @@ abstract class MeaningInference implements ModelGenerator {
     }
     var asks = new ArrayList<Ask>();
     var queries = new ArrayList<DataGenerator.Query>();
+    var sections =
+        byTable.isEmpty()
+            ? List.<DocumentSections.Section>of()
+            : DocumentSections.sections(context.documents());
     for (var located : byTable.values()) {
       var table = located.getFirst();
       var observed = (GeneratorContext.Observed.Read) table.table().observed();
@@ -287,27 +296,49 @@ abstract class MeaningInference implements ModelGenerator {
               .observationContent(table.table().observation())
               .map(content -> content.path("sourceMetadata"))
               .orElse(JSON.nullNode()));
+      var names = new ArrayList<String>();
+      names.add(table.tableReference().table());
+      names.addAll(columns);
+      var chosen = DocumentSections.choose(sections, names, DocumentSections.CHARACTERS);
+      missing.addAll(chosen.missing());
       for (var from = 0; from < located.size(); from += TARGETS_PER_CALL) {
         var share = located.subList(from, Math.min(from + TARGETS_PER_CALL, located.size()));
-        asks.add(ask(context, tableNode, share, predicatesByElement));
+        asks.add(ask(context, tableNode, chosen.sections(), share, predicatesByElement));
       }
     }
     return new Plan(asks, queries, List.copyOf(missing));
   }
 
   /**
-   * One model call over targets of one table: the table once, then each target with the predicates
-   * asked for, its confirmed Facts, and the values already rejected at those predicates.
+   * One model call over targets of one table: the table once, the document sections chosen for it,
+   * then each target with the predicates asked for, its confirmed Facts, and the values already
+   * rejected at those predicates. Every target's candidates rest on the documents the call reads.
    */
   private static Ask ask(
       GeneratorContext context,
       ObjectNode tableNode,
+      List<DocumentSections.Section> sections,
       List<Located> share,
       Map<String, List<String>> predicatesByElement) {
     var read = new LinkedHashSet<String>();
     var input = JSON.objectNode();
     var targetNodes = input.putArray("targets");
     input.putArray("tables").add(tableNode.deepCopy());
+    var documentNodes = input.putArray("documents");
+    var documentPremises = new LinkedHashSet<Dependency>();
+    for (var section : sections) {
+      var document = section.document();
+      documentNodes
+          .addObject()
+          .put("document", document.inputResource())
+          .put("name", document.document().name())
+          .put("heading", section.heading())
+          .put("text", section.text());
+      read.add(document.observation());
+      documentPremises.add(
+          new Dependency.OnInput(
+              Ref.urn(document.inputResource()), Ref.urn(document.observation())));
+    }
     var targets = new ArrayList<Target>();
     for (var target : share) {
       var predicates = predicatesByElement.getOrDefault(target.element(), List.of());
@@ -316,6 +347,7 @@ abstract class MeaningInference implements ModelGenerator {
       premises.add(
           new Dependency.OnInput(
               Ref.urn(target.table().inputResource()), Ref.urn(target.table().observation())));
+      premises.addAll(documentPremises);
       read.add(target.table().observation());
       read.add(target.existence().revision());
       var targetNode = targetNodes.addObject();
@@ -578,6 +610,7 @@ abstract class MeaningInference implements ModelGenerator {
         }
       }
     }
+    var cited = new CitedDocuments(context);
     for (var answered : answers) {
       var given = answers(answered.answer());
       var table = answered.ask().input().path("tables").path(0).path("ref").asText();
@@ -588,6 +621,7 @@ abstract class MeaningInference implements ModelGenerator {
             answered.ask(),
             target,
             given.get(target.reference()),
+            cited,
             observed.getOrDefault(table, List.of()),
             statistics.get(table));
       }
@@ -605,6 +639,7 @@ abstract class MeaningInference implements ModelGenerator {
       Ask ask,
       Target target,
       @Nullable Map<String, Given> values,
+      CitedDocuments cited,
       List<DataObservations.Observed> observations,
       DataObservations.@Nullable Observed statistics) {
     var located = locate(context, target.element());
@@ -637,7 +672,8 @@ abstract class MeaningInference implements ModelGenerator {
                 target,
                 predicate,
                 value,
-                given.basis(),
+                given,
+                cited.verified(ask, given.citation()),
                 observations,
                 statistics);
       }
@@ -647,7 +683,9 @@ abstract class MeaningInference implements ModelGenerator {
   /**
    * Proposes one candidate. It rests on what the model read as planned, so a physical schema
    * observed while the model answered leaves it depending on the older observation, which shows the
-   * deciding party what it was inferred from.
+   * deciding party what it was inferred from. A value whose citation is found in the cited document
+   * gets a {@code document} check quoting it; any other value gets an {@code inference} check with
+   * the basis the model stated.
    */
   private static void propose(
       GeneratorContext context,
@@ -656,7 +694,8 @@ abstract class MeaningInference implements ModelGenerator {
       Target target,
       String predicate,
       Valued.Value value,
-      String basis,
+      Given given,
+      @Nullable String quoted,
       List<DataObservations.Observed> observations,
       DataObservations.@Nullable Observed statistics) {
     var dependencies = new ArrayList<>(target.premises());
@@ -667,13 +706,24 @@ abstract class MeaningInference implements ModelGenerator {
       }
     }
     var check =
-        new Check(
-            ValidationMethod.INFERENCE,
-            JSON.textNode(Vocabulary.VALUE_ITEM),
-            CheckResult.SUPPORTED,
-            null,
-            statistics == null ? null : statistics.observation(),
-            DataObservations.stored(JSON.objectNode().put("basis", basis)));
+        quoted == null
+            ? new Check(
+                ValidationMethod.INFERENCE,
+                JSON.textNode(Vocabulary.VALUE_ITEM),
+                CheckResult.SUPPORTED,
+                null,
+                statistics == null ? null : statistics.observation(),
+                DataObservations.stored(JSON.objectNode().put("basis", given.basis())))
+            : new Check(
+                ValidationMethod.DOCUMENT,
+                JSON.textNode(Vocabulary.VALUE_ITEM),
+                CheckResult.SUPPORTED,
+                null,
+                Ref.urn(quoted),
+                DataObservations.stored(
+                    JSON.objectNode()
+                        .put("quotation", Objects.requireNonNull(given.citation()).quotation())
+                        .put("basis", given.basis())));
     var inputsRead = JSON.arrayNode();
     ask.read().forEach(inputsRead::add);
     for (var observation : observations) {
@@ -691,13 +741,79 @@ abstract class MeaningInference implements ModelGenerator {
         new LogRecord.Accept(fact, dependencies, List.of(check), inputsRead, context.provenance()));
   }
 
-  /** A predicate value the model gave, with the basis it stated. */
-  private record Given(JsonNode value, String basis) {}
+  /**
+   * The documents a run's answers cite, each read once in the recording transaction and kept in the
+   * form a quotation is checked against.
+   */
+  private static final class CitedDocuments {
+    private final GeneratorContext context;
+    private final Map<String, String> texts = new HashMap<>();
+
+    CitedDocuments(GeneratorContext context) {
+      this.context = context;
+    }
+
+    /**
+     * The Input Observation a citation quotes, when the call read the cited document and the
+     * quotation is in that observation's text; null otherwise, so the value is only an inference.
+     */
+    @Nullable String verified(Ask ask, @Nullable Citation citation) {
+      if (citation == null) {
+        return null;
+      }
+      var observation = passedObservation(ask, citation.document());
+      if (observation == null) {
+        return null;
+      }
+      var text =
+          texts.computeIfAbsent(
+              observation,
+              urn ->
+                  Quotations.collapsed(
+                      context
+                          .observationContent(urn)
+                          .map(content -> LogRecordJson.fromStored(content, Document.class).text())
+                          .orElse("")));
+      return Quotations.found(citation.quotation(), text) ? observation : null;
+    }
+
+    /**
+     * The observation of a document the call read: a document among the call's input whose
+     * observation the targets' premises name.
+     */
+    private static @Nullable String passedObservation(Ask ask, String document) {
+      var passed = false;
+      for (var section : ask.input().path("documents")) {
+        if (section.path("document").asText().equals(document)) {
+          passed = true;
+          break;
+        }
+      }
+      if (!passed) {
+        return null;
+      }
+      for (var target : ask.targets()) {
+        for (var premise : target.premises()) {
+          if (premise instanceof Dependency.OnInput input
+              && input.inputResource().urnValue().equals(document)) {
+            return input.observation().urnValue();
+          }
+        }
+      }
+      return null;
+    }
+  }
+
+  /** A predicate value the model gave, with the basis it stated and the document it cited. */
+  private record Given(JsonNode value, String basis, @Nullable Citation citation) {}
+
+  /** A document a model cites for a value, by its Input Resource, with the text it quotes. */
+  private record Citation(String document, String quotation) {}
 
   /**
    * Reads the answer: {@code {"targets": [{"ref": ..., "values": {predicate: {"value": ...,
-   * "basis": ...}}}]}}. An answer not in this form fails the run, so a model that misreads the
-   * instructions is noticed.
+   * "basis": ..., "citation": {"document": ..., "quotation": ...}}}}]}}, the citation optional. An
+   * answer not in this form fails the run, so a model that misreads the instructions is noticed.
    */
   private Map<String, Map<String, Given>> answers(JsonNode answer) {
     var targets = answer.path("targets");
@@ -725,7 +841,9 @@ abstract class MeaningInference implements ModelGenerator {
           throw unreadable("the value of " + entry.getKey() + " has no value or no basis");
         }
         if (!item.get("value").isNull()) {
-          given.put(entry.getKey(), new Given(item.get("value"), basis.asText()));
+          given.put(
+              entry.getKey(),
+              new Given(item.get("value"), basis.asText(), citation(entry.getKey(), item)));
         }
       }
       answers.merge(
@@ -738,6 +856,20 @@ abstract class MeaningInference implements ModelGenerator {
           });
     }
     return answers;
+  }
+
+  /** The citation of a value, if the model gave one; an object without both parts is unreadable. */
+  private @Nullable Citation citation(String predicate, JsonNode item) {
+    var citation = item.path("citation");
+    if (citation.isMissingNode() || citation.isNull()) {
+      return null;
+    }
+    var document = citation.path("document");
+    var quotation = citation.path("quotation");
+    if (!document.isTextual() || !quotation.isTextual()) {
+      throw unreadable("the citation of " + predicate + " has no document or no quotation");
+    }
+    return new Citation(document.asText(), quotation.asText());
   }
 
   private LanguageModelException unreadable(String why) {
