@@ -46,6 +46,14 @@ scalardb-analytics workspace init \
   --store-password-env CATALOG_PASSWORD
 ```
 
+`workspace.json` may also set the workspace's Semantic Catalog settings under `semanticCatalog`.
+`workspace init` writes none of them, and an unset one takes its default:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `sampleSize` | `100000` | The most rows construction-run SQL reads of a sampled table, at most `10000000` |
+| `constructionQueryTimeLimitSeconds` | `60` | How long one construction-run query may take, at most `86400` |
+
 Register, inspect, and query sources:
 
 ```console

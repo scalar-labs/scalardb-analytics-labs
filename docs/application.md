@@ -20,8 +20,8 @@ The application provides:
 - the user-facing interfaces for data-source registration, catalog access, Semantic Catalog
   construction and decisions, and query execution;
 - the retrieval of table metadata and its hand-off to both catalogs, including re-retrieval;
-- **[Planned]** the capabilities the Semantic Catalog needs from outside it: SQL execution for data
-  checks, name resolution, and re-retrieval;
+- the capabilities the Semantic Catalog needs from outside it: SQL execution for data checks,
+  and **[Planned]** name resolution and re-retrieval;
 - **[Planned]** the operations that run Semantic Catalog build tasks and expose their state and
   failures;
 - a versioned Agent Skill that teaches a Query Agent to use the CLI safely;
@@ -51,8 +51,11 @@ person as setter. Every call to the Semantic Catalog names that domain, and the 
 in from the workspace. How workspace, catalog, and domain relate beyond this one-to-one
 correspondence is not settled.
 
-**[Planned]** The workspace configuration holds what the Semantic Catalog needs from the
-application, per domain:
+The workspace configuration holds what the Semantic Catalog needs from the application, per domain.
+Today it holds the sample size and the time limit of construction-run SQL, under
+`semanticCatalog` in `workspace.json` (see
+[`../application/README.md`](../application/README.md#standalone-cli)). **[Planned]** It is also to
+hold:
 
 - the semantics owners, and the Query Agents an administrator permits (see
   [Callers and authority](#callers-and-authority));
@@ -61,8 +64,7 @@ application, per domain:
 - which inputs reach Generators and models: count statistics (on by default), value samples and
   distributions (off by default), and usage feedback (on by default) (see
   [`semantic-catalog/generators.md`](semantic-catalog/generators.md#input-passed-to-external-models));
-- whether data checks run (on by default); and
-- the sample size and the time and concurrency limits of construction-run SQL.
+- whether data checks run (on by default).
 
 Changing interfaces opens the same workspace and uses the same Query Engine without migrating
 sources or catalogs. Several application processes may open one workspace at the same time, and
@@ -309,15 +311,29 @@ One process does not mean one set of privileges or connections:
   operations sit behind connections or capabilities that untrusted SQL cannot reach.
 - **[Planned]** The databases that store the Physical Catalog and the Semantic Catalog cannot be
   registered as data sources, so SQL cannot reach them through the Query Engine.
-- **[Planned]** Semantic Catalog build tasks receive only the inputs given to them. A build task
-  that checks data values does not call connectors directly. It uses the application's SQL
-  execution, which identifies the build task as the caller, limits what it may read to the inputs
-  the task declared, reads each table through a sample bounded by the domain's sample size, and caps
-  rows, bytes, time, and the number of such queries running at once. The result says whether the
-  sample covered the whole table, and carries the connector's read provenance, or, on the scanner
-  path, the path's implementation and the names and versions of its DuckDB extensions instead. The
-  Query Engine for these reads is started with every data source of the catalog attached, on the
-  first such read of a construction run, the same way as for a user's query.
+- **[Planned]** Semantic Catalog build tasks receive only the inputs given to them.
+- A build task that checks data values does not call connectors directly. It uses the
+  application's construction-run SQL, an entry point separate from a user's SQL, so every read
+  through it is the build task's:
+  - The build task declares each table it reads, by data-source registration, namespace, and table
+    name, as sampled or whole. A declared table must be registered in the Physical Catalog, and the
+    statement must read every declared table and nothing else: its parse tree may reference only
+    declared tables and its own common table expressions, and no table function.
+  - The application, not the build task, applies sampling: each reference to a sampled table reads
+    a reservoir sample of the domain's sample size, with one fixed seed, so every reference to a
+    table in a statement reads the same rows. A table within the sample size is read whole. A
+    reservoir sample is drawn from a scan of the whole table, so sampling bounds what a check
+    holds, not what it reads from the source; each reference scans the table again, and a large
+    table is bounded only by the time limit.
+  - The statement and the counts of what it read share the domain's time limit, and its result is
+    capped at 10,000 rows and 64 MiB. A statement over a limit returns nothing and leaves its items
+    undecidable. The engine runs one query at a time, so these queries run one after another.
+  - The result says, for each declared table, whether it was read through a sample or whole, how
+    many rows were read, and when. Neither read path returns read provenance yet, so it carries the
+    read path of each data source read and the name and version of the DuckDB extension that read
+    it. **[Planned]** On the connector path, it is to carry the connector's read provenance.
+  - The Query Engine for these reads is started with every data source of the catalog attached, on
+    the first such read, the same way as for a user's query.
 - External files, URLs, automatic extension downloads, and arbitrary `ATTACH` are denied by default.
 
 The first distribution target is Linux x86_64 with glibc 2.28 or newer and the baseline x86-64

@@ -7,6 +7,7 @@ package com.scalar.db.analytics.labs.application.cli.query;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.scalar.db.analytics.labs.application.ApplicationFailure;
+import com.scalar.db.analytics.labs.application.ArrowJson;
 import com.scalar.db.analytics.labs.application.cli.CliOutput;
 import com.scalar.db.analytics.labs.application.workspace.Workspace;
 import com.scalar.db.analytics.labs.query.QueryEngineException;
@@ -14,38 +15,20 @@ import com.scalar.db.analytics.labs.query.QueryError;
 import com.scalar.db.analytics.labs.query.QueryResult;
 import java.io.IOException;
 import java.io.InputStream;
-import java.math.BigDecimal;
-import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.time.Instant;
-import java.time.LocalDate;
-import java.time.LocalTime;
-import java.time.temporal.TemporalAccessor;
 import java.util.ArrayList;
-import java.util.Base64;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Callable;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
-import org.apache.arrow.vector.DateDayVector;
-import org.apache.arrow.vector.FieldVector;
-import org.apache.arrow.vector.TimeMicroVector;
-import org.apache.arrow.vector.TimeStampVector;
-import org.apache.arrow.vector.complex.FixedSizeListVector;
-import org.apache.arrow.vector.complex.ListVector;
-import org.apache.arrow.vector.complex.StructVector;
-import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
-import org.apache.arrow.vector.util.Text;
 import org.jspecify.annotations.Nullable;
 import picocli.CommandLine.ArgGroup;
 import picocli.CommandLine.Command;
@@ -185,7 +168,7 @@ public final class QueryCommand implements Callable<Integer>, AutoCloseable {
         }
         var row = new ArrayList<@Nullable Object>(root.getFieldVectors().size());
         for (var vector : root.getFieldVectors()) {
-          row.add(toJsonValue(vector, rowIndex));
+          row.add(ArrowJson.value(vector, rowIndex));
         }
         rows.add(row);
       }
@@ -207,103 +190,6 @@ public final class QueryCommand implements Callable<Integer>, AutoCloseable {
         field.getType().toString(),
         field.isNullable(),
         field.getChildren().stream().map(QueryCommand::toOutputField).toList());
-  }
-
-  /**
-   * Converts one value of a vector, descending into lists, arrays, maps, and structs. Arrow
-   * represents dates, times of day, and zoned timestamps as plain numbers, so those are rendered as
-   * ISO-8601 strings at any depth, like timestamps without a zone.
-   */
-  private static @Nullable Object toJsonValue(FieldVector vector, int index) {
-    if (vector.isNull(index)) {
-      return null;
-    }
-    return switch (vector) {
-      case DateDayVector dates -> LocalDate.ofEpochDay(dates.get(index)).toString();
-      case TimeMicroVector times -> timeOfDay(times.get(index));
-      case TimeStampVector timestamps
-          when vector.getField().getType() instanceof ArrowType.Timestamp type
-              && type.getTimezone() != null ->
-          instant(timestamps.get(index), type.getUnit()).toString();
-      case FixedSizeListVector array -> {
-        var elements = new ArrayList<@Nullable Object>();
-        var values = array.getDataVector();
-        var start = index * array.getListSize();
-        for (var element = start; element < start + array.getListSize(); element++) {
-          elements.add(toJsonValue(values, element));
-        }
-        yield elements;
-      }
-      // A map vector is a list of key and value structs, so maps render as lists of entries.
-      case ListVector list -> {
-        var elements = new ArrayList<@Nullable Object>();
-        var values = list.getDataVector();
-        for (var element = list.getElementStartIndex(index);
-            element < list.getElementEndIndex(index);
-            element++) {
-          elements.add(toJsonValue(values, element));
-        }
-        yield elements;
-      }
-      case StructVector struct -> {
-        var fields = new LinkedHashMap<String, @Nullable Object>();
-        for (var child : struct.getChildrenFromFields()) {
-          fields.put(child.getName(), toJsonValue(child, index));
-        }
-        yield fields;
-      }
-      default -> toJsonValue(vector.getObject(index));
-    };
-  }
-
-  /** Renders a time of day, including the end-of-day value {@code 24:00:00} that SQL allows. */
-  private static String timeOfDay(long microseconds) {
-    return microseconds == TimeUnit.DAYS.toMicros(1)
-        ? "24:00:00"
-        : LocalTime.ofNanoOfDay(TimeUnit.MICROSECONDS.toNanos(microseconds)).toString();
-  }
-
-  private static Instant instant(long value, org.apache.arrow.vector.types.TimeUnit unit) {
-    return switch (unit) {
-      case SECOND -> Instant.ofEpochSecond(value);
-      case MILLISECOND -> Instant.ofEpochMilli(value);
-      case MICROSECOND ->
-          Instant.ofEpochSecond(
-              Math.floorDiv(value, 1_000_000L), Math.floorMod(value, 1_000_000L) * 1_000L);
-      case NANOSECOND ->
-          Instant.ofEpochSecond(
-              Math.floorDiv(value, 1_000_000_000L), Math.floorMod(value, 1_000_000_000L));
-    };
-  }
-
-  private static Object toJsonValue(Object value) {
-    if (value == null || value instanceof Boolean || value instanceof String) {
-      return value;
-    }
-    if (value instanceof Text text) {
-      return text.toString();
-    }
-    if (value instanceof BigInteger integer) {
-      return integer.toString();
-    }
-    if (value instanceof BigDecimal decimal) {
-      return decimal.toPlainString();
-    }
-    if (value instanceof byte[] bytes) {
-      return Base64.getEncoder().encodeToString(bytes);
-    }
-    if (value instanceof TemporalAccessor || value instanceof UUID) {
-      return value.toString();
-    }
-    if (value instanceof List<?> list) {
-      return list.stream().map(QueryCommand::toJsonValue).toList();
-    }
-    if (value instanceof Map<?, ?> map) {
-      var result = new LinkedHashMap<String, Object>();
-      map.forEach((key, item) -> result.put(String.valueOf(key), toJsonValue(item)));
-      return result;
-    }
-    return value;
   }
 
   private String readSql() throws IOException {

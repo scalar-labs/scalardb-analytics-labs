@@ -54,6 +54,12 @@ class BuildTasksTest extends StoreScenarioTest {
   private static final JsonNode MODEL_VERSION =
       JsonNodeFactory.instance.objectNode().put("model", "stand-in").put("prompt", "v1");
 
+  /** Policy evaluation reads no data values, so a construction query fails the test. */
+  static final ConstructionSql NO_CONSTRUCTION_SQL =
+      request -> {
+        throw new AssertionError("Policy evaluation ran a construction query");
+      };
+
   /** A stand-in for the policy evaluation model that answers by a rule and records its subjects. */
   private static final class StandIn implements PolicyEvaluationModel {
     private final Function<Subject, Decision> rule;
@@ -89,7 +95,10 @@ class BuildTasksTest extends StoreScenarioTest {
 
   private static BuildRun.Summary drain(Scenario s, PolicyEvaluationModel model) {
     return store.runBuildTasks(
-        s.domain, new BuildRun.Environment(model), BuildRun.drain(), task -> {});
+        s.domain,
+        new BuildRun.Environment(model, NO_CONSTRUCTION_SQL),
+        BuildRun.drain(),
+        task -> {});
   }
 
   private static BuildTask task(Scenario s, long number) {
@@ -399,7 +408,7 @@ class BuildTasksTest extends StoreScenarioTest {
             () ->
                 store.runBuildTasks(
                     s.domain,
-                    new BuildRun.Environment(adopting()),
+                    new BuildRun.Environment(adopting(), NO_CONSTRUCTION_SQL),
                     BuildRun.keepWaiting(Duration.ofMillis(20), stop::get),
                     task -> finished.countDown()));
 
@@ -631,7 +640,10 @@ class BuildTasksTest extends StoreScenarioTest {
       var s = new Scenario(small);
       var inferred = inferredRowKind(s, "shop.public.orders");
       small.runBuildTasks(
-          s.domain, new BuildRun.Environment(adopting()), BuildRun.drain(), task -> {});
+          s.domain,
+          new BuildRun.Environment(adopting(), NO_CONSTRUCTION_SQL),
+          BuildRun.drain(),
+          task -> {});
       assertThat(s.state(inferred.rowKind())).contains(FactState.CONFIRMED);
     }
   }
@@ -645,7 +657,7 @@ class BuildTasksTest extends StoreScenarioTest {
             () ->
                 store.runBuildTasks(
                     s.domain,
-                    new BuildRun.Environment(adopting()),
+                    new BuildRun.Environment(adopting(), NO_CONSTRUCTION_SQL),
                     BuildRun.keepWaiting(
                         Duration.ofMillis(20),
                         () -> {

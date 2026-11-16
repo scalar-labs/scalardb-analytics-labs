@@ -4,6 +4,7 @@
  */
 package com.scalar.db.analytics.labs.duckdb.connector;
 
+import com.scalar.db.analytics.labs.connector.ConnectorPackage;
 import com.scalar.db.analytics.labs.duckdb.AttachSession;
 import com.scalar.db.analytics.labs.duckdb.SourceAttachException;
 import com.scalar.db.analytics.labs.duckdb.SourceAttachment;
@@ -52,8 +53,8 @@ public final class ConnectorPath {
   private record PostgreSqlAttachment(String name, DataSourceConnection.PostgreSql connection)
       implements SourceAttachment {
     @Override
-    public boolean usesConnectorsExtension() {
-      return true;
+    public ReadPath readPath() {
+      return new ReadPath(ReadPath.Kind.CONNECTOR, ConnectorPackage.EXTENSION_NAME);
     }
 
     @Override

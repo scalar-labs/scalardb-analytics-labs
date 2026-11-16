@@ -21,8 +21,10 @@ public final class BuildRun {
    * What the build tasks run with: the components the Semantic Catalog calls while running them.
    *
    * @param policyEvaluationModel the policy evaluation model that evaluation tasks call
+   * @param constructionSql the application's SQL execution for tasks that read data values
    */
-  public record Environment(PolicyEvaluationModel policyEvaluationModel) {}
+  public record Environment(
+      PolicyEvaluationModel policyEvaluationModel, ConstructionSql constructionSql) {}
 
   /** When a run returns. */
   public sealed interface Mode {

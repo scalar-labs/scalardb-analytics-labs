@@ -70,8 +70,11 @@ source-native metadata without an explicit mapping owned by the relevant catalog
 ## Source attachment and read paths
 
 `DuckDbQueryEngine` takes the data sources to make queryable as `SourceAttachment` values when it
-starts. An attachment has a name and attaches its source through one read path; the engine knows
-nothing else about the source, so its API does not depend on source types. Each source becomes a
+starts. An attachment has a name, attaches its source through one read path, and names that path
+and the DuckDB extension that reads through it; the engine knows nothing else about the source, so
+its API does not depend on source types. The engine reports each attached source with its read
+path and the version DuckDB gives for that extension, which construction-run SQL records with what
+it read. Each source becomes a
 DuckDB database named after the data source, and SQL addresses its tables as
 `source.schema.table` whichever read path serves it. The application resolves the data sources of
 one Physical Catalog catalog and chooses the read path for each of them.

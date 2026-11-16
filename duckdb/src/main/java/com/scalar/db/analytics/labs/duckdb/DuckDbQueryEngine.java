@@ -21,6 +21,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -71,6 +72,7 @@ public final class DuckDbQueryEngine implements QueryEngine {
   // The memory limit the engine runs with outside a query that sets its own.
   private final String engineMemoryLimit;
   private final @Nullable CatalogHostRegistration catalogHost;
+  private final List<AttachedSource> attachedSources;
   private final ExecutorService queryExecutor;
   private final ScheduledExecutorService deadlineExecutor;
   private final AtomicReference<@Nullable DuckDbQueryExecution> activeExecution =
@@ -103,13 +105,14 @@ public final class DuckDbQueryEngine implements QueryEngine {
    */
   public DuckDbQueryEngine(
       @Nullable NativeCatalogProvider catalogProvider, List<SourceAttachment> sources) {
-    var attachedSources = List.copyOf(sources);
+    var toAttach = List.copyOf(sources);
     allocator = new RootAllocator();
     try {
-      var opened = openConnection(catalogProvider, attachedSources);
+      var opened = openConnection(catalogProvider, toAttach);
       connection = opened.connection();
       engineMemoryLimit = opened.memoryLimit();
       catalogHost = opened.catalogHost();
+      attachedSources = opened.attachedSources();
 
     } catch (RuntimeException e) {
       try {
@@ -127,7 +130,18 @@ public final class DuckDbQueryEngine implements QueryEngine {
   }
 
   private record OpenedConnection(
-      Connection connection, @Nullable CatalogHostRegistration catalogHost, String memoryLimit) {}
+      Connection connection,
+      @Nullable CatalogHostRegistration catalogHost,
+      String memoryLimit,
+      List<AttachedSource> attachedSources) {}
+
+  /**
+   * A data source the engine attached, with the read path it reads through.
+   *
+   * @param extensionVersion the version DuckDB reports for the path's extension
+   */
+  public record AttachedSource(
+      String name, SourceAttachment.ReadPath readPath, String extensionVersion) {}
 
   private static OpenedConnection openConnection(
       @Nullable NativeCatalogProvider catalogProvider, List<SourceAttachment> sources) {
@@ -150,8 +164,11 @@ public final class DuckDbQueryEngine implements QueryEngine {
         PackagedDuckDbExtensions.loadConnectors(openedConnection, ConnectorPackage.forProcess());
       }
       SourceAttachments.attach(openedConnection, sources);
+      // Listing extensions reads the extension directory, so it runs before file access stops.
+      var attached = attachedSources(openedConnection, sources);
       configureConnection(openedConnection);
-      return new OpenedConnection(openedConnection, registration, memoryLimit(openedConnection));
+      return new OpenedConnection(
+          openedConnection, registration, memoryLimit(openedConnection), attached);
     } catch (IncompatibleExtensionsException | AttachFailedException e) {
       closeAfterFailedInitialization(openedConnection, e);
       closeCatalogHost(registration, e);
@@ -395,6 +412,35 @@ public final class DuckDbQueryEngine implements QueryEngine {
       }
       return resultSet.getString(1);
     }
+  }
+
+  /** The data sources this engine attached, in the order given. */
+  public List<AttachedSource> attachedSources() {
+    return attachedSources;
+  }
+
+  private static List<AttachedSource> attachedSources(
+      Connection connection, List<SourceAttachment> sources) throws SQLException {
+    var versions = new HashMap<String, String>();
+    try (var statement = connection.createStatement();
+        var resultSet =
+            statement.executeQuery(
+                "SELECT extension_name, extension_version FROM duckdb_extensions() WHERE loaded")) {
+      while (resultSet.next()) {
+        versions.put(
+            resultSet.getString(1), Objects.requireNonNullElse(resultSet.getString(2), ""));
+      }
+    }
+    var attached = new ArrayList<AttachedSource>(sources.size());
+    for (var source : sources) {
+      var readPath = source.readPath();
+      var version = versions.get(readPath.extension());
+      if (version == null) {
+        throw new SQLException("The extension of an attached source is not loaded");
+      }
+      attached.add(new AttachedSource(source.name(), readPath, version));
+    }
+    return List.copyOf(attached);
   }
 
   static boolean isMemoryLimitFailure(Throwable failure) {

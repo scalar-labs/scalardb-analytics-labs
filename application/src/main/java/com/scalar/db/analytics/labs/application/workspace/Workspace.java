@@ -9,6 +9,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.scalar.db.analytics.labs.application.ApplicationFailure;
 import com.scalar.db.analytics.labs.application.ApplicationRuntime;
+import com.scalar.db.analytics.labs.application.construction.ConstructionSqlSettings;
 import com.scalar.db.analytics.labs.physical.PhysicalCatalogSettings;
 import com.scalar.db.analytics.labs.physical.Secret;
 import com.scalar.db.analytics.labs.semantic.StoreSettings;
@@ -22,6 +23,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Duration;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -102,7 +104,8 @@ public final class Workspace {
             catalogName,
             storeJdbcUrl,
             storeUsername,
-            storePasswordEnv);
+            storePasswordEnv,
+            null);
     configuration.validate("INVALID_REQUEST");
     var password = environment.get(storePasswordEnv);
     if (password == null) {
@@ -264,6 +267,23 @@ public final class Workspace {
     return domain.length() > 63 ? domain.substring(0, 63).replaceAll("-+$", "") : domain;
   }
 
+  /**
+   * The domain's settings for construction-run SQL. The workspace configuration may set each under
+   * {@code semanticCatalog}; an unset one takes its default.
+   */
+  public ConstructionSqlSettings constructionSqlSettings() {
+    var semanticCatalog = configuration.semanticCatalog();
+    if (semanticCatalog == null) {
+      return ConstructionSqlSettings.defaults();
+    }
+    return new ConstructionSqlSettings(
+        Objects.requireNonNullElse(
+            semanticCatalog.sampleSize(), ConstructionSqlSettings.DEFAULT_SAMPLE_SIZE),
+        semanticCatalog.constructionQueryTimeLimitSeconds() == null
+            ? ConstructionSqlSettings.DEFAULT_TIME_LIMIT
+            : Duration.ofSeconds(semanticCatalog.constructionQueryTimeLimitSeconds()));
+  }
+
   private PhysicalCatalogSettings catalogSettings() {
     return new PhysicalCatalogSettings(
         configuration.storeJdbcUrl(),
@@ -278,7 +298,8 @@ public final class Workspace {
       String catalogName,
       String storeJdbcUrl,
       @Nullable String storeUsername,
-      String storePasswordEnv) {
+      String storePasswordEnv,
+      @Nullable SemanticCatalogConfiguration semanticCatalog) {
     void validate(String errorCode) {
       if (!CONFIG_SCHEMA.equals(schema)
           || !CONFIG_SCHEMA_VERSION.equals(schemaVersion)
@@ -289,10 +310,31 @@ public final class Workspace {
           || storePasswordEnv == null
           || storePasswordEnv.isBlank()
           || (storeUsername != null && storeUsername.isBlank())
-          || (storeJdbcUrl != null && containsJdbcCredentials(storeJdbcUrl))) {
+          || (storeJdbcUrl != null && containsJdbcCredentials(storeJdbcUrl))
+          || (semanticCatalog != null && !semanticCatalog.isValid())) {
         throw new ApplicationFailure(
             errorCode, "The workspace configuration is invalid or unsafe.");
       }
+    }
+  }
+
+  /**
+   * The Semantic Catalog settings of the workspace's domain.
+   *
+   * @param sampleSize the most rows read of a sampled table in construction-run SQL
+   * @param constructionQueryTimeLimitSeconds how long one construction query may take
+   */
+  @JsonInclude(JsonInclude.Include.NON_NULL)
+  record SemanticCatalogConfiguration(
+      @Nullable Long sampleSize, @Nullable Long constructionQueryTimeLimitSeconds) {
+
+    boolean isValid() {
+      return (sampleSize == null
+              || (sampleSize > 0 && sampleSize <= ConstructionSqlSettings.MAX_SAMPLE_SIZE))
+          && (constructionQueryTimeLimitSeconds == null
+              || (constructionQueryTimeLimitSeconds > 0
+                  && constructionQueryTimeLimitSeconds
+                      <= ConstructionSqlSettings.MAX_TIME_LIMIT.toSeconds()));
     }
   }
 }

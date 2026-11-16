@@ -103,6 +103,11 @@ public final class ScannerPath {
           + "')";
     }
 
+    @Override
+    public ReadPath readPath() {
+      return new ReadPath(ReadPath.Kind.SCANNER, scannerType() + "_scanner");
+    }
+
     private String scannerType() {
       return switch (connection) {
         case DataSourceConnection.PostgreSql ignored -> "postgres";
