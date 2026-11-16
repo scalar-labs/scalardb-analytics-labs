@@ -52,6 +52,7 @@ public final class FactRecord {
   private List<Check> checks = List.of();
   private @Nullable FactState state;
   private @Nullable LogPosition latestEvent;
+  private JsonNode inputsRead = NullNode.getInstance();
   private JsonNode provenance = NullNode.getInstance();
   private Set<Dependency> confirmationDependencies = Set.of();
   private Set<Dependency> dependenciesAtLastJudgement = Set.of();
@@ -96,6 +97,7 @@ public final class FactRecord {
       LogPosition latestEvent,
       List<Dependency> dependencies,
       List<Check> checks,
+      JsonNode inputsRead,
       JsonNode provenance,
       List<Dependency> confirmationDependencies,
       List<Dependency> dependenciesAtLastJudgement,
@@ -160,6 +162,7 @@ public final class FactRecord {
     record.latestEvent = stored.latestEvent();
     record.dependencies = ordered(stored.dependencies());
     record.checks = stored.checks();
+    record.inputsRead = stored.inputsRead();
     record.provenance = stored.provenance();
     record.confirmationDependencies = ordered(stored.confirmationDependencies());
     record.dependenciesAtLastJudgement = ordered(stored.dependenciesAtLastJudgement());
@@ -199,6 +202,7 @@ public final class FactRecord {
             latestEvent,
             List.copyOf(dependencies),
             checks,
+            inputsRead,
             provenance,
             List.copyOf(confirmationDependencies),
             List.copyOf(dependenciesAtLastJudgement),
@@ -234,6 +238,7 @@ public final class FactRecord {
         }
         dependencies = Collections.unmodifiableSet(new LinkedHashSet<>(accept.dependencies()));
         checks = accept.checks();
+        inputsRead = accept.inputsRead();
         provenance = accept.provenance();
         latestAcceptance = at;
         lastConfirmedOrChecked = at.commit();
@@ -480,6 +485,7 @@ public final class FactRecord {
             latestEvent,
             List.copyOf(dependencies),
             List.copyOf(checks),
+            inputsRead,
             provenance,
             confirmationPath,
             confirmationBasis,

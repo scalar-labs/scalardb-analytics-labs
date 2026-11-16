@@ -65,8 +65,8 @@ public final class Review {
    * The items about one table, or the domain-wide items.
    *
    * @param table the table's canonical form, such as {@code shop.public.orders}; absent for the
-   *     group of domain-wide items: Concepts, business terms, concept relationships, Measures, and
-   *     Dimensions
+   *     group of domain-wide items: Concepts, business terms, concept relationships, Dimensions,
+   *     and Measures without a selected base Dataset
    * @param items the items, ordered by the commit at which the need for judgement arose
    */
   public record Group(@Nullable String table, List<Item> items) {

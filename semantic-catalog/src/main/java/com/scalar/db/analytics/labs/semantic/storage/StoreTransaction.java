@@ -430,6 +430,27 @@ public final class StoreTransaction {
         .optional();
   }
 
+  /** The log records at some log positions, in log order; positions with no record are left out. */
+  public List<PositionedRecord> logRecordsAt(String domain, Collection<LogPosition> positions) {
+    if (positions.isEmpty()) {
+      return List.of();
+    }
+    var commits = positions.stream().map(LogPosition::commit).toArray(Long[]::new);
+    var ordinals = positions.stream().map(LogPosition::ordinal).toArray(Integer[]::new);
+    return jdbc.sql(
+            "SELECT r.commit_number, r.ordinal, r.content::text AS content"
+                + " FROM unnest(CAST(:commits AS bigint[]), CAST(:ordinals AS integer[]))"
+                + " AS p(commit_number, ordinal)"
+                + " JOIN semantic_catalog.log_records r ON r.domain = :domain"
+                + " AND r.commit_number = p.commit_number AND r.ordinal = p.ordinal"
+                + " ORDER BY r.commit_number, r.ordinal")
+        .param("domain", domain)
+        .param("commits", commits)
+        .param("ordinals", ordinals)
+        .query(this::positioned)
+        .list();
+  }
+
   /** Records the latest table metadata version received for a physical-schema Input Resource. */
   public void setLatestTableMetadataVersion(String domain, String inputResource, long version) {
     jdbc.sql(
@@ -885,18 +906,17 @@ public final class StoreTransaction {
   }
 
   /**
-   * The Fact Addresses of some elements that exist at a commit, except those of free-description
-   * predicates, which cannot be requested by name.
+   * The Fact Addresses of some elements that exist at a commit, including those of free-description
+   * predicates, which only a request for all predicates returns.
    */
-  public List<FactAddressRow> namedAddressesOf(
-      String domain, Collection<String> elements, long commit) {
+  public List<FactAddressRow> addressesOf(String domain, Collection<String> elements, long commit) {
     if (elements.isEmpty()) {
       return List.of();
     }
     return jdbc.sql(
             ADDRESSES
                 + " WHERE domain = :domain AND element = ANY(CAST(:elements AS text[]))"
-                + " AND created_commit <= :commit AND predicate_definition IS NULL"
+                + " AND created_commit <= :commit"
                 + " ORDER BY fact_address")
         .param("domain", domain)
         .param("elements", array(elements))

@@ -84,7 +84,7 @@ class PolicyEvaluationTest extends StoreScenarioTest {
     var waiting =
         (Knowledge.AwaitingJudgement)
             s.only(s.lastCommit(), written.urn(orders.dataset()), "row-kind");
-    assertThat(waiting.candidates().getFirst().waiting())
+    assertThat(waiting.candidates().getFirst().waitingFor())
         .isEqualTo(Knowledge.Waiting.POLICY_EVALUATION);
     assertThat(reviewedFacts(s)).isEmpty();
   }
@@ -239,7 +239,8 @@ class PolicyEvaluationTest extends StoreScenarioTest {
     var waiting =
         (Knowledge.AwaitingJudgement)
             s.only(s.lastCommit(), written.urn(measure), "aggregation-rule");
-    assertThat(waiting.candidates().getFirst().waiting()).isEqualTo(Knowledge.Waiting.DEPENDENCIES);
+    assertThat(waiting.candidates().getFirst().waitingFor())
+        .isEqualTo(Knowledge.Waiting.DEPENDENCIES);
 
     var outcome =
         Judgement.submit(s, Judgement.answer(written.urn(existence.fact()), AnswerType.CONSENT));

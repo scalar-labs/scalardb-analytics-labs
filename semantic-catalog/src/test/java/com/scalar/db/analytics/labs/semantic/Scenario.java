@@ -92,7 +92,9 @@ final class Scenario {
         commit,
         snapshot ->
             snapshot
-                .request(List.of(KnowledgeRequest.of(element, predicate)))
+                .request(
+                    List.of(KnowledgeRequest.of(element, predicate)),
+                    Knowledge.View.WITH_UNCONFIRMED)
                 .getFirst()
                 .addresses());
   }

@@ -126,6 +126,12 @@ public final class Urns {
     return encoded.toString();
   }
 
+  /** The name an {@linkplain #encode encoded} name stands for. */
+  public static String decode(String encoded) {
+    // An encoded name holds no '+', so URL decoding reads only its percent-encoded bytes.
+    return java.net.URLDecoder.decode(encoded, StandardCharsets.UTF_8);
+  }
+
   /** The record kind of an element kind's URNs, such as {@code business-term}. */
   public static String recordKind(ElementKind kind) {
     return kind.name().toLowerCase(Locale.ROOT).replace('_', '-');

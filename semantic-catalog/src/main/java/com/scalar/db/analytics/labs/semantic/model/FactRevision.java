@@ -17,6 +17,7 @@ import org.jspecify.annotations.Nullable;
  * @param event the log position of the Fact Event that produced this revision
  * @param dependencies the dependency references in effect: those of the latest acceptance
  * @param checks the validation result of the latest acceptance
+ * @param inputsRead what the Generator read, as the latest acceptance states it
  * @param provenance the provenance of the latest acceptance
  * @param confirmationPath how the latest confirmation was made; absent before the first one
  * @param confirmationBasis the log record the latest confirmation rests on; absent before the first
@@ -32,6 +33,7 @@ public record FactRevision(
     LogPosition event,
     List<Dependency> dependencies,
     List<Check> checks,
+    JsonNode inputsRead,
     JsonNode provenance,
     @Nullable ConfirmationPath confirmationPath,
     @Nullable String confirmationBasis,

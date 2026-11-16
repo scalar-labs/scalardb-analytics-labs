@@ -4,10 +4,16 @@
  */
 package com.scalar.db.analytics.labs.semantic.model;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import org.jspecify.annotations.Nullable;
+
 /**
- * The closed vocabularies of the record model that the store itself relies on (see {@code
- * docs/semantic-catalog/record-model.md}, "Elements and predicates"). The rest of the closed core,
- * such as the predicates of each element kind, is interpreted by Generators and judgement.
+ * The closed vocabularies of the record model (see {@code docs/semantic-catalog/record-model.md},
+ * "Elements and predicates"): element kinds, the closed-core predicates of each kind, and the other
+ * closed lists the store relies on. What a predicate's values mean is interpreted by Generators and
+ * judgement.
  */
 public final class Vocabulary {
   /**
@@ -22,7 +28,148 @@ public final class Vocabulary {
    */
   public static final String TECHNICAL_REFERENCE = "technical-reference";
 
+  /** A Dataset's concept that a row represents. */
+  public static final String ROW_CONCEPT = "row-concept";
+
+  public static final String ROW_KIND = "row-kind";
+  public static final String ROW_GRAIN = "row-grain";
+  public static final String ROW_INCLUSION = "row-inclusion";
+  public static final String KEY = "key";
+
+  /**
+   * The prefix of a Dataset's uniqueness predicates, which carry their Field set in the predicate:
+   * {@code uniqueness:} and the sorted Field URNs joined by commas. They cannot be listed before a
+   * Field set is proposed, so they are not among {@link #closedCore closed-core predicates}.
+   */
+  public static final String UNIQUENESS_PREFIX = "uniqueness:";
+
+  public static final String MEANING = "meaning";
+  public static final String VALUE_KIND = "value-kind";
+  public static final String UNIT = "unit";
+  public static final String NULL_MEANING = "null-meaning";
+  public static final String REPRESENTED_CONCEPT = "represented-concept";
+
+  /** A Field's time meaning, including its time zone. */
+  public static final String TIME_MEANING = "time-meaning";
+
+  /** A Measure's base Dataset, whose value is the Dataset's URN. */
+  public static final String BASE_DATASET = "base-dataset";
+
+  public static final String AGGREGATION_RULE = "aggregation-rule";
+
+  /** A Measure's filter conditions. */
+  public static final String FILTER = "filter";
+
+  public static final String REFERENCE_TIME_FIELD = "reference-time-field";
+  public static final String DEFAULT_TIME_GRANULARITY = "default-time-granularity";
+  public static final String DIMENSION_KIND = "dimension-kind";
+
+  /** A Dimension's source Field and classification expression. */
+  public static final String CLASSIFICATION = "classification";
+
+  public static final String SOURCE_TIME_FIELD = "source-time-field";
+  public static final String HIERARCHY = "hierarchy";
+  public static final String CALENDAR_RULE = "calendar-rule";
+  public static final String WRITTEN_FORM = "written-form";
+
+  /** A business term's referenced element, whose value is the element's URN. */
+  public static final String REFERENCED_ELEMENT = "referenced-element";
+
+  public static final String SET_RELATIONSHIP = "set-relationship";
+  public static final String BUSINESS_DEFINITION = "business-definition";
+  public static final String MULTIPLICITY = "multiplicity";
+
+  /** The validation item of a predicate whose value is not made of parts: the value itself. */
+  public static final String VALUE_ITEM = "value";
+
   private Vocabulary() {}
+
+  /**
+   * The closed-core predicates of an element kind, existence first: what construction aims at for
+   * every element of the kind, so a request for all predicates reports each one without a Fact
+   * Address as missing knowledge.
+   */
+  public static List<String> closedCore(ElementKind kind) {
+    return switch (kind) {
+      case DATASET ->
+          List.of(
+              EXISTENCE, TECHNICAL_REFERENCE, ROW_CONCEPT, ROW_KIND, ROW_GRAIN, ROW_INCLUSION, KEY);
+      case FIELD ->
+          List.of(
+              EXISTENCE,
+              TECHNICAL_REFERENCE,
+              MEANING,
+              VALUE_KIND,
+              UNIT,
+              NULL_MEANING,
+              REPRESENTED_CONCEPT,
+              TIME_MEANING);
+      case CONCEPT -> List.of(EXISTENCE, MEANING);
+      case MEASURE ->
+          List.of(
+              EXISTENCE,
+              MEANING,
+              BASE_DATASET,
+              AGGREGATION_RULE,
+              FILTER,
+              REFERENCE_TIME_FIELD,
+              DEFAULT_TIME_GRANULARITY);
+      case DIMENSION ->
+          List.of(
+              EXISTENCE,
+              MEANING,
+              DIMENSION_KIND,
+              CLASSIFICATION,
+              SOURCE_TIME_FIELD,
+              HIERARCHY,
+              CALENDAR_RULE);
+      case BUSINESS_TERM -> List.of(EXISTENCE, WRITTEN_FORM, REFERENCED_ELEMENT);
+      case IDENTIFIER_CORRESPONDENCE -> List.of(EXISTENCE, SET_RELATIONSHIP, BUSINESS_DEFINITION);
+      case CONCEPT_RELATIONSHIP -> List.of(EXISTENCE, MULTIPLICITY);
+    };
+  }
+
+  /**
+   * The validation items of a predicate on an element: the parts of its value that checks examine
+   * (see {@code docs/semantic-catalog/record-model.md}, "Validation results and dependencies"). An
+   * identifier correspondence's existence has one item per pair of corresponding Fields ({@code
+   * pair:<from Field>=<to Field>}), per normalization step ({@code normalization:<Field>:<step>}),
+   * and, when the condition goes through intermediate Datasets, per hop ({@code hop:<index>}); an
+   * aggregation rule has its aggregate function and its value expression; any other predicate has
+   * the value itself.
+   *
+   * @param identity the identity of an edge, which holds a correspondence's matching condition;
+   *     absent for a node
+   */
+  public static List<String> validationItems(@Nullable ElementIdentity identity, String predicate) {
+    if (predicate.equals(AGGREGATION_RULE)) {
+      return List.of("function", "expression");
+    }
+    if (!predicate.equals(EXISTENCE)
+        || !(identity instanceof ElementIdentity.IdentifierCorrespondence correspondence)) {
+      return List.of(VALUE_ITEM);
+    }
+    var items = new ArrayList<String>();
+    var hops = correspondence.condition().hops();
+    for (var i = 0; i < hops.size(); i++) {
+      if (hops.size() > 1) {
+        items.add("hop:" + i);
+      }
+      for (var pair : hops.get(i).pairs()) {
+        items.add("pair:" + pair.from().field().urnValue() + "=" + pair.to().field().urnValue());
+        for (var side : List.of(pair.from(), pair.to())) {
+          for (var step : side.normalization()) {
+            items.add(
+                "normalization:"
+                    + side.field().urnValue()
+                    + ":"
+                    + step.name().toLowerCase(Locale.ROOT).replace('_', '-'));
+          }
+        }
+      }
+    }
+    return items;
+  }
 
   /** The kinds of element: the node kinds and the edge kinds of the closed core. */
   public enum ElementKind {

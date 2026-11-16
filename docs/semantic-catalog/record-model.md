@@ -57,6 +57,25 @@ Every element also has an **existence** predicate, which states that the element
 catalog. Every other Fact about an element depends on its existence Fact. A Field holds a reference
 to its Dataset.
 
+Each predicate is named in records by an identifier:
+
+| Element | Predicate identifiers |
+| --- | --- |
+| Every element | `existence` |
+| Dataset | `technical-reference`, `row-concept`, `row-kind`, `row-grain`, `row-inclusion`, `key`, and `uniqueness:<Field URNs, sorted and joined by commas>` |
+| Field | `technical-reference`, `meaning`, `value-kind`, `unit`, `null-meaning`, `represented-concept`, `time-meaning` (with the time zone) |
+| Concept | `meaning` |
+| Measure | `meaning`, `base-dataset`, `aggregation-rule`, `filter`, `reference-time-field`, `default-time-granularity` |
+| Dimension | `meaning`, `dimension-kind`, `classification` (the source Field and classification expression), `source-time-field`, `hierarchy`, `calendar-rule` |
+| Business term | `written-form`, `referenced-element` |
+| Identifier correspondence | `set-relationship`, `business-definition` |
+| Concept relationship | `multiplicity` |
+
+A uniqueness predicate names its Field set, so it cannot be listed before a Field set is proposed.
+Every other identifier above is a **closed-core predicate** of its kind: a request for all
+predicates of an element reports each one without a Fact Address as missing knowledge (see
+[`public-api.md`](public-api.md#requesting-knowledge)).
+
 There is no separate join element. Joining two Datasets correctly rests on knowing that values on
 both sides denote the same object, which is what an identifier correspondence states, from an order
 line's customer ID to the customer table as much as from e-commerce customers to POS members. What a

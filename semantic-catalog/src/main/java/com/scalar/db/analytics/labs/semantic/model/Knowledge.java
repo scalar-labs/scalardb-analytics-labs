@@ -4,27 +4,73 @@
  */
 package com.scalar.db.analytics.labs.semantic.model;
 
+import com.fasterxml.jackson.annotation.JsonSubTypes;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.AnswerType;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Transition;
 import java.util.List;
+import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 
 /**
  * What a Fact Address offers at a point: its selected Fact, or a status with the material to judge
  * it (see {@code docs/semantic-catalog/catalog-snapshot.md}, "What the Query Agent receives").
  * Exactly one applies, judged in this order: a conflict, a selected Fact, candidates awaiting
- * judgement, and missing knowledge.
+ * judgement, and missing knowledge. Its status is written as the {@code status} property, so a
+ * consumer of the JSON form never infers it from which fields are present.
  */
+@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "status")
+@JsonSubTypes({
+  @JsonSubTypes.Type(value = Knowledge.Selected.class, name = "selected"),
+  @JsonSubTypes.Type(value = Knowledge.Conflict.class, name = "conflict"),
+  @JsonSubTypes.Type(value = Knowledge.AwaitingJudgement.class, name = "awaiting-judgement"),
+  @JsonSubTypes.Type(value = Knowledge.MissingKnowledge.class, name = "missing-knowledge")
+})
 public sealed interface Knowledge {
+  /**
+   * Which knowledge a read returns.
+   *
+   * <p>Most uses, such as composing a query, need only confirmed knowledge, so that is the default.
+   * A consumer that judges or reports on the catalog asks for unconfirmed knowledge too.
+   */
+  enum View {
+    /**
+     * Only Fact Addresses with a selected Fact: {@link Selected}, and a {@link Conflict} whose
+     * selected Fact still stands. Candidates are not listed; {@link RevisionContent#newCandidates}
+     * still says whether they exist.
+     */
+    CONFIRMED,
+    /** Every Fact Address with its status and judgement material. */
+    WITH_UNCONFIRMED
+  }
+
   /**
    * One Fact is selected and nothing conflicts with it.
    *
    * @param candidates the {@code candidate} Facts at the same Fact Address: new candidates that may
-   *     replace it
+   *     replace it; empty in the {@linkplain View#CONFIRMED confirmed view}
    */
   record Selected(RevisionContent fact, List<String> candidates) implements Knowledge {
     public Selected {
       candidates = List.copyOf(candidates);
     }
+  }
+
+  /** What the knowledge at a Fact Address is in a view, or empty when the view leaves it out. */
+  default Optional<Knowledge> in(View view) {
+    if (view == View.WITH_UNCONFIRMED) {
+      return Optional.of(this);
+    }
+    return switch (this) {
+      case Selected selected -> Optional.of(new Selected(selected.fact(), List.of()));
+      case Conflict conflict ->
+          conflict.selected() == null ? Optional.empty() : Optional.of(conflict);
+      case AwaitingJudgement ignored -> Optional.empty();
+      case MissingKnowledge ignored -> Optional.empty();
+    };
   }
 
   /**
@@ -51,16 +97,33 @@ public sealed interface Knowledge {
   /**
    * Neither an eligible Fact nor a candidate exists.
    *
-   * @param rejectedOrRetired the rejected and retired Facts, if any
+   * @param rejectedOrRetired the rejected and retired Facts, if any, with the answers given to them
    */
-  record MissingKnowledge(List<String> rejectedOrRetired) implements Knowledge {
+  record MissingKnowledge(List<Ended> rejectedOrRetired) implements Knowledge {
     public MissingKnowledge {
       rejectedOrRetired = List.copyOf(rejectedOrRetired);
     }
   }
 
-  /** A candidate awaiting judgement, and what it waits for. */
-  record Candidate(String fact, Waiting waiting) {}
+  /**
+   * A candidate awaiting judgement, and what it waits for.
+   *
+   * @param state the Fact's state, always {@code candidate}: stated so a consumer reads it as a
+   *     Fact state, as it reads every other Fact's
+   * @param waitingFor what the candidate waits for before it can be confirmed, which is not a Fact
+   *     state of its own
+   */
+  record Candidate(String fact, FactState state, Waiting waitingFor) {
+    public Candidate {
+      if (state != FactState.CANDIDATE) {
+        throw new IllegalArgumentException("A candidate awaiting judgement is in state candidate");
+      }
+    }
+
+    public static Candidate of(String fact, Waiting waitingFor) {
+      return new Candidate(fact, FactState.CANDIDATE, waitingFor);
+    }
+  }
 
   /** What a candidate waits for before it can be confirmed. */
   enum Waiting {
@@ -72,19 +135,83 @@ public sealed interface Knowledge {
     CONSENT
   }
 
+  /** A rejected or retired Fact, and the answers given to it up to the point. */
+  record Ended(RevisionContent fact, List<GivenAnswer> answers) {
+    public Ended {
+      answers = List.copyOf(answers);
+    }
+  }
+
+  /**
+   * A human answer given to a Fact.
+   *
+   * @param logRecord the URN of the answer's log record
+   * @param decidedBy the deciding party
+   * @param wording the wording answered; for a correction, the given value or condition
+   * @param reviewPresentation the review presentation the answer was given in, if any
+   */
+  record GivenAnswer(
+      String logRecord,
+      Transition transition,
+      AnswerType answerType,
+      String decidedBy,
+      String wording,
+      @Nullable String reviewPresentation) {}
+
   /**
    * A Fact Revision as read at a point (see {@code docs/semantic-catalog/public-api.md}, "Fact
-   * Revision content").
+   * Revision content"), with the records behind it expanded one level.
    *
    * @param newCandidates whether {@code candidate} Facts exist at the same Fact Address
    * @param newerObservation whether an input the Fact depends on has an observation newer than the
    *     one depended on, up to the point
+   * @param unexaminedItems the validation items of the predicate that no supporting check examined,
+   *     listed as information, never as a measure of whether the Fact holds
+   * @param referenced the content of each record its dependencies, checks, and inputs read refer
+   *     to, once per URN in the order first referred to; their own references stay URNs
    */
-  record RevisionContent(FactRevision revision, boolean newCandidates, boolean newerObservation) {}
+  record RevisionContent(
+      FactRevision revision,
+      boolean newCandidates,
+      boolean newerObservation,
+      List<String> unexaminedItems,
+      List<Referenced> referenced) {
+    public RevisionContent {
+      unexaminedItems = List.copyOf(unexaminedItems);
+      referenced = List.copyOf(referenced);
+    }
+  }
+
+  /** A record a Fact Revision refers to, with its content at the point. */
+  sealed interface Referenced {
+    /** The URN referred to. */
+    String urn();
+
+    /** An Input Observation and its content as recorded. */
+    record Observation(String urn, String inputResource, JsonNode content) implements Referenced {}
+
+    /**
+     * A Fact Revision, or a Fact's latest Fact Revision at the point when a Fact is referred to.
+     *
+     * @param stateAtPoint the Fact's state at the point, which may differ from the revision's
+     * @param answers for a Fact rejected or retired at the point, the answers given to it
+     */
+    record Revision(
+        String urn, FactRevision revision, FactState stateAtPoint, List<GivenAnswer> answers)
+        implements Referenced {
+      public Revision {
+        answers = List.copyOf(answers);
+      }
+    }
+
+    /** An answer, which inputs read refer to by its log record. */
+    record Answer(String urn, GivenAnswer answer) implements Referenced {}
+  }
 
   /**
    * What a request receives for one Fact Address of the requested predicate on a target.
    *
+   * @param predicateDefinition the definition of a free-description predicate; absent otherwise
    * @param scopeDescription the applicability scope's description; absent for the empty scope
    * @param scopeEntities the URNs of the entities the applicability scope mentions
    */
@@ -92,6 +219,7 @@ public sealed interface Knowledge {
       String factAddress,
       String element,
       String predicate,
+      @Nullable String predicateDefinition,
       @Nullable String scopeDescription,
       List<String> scopeEntities,
       Knowledge knowledge) {
@@ -101,14 +229,25 @@ public sealed interface Knowledge {
   }
 
   /**
-   * The answer to one request: one entry per Fact Address of the predicate on each target. An empty
-   * list is missing knowledge with no Fact Address at all, or no edge between the given ends.
+   * The answer to one request: one entry per Fact Address of the requested predicate, or of every
+   * predicate, on each target. No entry and no missing predicate means no edge between the given
+   * ends.
+   *
+   * @param addresses the Fact Addresses the view includes
+   * @param missing the requested predicates with missing knowledge on a target, in either view:
+   *     those with no Fact Address, or whose every Fact Address offers missing knowledge. The
+   *     requested predicates are the named one, or for a request for all predicates each
+   *     closed-core predicate of the target's kind.
    */
-  record Answer(KnowledgeRequest request, List<AtAddress> addresses) {
+  record Answer(KnowledgeRequest request, List<AtAddress> addresses, List<Missing> missing) {
     public Answer {
       addresses = List.copyOf(addresses);
+      missing = List.copyOf(missing);
     }
   }
+
+  /** A predicate requested of an element that has no Fact Address for it. */
+  record Missing(String element, String predicate) {}
 
   /**
    * An element whose existence Fact is selected at the point.

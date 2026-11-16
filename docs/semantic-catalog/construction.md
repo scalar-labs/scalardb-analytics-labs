@@ -292,7 +292,7 @@ UI. A review item carries:
 
 - **What is claimed:** the target, with exact table and column names from its technical-reference
   Facts, the predicate, the value, and the applicability scope.
-- **[Planned]** **The records behind it, with their content expanded:** inputs read, including
+- **The records behind it, with their content expanded:** inputs read, including
   rejected or retired Facts at the same Fact Address with their answers; checks, with the quotation,
   the query and its result and range read, or the model's stated basis; and dependencies, including
   the feedback a correction left. Pointing to them by URN alone would make the deciding party look

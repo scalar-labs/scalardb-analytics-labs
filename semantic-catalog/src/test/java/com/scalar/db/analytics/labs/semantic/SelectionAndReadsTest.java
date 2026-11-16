@@ -261,20 +261,33 @@ class SelectionAndReadsTest extends StoreScenarioTest {
         .isEqualTo(
             new Knowledge.AwaitingJudgement(
                 List.of(
-                    new Knowledge.Candidate(
+                    Knowledge.Candidate.of(
                         written.urn(key), Knowledge.Waiting.POLICY_EVALUATION))));
     assertThat(s.only(point, element, "meaning"))
         .isEqualTo(
             new Knowledge.AwaitingJudgement(
-                List.of(new Knowledge.Candidate(written.urn(meaning), Knowledge.Waiting.CONSENT))));
+                List.of(Knowledge.Candidate.of(written.urn(meaning), Knowledge.Waiting.CONSENT))));
     assertThat(
             ((Knowledge.AwaitingJudgement) s.only(point, element, "row-grain"))
                 .candidates()
                 .getFirst()
-                .waiting())
+                .waitingFor())
         .isEqualTo(Knowledge.Waiting.DEPENDENCIES);
-    assertThat(s.only(point, element, "row-kind"))
-        .isEqualTo(new Knowledge.MissingKnowledge(List.of(written.urn(rejected))));
+    var missing = (Knowledge.MissingKnowledge) s.only(point, element, "row-kind");
+    assertThat(missing.rejectedOrRetired())
+        .singleElement()
+        .satisfies(
+            ended -> {
+              assertThat(ended.fact().revision().fact()).isEqualTo(written.urn(rejected));
+              assertThat(ended.answers())
+                  .singleElement()
+                  .satisfies(
+                      given -> {
+                        assertThat(given.answerType()).isEqualTo(AnswerType.REJECTION);
+                        assertThat(given.decidedBy()).isEqualTo("owner");
+                        assertThat(given.wording()).isEqualTo("wording");
+                      });
+            });
     assertThat(s.knowledge(point, element, "uniqueness")).isEmpty();
 
     var unknown = "urn:scalardb:analytics:" + s.domain + ":dataset:shop.public.none";
@@ -320,7 +333,7 @@ class SelectionAndReadsTest extends StoreScenarioTest {
     assertThat(answers).extracting(Knowledge.Answer::request).containsExactlyElementsOf(requests);
     for (var answer : answers) {
       var target = ((KnowledgeRequest.Target.Element) answer.request().target()).element();
-      if (answer.request().predicate().equals("meaning")) {
+      if ("meaning".equals(answer.request().predicate())) {
         if (target.equals(written.urn(amount))) {
           assertThat(selected(answer.addresses().getFirst().knowledge()))
               .isEqualTo(written.urn(amountMeaning));
@@ -373,7 +386,11 @@ class SelectionAndReadsTest extends StoreScenarioTest {
             List.of(written.urn(shop)),
             "set-relationship");
     List<Knowledge.Answer> answers =
-        s.at(point, snapshot -> snapshot.request(List.of(forward, backward, part)));
+        s.at(
+            point,
+            snapshot ->
+                snapshot.request(
+                    List.of(forward, backward, part), Knowledge.View.WITH_UNCONFIRMED));
     assertThat(answers.getFirst().addresses())
         .singleElement()
         .satisfies(at -> assertThat(at.element()).isEqualTo(written.urn(correspondence)));

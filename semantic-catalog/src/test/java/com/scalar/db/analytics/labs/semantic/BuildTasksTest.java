@@ -484,11 +484,12 @@ class BuildTasksTest extends StoreScenarioTest {
     var existence =
         (Knowledge.AwaitingJudgement)
             s.only(s.lastCommit(), inferred.dataset(), Vocabulary.EXISTENCE);
-    assertThat(existence.candidates().getFirst().waiting())
+    assertThat(existence.candidates().getFirst().waitingFor())
         .isEqualTo(Knowledge.Waiting.POLICY_EVALUATION);
     var rowKind =
         (Knowledge.AwaitingJudgement) s.only(s.lastCommit(), inferred.dataset(), "row-kind");
-    assertThat(rowKind.candidates().getFirst().waiting()).isEqualTo(Knowledge.Waiting.DEPENDENCIES);
+    assertThat(rowKind.candidates().getFirst().waitingFor())
+        .isEqualTo(Knowledge.Waiting.DEPENDENCIES);
     // Two versions set before the re-evaluation runs share one task.
     var again =
         store.setPolicyVersion(
