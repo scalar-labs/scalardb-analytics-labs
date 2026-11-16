@@ -375,6 +375,33 @@ public final class GeneratorContext {
 
   private static final String EXISTS = "exists";
 
+  /**
+   * A Dataset's table as its existence rests on it: the table whose latest physical schema
+   * observation the existence Fact depends on.
+   */
+  public record DatasetTable(
+      String dataset, Table table, PhysicalCatalogReference.Table reference, Fact existence) {}
+
+  /** The table of a Dataset, when its existence and table are known and the table was read. */
+  public Optional<DatasetTable> datasetTable(String dataset) {
+    var row = projection.element(dataset);
+    if (row.isEmpty() || row.get().kind() != ElementKind.DATASET) {
+      return Optional.empty();
+    }
+    var existence = closedRangeFact(dataset, Vocabulary.EXISTENCE, IdentityKey.choice(EXISTS));
+    if (existence.isEmpty()) {
+      return Optional.empty();
+    }
+    var table = physicalSchemaOf(existence.get().urn()).flatMap(this::table);
+    if (table.isEmpty()
+        || table.get().reference().isEmpty()
+        || !(table.get().observed() instanceof Observed.Read)) {
+      return Optional.empty();
+    }
+    return Optional.of(
+        new DatasetTable(dataset, table.get(), table.get().reference().get(), existence.get()));
+  }
+
   /** The Dataset or Field a Physical Catalog reference identifies, if one exists. */
   public Optional<String> element(PhysicalCatalogReference reference) {
     return lookup.physicalCatalogElement(

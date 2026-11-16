@@ -1,8 +1,8 @@
 # What is the unit of a Semantic Catalog Generator?
 
-The schema-interpretation and data-check Generators implement this decision. **[Planned]** The
-meaning-inference Generators, and running a Generator again after a rejection, correction, or
-retirement, are not implemented yet.
+The schema-interpretation and data-check Generators, and row and Field meaning inference, implement
+this decision. **[Planned]** The other meaning-inference Generators, and running a Generator again
+after a rejection, correction, or retirement, are not implemented yet.
 
 ## Current answer
 

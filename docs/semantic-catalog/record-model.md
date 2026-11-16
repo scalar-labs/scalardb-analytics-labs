@@ -108,7 +108,9 @@ Some values deserve note:
   pre-aggregated), the row grain for per-point and pre-aggregated rows (store, product, and day for
   daily inventory), and the row inclusion (whether return rows or logically deleted rows are
   included). Adding return rows changes only row inclusion. Row meaning is never defined as what
-  counting rows gives, because that cannot describe snapshot or pre-aggregated rows.
+  counting rows gives, because that cannot describe snapshot or pre-aggregated rows. A row kind's
+  value is one of `current-state`, `event`, `state-per-point`, and `pre-aggregated`; row grain and
+  row inclusion are descriptions in text.
 - A **key** is a set of Fields or "no key". **Uniqueness** carries its Field set in the predicate
   and takes "does not repeat" or "repeats". Whether uniqueness rests on a declaration or a data
   check is expressed by the validation method, not by separate predicates, because the declaration
@@ -121,6 +123,9 @@ Some values deserve note:
   `time-or-date`, `string`, and `boolean`; schema interpretation proposes `time-or-date` and
   `boolean` from the Analytics type. It is separate from the physical type and tells Generators which further predicates to
   pursue.
+- A Field's **meaning**, **unit**, and **meaning of null** are descriptions in text. Its **time
+  meaning** is `{"meaning": ..., "timeZone": ...}`: which moment the value records, and the IANA
+  time zone it is in, or null when unknown.
 - A Measure's **aggregation rule** is an aggregate function, chosen from a closed list, over a value
   expression on its base Dataset's Fields. A period that changes per question belongs to the
   question, not to the Measure. Its default time granularity refers to a level of a calendar

@@ -52,18 +52,18 @@ in from the workspace. How workspace, catalog, and domain relate beyond this one
 correspondence is not settled.
 
 The workspace configuration holds what the Semantic Catalog needs from the application, per domain.
-Today it holds the sample size and the time limit of construction-run SQL, and the language-model
+Today it holds the sample size and the time limit of construction-run SQL, the language-model
 adapter and the concrete model it uses (see
-[`semantic-catalog/generators.md`](semantic-catalog/generators.md#reaching-a-language-model)), under
-`semanticCatalog` in `workspace.json` (see
+[`semantic-catalog/generators.md`](semantic-catalog/generators.md#reaching-a-language-model)), and
+whether count statistics (on by default) and value samples (off by default) reach the model (see
+[`semantic-catalog/generators.md`](semantic-catalog/generators.md#input-passed-to-external-models)),
+under `semanticCatalog` in `workspace.json` (see
 [`../application/README.md`](../application/README.md#standalone-cli)). **[Planned]** It is also to
 hold:
 
 - the semantics owners, and the Query Agents an administrator permits (see
   [Callers and authority](#callers-and-authority));
-- which inputs reach Generators and models: count statistics (on by default), value samples and
-  distributions (off by default), and usage feedback (on by default) (see
-  [`semantic-catalog/generators.md`](semantic-catalog/generators.md#input-passed-to-external-models));
+- whether value distributions (off by default) and usage feedback (on by default) reach models;
 - whether data checks run (on by default).
 
 Changing interfaces opens the same workspace and uses the same Query Engine without migrating

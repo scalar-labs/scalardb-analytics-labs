@@ -87,7 +87,7 @@ class LanguageModelPolicyEvaluationTest extends StoreScenarioTest {
   private static void drain(Scenario s, LanguageModelSettings settings) {
     store.runBuildTasks(
         s.domain,
-        new BuildRun.Environment(model(settings), BuildTasksTest.NO_CONSTRUCTION_SQL),
+        ScriptedModel.silent(model(settings), BuildTasksTest.NO_CONSTRUCTION_SQL),
         BuildRun.drain(),
         task -> {});
   }

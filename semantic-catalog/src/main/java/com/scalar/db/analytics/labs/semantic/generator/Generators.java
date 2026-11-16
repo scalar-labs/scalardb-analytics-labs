@@ -5,6 +5,7 @@
 package com.scalar.db.analytics.labs.semantic.generator;
 
 import com.scalar.db.analytics.labs.semantic.generator.data.DataChecks;
+import com.scalar.db.analytics.labs.semantic.generator.llm.MeaningInferences;
 import com.scalar.db.analytics.labs.semantic.generator.schema.SchemaInterpretation;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
 import java.util.ArrayList;
@@ -23,6 +24,7 @@ public final class Generators {
   private static List<Generator> all(List<Generator> schemaInterpretation) {
     var all = new ArrayList<>(schemaInterpretation);
     all.addAll(DataChecks.generators());
+    all.addAll(MeaningInferences.generators());
     return List.copyOf(all);
   }
 

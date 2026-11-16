@@ -95,10 +95,7 @@ class BuildTasksTest extends StoreScenarioTest {
 
   private static BuildRun.Summary drain(Scenario s, PolicyEvaluationModel model) {
     return store.runBuildTasks(
-        s.domain,
-        new BuildRun.Environment(model, NO_CONSTRUCTION_SQL),
-        BuildRun.drain(),
-        task -> {});
+        s.domain, ScriptedModel.silent(model, NO_CONSTRUCTION_SQL), BuildRun.drain(), task -> {});
   }
 
   /**
@@ -429,7 +426,7 @@ class BuildTasksTest extends StoreScenarioTest {
             () ->
                 store.runBuildTasks(
                     s.domain,
-                    new BuildRun.Environment(adopting(), NO_CONSTRUCTION_SQL),
+                    ScriptedModel.silent(adopting(), NO_CONSTRUCTION_SQL),
                     BuildRun.keepWaiting(Duration.ofMillis(20), stop::get),
                     task -> finished.countDown()));
 
@@ -663,7 +660,7 @@ class BuildTasksTest extends StoreScenarioTest {
       var inferred = inferredRowKind(s, "shop.public.orders");
       small.runBuildTasks(
           s.domain,
-          new BuildRun.Environment(adopting(), NO_CONSTRUCTION_SQL),
+          ScriptedModel.silent(adopting(), NO_CONSTRUCTION_SQL),
           BuildRun.drain(),
           task -> {});
       assertThat(s.state(inferred.rowKind())).contains(FactState.CONFIRMED);
@@ -679,7 +676,7 @@ class BuildTasksTest extends StoreScenarioTest {
             () ->
                 store.runBuildTasks(
                     s.domain,
-                    new BuildRun.Environment(adopting(), NO_CONSTRUCTION_SQL),
+                    ScriptedModel.silent(adopting(), NO_CONSTRUCTION_SQL),
                     BuildRun.keepWaiting(
                         Duration.ofMillis(20),
                         () -> {

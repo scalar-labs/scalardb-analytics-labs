@@ -4,14 +4,18 @@
  */
 package com.scalar.db.analytics.labs.semantic;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.scalar.db.analytics.labs.semantic.generator.DataGenerator;
 import com.scalar.db.analytics.labs.semantic.generator.Generator;
 import com.scalar.db.analytics.labs.semantic.generator.GeneratorContext;
 import com.scalar.db.analytics.labs.semantic.generator.Generators;
+import com.scalar.db.analytics.labs.semantic.generator.ModelGenerator;
 import com.scalar.db.analytics.labs.semantic.generator.Output;
 import com.scalar.db.analytics.labs.semantic.generator.StoreGenerator;
+import com.scalar.db.analytics.labs.semantic.llm.LanguageModelException;
 import com.scalar.db.analytics.labs.semantic.model.BuildRunInProgressException;
 import com.scalar.db.analytics.labs.semantic.model.BuildTask;
 import com.scalar.db.analytics.labs.semantic.model.LogPosition;
@@ -364,6 +368,7 @@ final class BuildRunner {
     return switch (generator) {
       case StoreGenerator reading -> generateFromStore(task, reading);
       case DataGenerator reading -> generateFromData(task, reading);
+      case ModelGenerator asking -> generateFromModel(task, asking);
       default ->
           throw new SemanticCatalogException("Generator " + name + " declares no way of running");
     };
@@ -377,10 +382,10 @@ final class BuildRunner {
   private BuildTask generateFromStore(BuildTask task, StoreGenerator generator) {
     return store.write(
         transaction -> {
-          var context = context(transaction, task, generator);
+          var context = context(transaction, task, generator, generator.version());
           var output = new Output();
           generator.run(context, output);
-          return recordRun(transaction, task, generator, output);
+          return recordRun(transaction, task, generator, generator.version(), output);
         });
   }
 
@@ -394,11 +399,91 @@ final class BuildRunner {
    * it as missing input and still records the reads of the other targets.
    */
   private BuildTask generateFromData(BuildTask task, DataGenerator generator) {
-    var plan = store.read(transaction -> generator.plan(context(transaction, task, generator)));
+    var version = generator.version();
+    var plan =
+        store.read(transaction -> generator.plan(context(transaction, task, generator, version)));
+    var failed = new ArrayList<>(plan.unread());
+    var reads = read(plan.queries(), failed);
+    return store.write(
+        transaction -> {
+          var context = context(transaction, task, generator, version);
+          var output = new Output();
+          failed.forEach(output::missing);
+          generator.record(context, reads, output);
+          return recordRun(transaction, task, generator, version, output);
+        });
+  }
+
+  /**
+   * Runs a Generator that asks a language model: it plans its targets and the data reads the
+   * domain's settings allow at the latest commit, runs the reads and asks the model outside any
+   * transaction, and records what the answer proposes inside the recording transaction, for the
+   * targets that still call for a candidate there. Its targets are split into model calls of a
+   * bounded size; a run with no target asks nothing.
+   *
+   * <p>An unavailable model, one that gives no answer in time, and an answer not in the form asked
+   * for fail the task, which can be resumed.
+   */
+  private BuildTask generateFromModel(BuildTask task, ModelGenerator generator) {
+    var model = environment.languageModel();
+    var version = generator.version(model);
+    var plan =
+        store.read(
+            transaction ->
+                generator.plan(
+                    context(transaction, task, generator, version), environment.modelInput()));
+    var failed = new ArrayList<String>();
+    List<DataGenerator.Read> reads =
+        plan.asks().isEmpty() ? List.of() : read(plan.queries(), failed);
+    var answers = new ArrayList<ModelGenerator.Answered>();
+    for (var ask : plan.asks()) {
+      answers.add(
+          new ModelGenerator.Answered(
+              ask,
+              answerObject(model.complete(generator.instructions(), generator.input(ask, reads)))));
+    }
+    return store.write(
+        transaction -> {
+          var context = context(transaction, task, generator, version);
+          var output = new Output();
+          plan.missing().forEach(output::missing);
+          failed.forEach(output::missing);
+          generator.record(context, plan, reads, answers, output);
+          return recordRun(transaction, task, generator, version, output);
+        });
+  }
+
+  private static final JsonMapper MAPPER = JsonMapper.builder().build();
+
+  /** Reads a model's answer as one JSON object, allowing a Markdown code fence around it. */
+  static JsonNode answerObject(String answer) {
+    var text = answer.strip();
+    if (text.startsWith("```")) {
+      var firstLine = text.indexOf('\n');
+      var closing = text.lastIndexOf("```");
+      if (firstLine >= 0 && closing > firstLine) {
+        text = text.substring(firstLine + 1, closing).strip();
+      }
+    }
+    try {
+      var json = MAPPER.readTree(text);
+      if (json != null && json.isObject()) {
+        return json;
+      }
+    } catch (JsonProcessingException e) {
+      // Reported below as an answer not in the form asked for.
+    }
+    throw new LanguageModelException("The model's answer is not one JSON object");
+  }
+
+  /**
+   * Runs queries through construction-run SQL, outside any transaction. A query whose statement is
+   * rejected or fails reads nothing; it is added to the failed reads, recorded as missing input.
+   */
+  private List<DataGenerator.Read> read(List<DataGenerator.Query> queries, List<String> failed) {
     var sql = environment.constructionSql();
     var reads = new ArrayList<DataGenerator.Read>();
-    var failed = new ArrayList<>(plan.unread());
-    for (var query : plan.queries()) {
+    for (var query : queries) {
       try {
         var outcomes = new ArrayList<ConstructionSql.Outcome>();
         for (var statement : query.statements()) {
@@ -413,30 +498,27 @@ final class BuildRunner {
                 + Objects.requireNonNullElse(e.getMessage(), e.getClass().getName()));
       }
     }
-    return store.write(
-        transaction -> {
-          var context = context(transaction, task, generator);
-          var output = new Output();
-          failed.forEach(output::missing);
-          generator.record(context, reads, output);
-          return recordRun(transaction, task, generator, output);
-        });
+    return reads;
   }
 
   private GeneratorContext context(
-      StoreTransaction transaction, BuildTask task, Generator generator) {
+      StoreTransaction transaction, BuildTask task, Generator generator, String version) {
     var projection = new Projection(domain, transaction.projectionSource(domain));
     var provenance =
         JsonNodeFactory.instance
             .objectNode()
             .put("generator", generator.name())
-            .put("version", generator.version())
+            .put("version", version)
             .put("buildTask", task.number());
     return new GeneratorContext(transaction, domain, projection, task.triggers(), provenance);
   }
 
   private BuildTask recordRun(
-      StoreTransaction transaction, BuildTask task, Generator generator, Output output) {
+      StoreTransaction transaction,
+      BuildTask task,
+      Generator generator,
+      String version,
+      Output output) {
     Long commit = null;
     if (output.hasRecords()) {
       var result =
@@ -448,7 +530,7 @@ final class BuildRunner {
         transaction,
         task,
         new BuildTask.Status.Succeeded(
-            new BuildTask.Result.Generated(generator.version(), commit, output.missingInputs())));
+            new BuildTask.Result.Generated(version, commit, output.missingInputs())));
   }
 
   // Task state

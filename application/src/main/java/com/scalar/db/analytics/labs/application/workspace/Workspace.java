@@ -14,6 +14,7 @@ import com.scalar.db.analytics.labs.application.ApplicationRuntime;
 import com.scalar.db.analytics.labs.application.construction.ConstructionSqlSettings;
 import com.scalar.db.analytics.labs.physical.PhysicalCatalogSettings;
 import com.scalar.db.analytics.labs.physical.Secret;
+import com.scalar.db.analytics.labs.semantic.ModelInputSettings;
 import com.scalar.db.analytics.labs.semantic.StoreSettings;
 import com.scalar.db.analytics.labs.semantic.llm.LanguageModelSettings;
 import java.io.IOException;
@@ -299,6 +300,22 @@ public final class Workspace {
     return Optional.of(semanticCatalog.languageModel().settings());
   }
 
+  /**
+   * Which data reads the domain lets reach the language model, as {@code
+   * semanticCatalog.modelInput} sets them; an unset one takes its default.
+   */
+  public ModelInputSettings modelInputSettings() {
+    var defaults = ModelInputSettings.defaults();
+    var semanticCatalog = configuration.semanticCatalog();
+    if (semanticCatalog == null || semanticCatalog.modelInput() == null) {
+      return defaults;
+    }
+    var modelInput = semanticCatalog.modelInput();
+    return new ModelInputSettings(
+        Objects.requireNonNullElse(modelInput.countStatistics(), defaults.countStatistics()),
+        Objects.requireNonNullElse(modelInput.valueSamples(), defaults.valueSamples()));
+  }
+
   private PhysicalCatalogSettings catalogSettings() {
     return new PhysicalCatalogSettings(
         configuration.storeJdbcUrl(),
@@ -339,12 +356,14 @@ public final class Workspace {
    * @param sampleSize the most rows read of a sampled table in construction-run SQL
    * @param constructionQueryTimeLimitSeconds how long one construction query may take
    * @param languageModel the language model the domain's build tasks call
+   * @param modelInput which data reads reach the language model
    */
   @JsonInclude(JsonInclude.Include.NON_NULL)
   record SemanticCatalogConfiguration(
       @Nullable Long sampleSize,
       @Nullable Long constructionQueryTimeLimitSeconds,
-      @Nullable LanguageModelConfiguration languageModel) {
+      @Nullable LanguageModelConfiguration languageModel,
+      @Nullable ModelInputConfiguration modelInput) {
 
     boolean isValid() {
       return (languageModel == null || languageModel.isValid())
@@ -356,6 +375,17 @@ public final class Workspace {
                       <= ConstructionSqlSettings.MAX_TIME_LIMIT.toSeconds()));
     }
   }
+
+  /**
+   * Which data reads reach the language model (see {@code docs/semantic-catalog/generators.md},
+   * "Input passed to external models"). An unset one takes its default.
+   *
+   * @param countStatistics whether row counts, null ratios, and distinct counts are passed
+   * @param valueSamples whether some distinct values of each column are passed
+   */
+  @JsonInclude(JsonInclude.Include.NON_NULL)
+  record ModelInputConfiguration(
+      @Nullable Boolean countStatistics, @Nullable Boolean valueSamples) {}
 
   /**
    * The language model the domain's build tasks call, by the adapter that reaches it (see {@code

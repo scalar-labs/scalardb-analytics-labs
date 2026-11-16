@@ -49,6 +49,13 @@ class SemanticBuildCliIntegrationTest {
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final String POSTGRES_PASSWORD = "pg-build-" + UUID.randomUUID();
 
+  /**
+   * A model that infers nothing: meaning inference asks it about every confirmed Dataset and Field
+   * and gets no value, so no candidate reaches the policy evaluation model, which would fail on
+   * this answer.
+   */
+  private static final String INFERRING_NOTHING = "cat > /dev/null; echo '{\"targets\": []}'";
+
   @Container
   private static final PostgreSQLContainer<?> STORE =
       new PostgreSQLContainer<>("postgres:16.4").withPassword("store-" + UUID.randomUUID());
@@ -102,8 +109,8 @@ class SemanticBuildCliIntegrationTest {
 
   @Test
   void buildConfirmsWhatTheRegisteredTablesDeclare() throws Exception {
-    // A model that fails if called: enforced declarations settle everything without it.
-    configureLanguageModel("exit 3");
+    // Enforced declarations settle everything without the policy evaluation model.
+    configureLanguageModel(INFERRING_NOTHING);
     registerSource();
     assertThat(buildTasks()).isNotEmpty().allMatch(task -> isState(task, BuildTask.State.CREATED));
 
@@ -132,6 +139,42 @@ class SemanticBuildCliIntegrationTest {
   }
 
   @Test
+  void theWorkspacesModelInputSettingsDecideWhatReachesTheModel() throws Exception {
+    var prompts = temporaryDirectory.resolve("prompts.txt");
+    configureLanguageModel("cat >> '" + prompts + "'; echo '{\"targets\": []}'");
+    var path = workspace.resolve(Workspace.CONFIG_FILE_NAME);
+    var configuration = (ObjectNode) OBJECT_MAPPER.readTree(path.toFile());
+    ((ObjectNode) configuration.get("semanticCatalog"))
+        .putObject("modelInput")
+        .put("countStatistics", false);
+    Files.writeString(path, OBJECT_MAPPER.writeValueAsString(configuration));
+    registerSource();
+
+    assertSuccessful(execute("semantic", "build", "--workspace", workspace.toString()));
+
+    var asked = Files.readString(prompts);
+    assertThat(asked).contains("\"tableMetadata\" :").doesNotContain("nullRatio");
+    assertThat(buildTasks())
+        .anySatisfy(
+            task ->
+                assertThat(task.status())
+                    .isInstanceOfSatisfying(
+                        BuildTask.Status.Succeeded.class,
+                        succeeded ->
+                            assertThat(succeeded.result())
+                                .isInstanceOfSatisfying(
+                                    BuildTask.Result.Generated.class,
+                                    generated ->
+                                        assertThat(generated.missingInputs())
+                                            .anyMatch(
+                                                missing ->
+                                                    missing.startsWith("the count statistics of")
+                                                        && missing.endsWith(
+                                                            "which the domain's settings"
+                                                                + " withhold")))));
+  }
+
+  @Test
   void buildWithoutALanguageModelFailsBeforeRunning() throws Exception {
     registerSource();
 
@@ -143,7 +186,7 @@ class SemanticBuildCliIntegrationTest {
 
   @Test
   void watchingRunHoldsTheBuildersPlaceUntilAskedToStop() throws Exception {
-    configureLanguageModel("exit 3");
+    configureLanguageModel(INFERRING_NOTHING);
     var standardOutput = new ByteArrayOutputStream();
     try (var cli = cli(standardOutput);
         var executor = Executors.newSingleThreadExecutor()) {

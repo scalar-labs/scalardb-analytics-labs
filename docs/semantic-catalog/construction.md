@@ -60,7 +60,7 @@ the inputs a target lacked in its result, and the run's commit, if it wrote one.
 
 No Generator suspends to wait. An answer or new input creates a new build task.
 A Generator lacking input records that there was no candidate and which inputs were
-missing, and succeeds. **[Planned]** An unavailable model fails the task, and resuming runs it again on the latest
+missing, and succeeds. An unavailable model fails the task, and resuming runs it again on the latest
 state. Whether construction is
 in progress, blocked, or awaiting judgement is derived: in progress means some task is `created` or
 `running`, blocked means some task is `failed`, and awaiting judgement means the review list is

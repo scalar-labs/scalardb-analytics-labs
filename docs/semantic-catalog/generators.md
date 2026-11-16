@@ -11,8 +11,8 @@ counts that are expected to be tuned from use of the product.
 
 ## One rule per Generator
 
-The schema-interpretation and data-check Generators are implemented. **[Planned]** The
-meaning-inference Generators are not.
+The schema-interpretation and data-check Generators, and row and Field meaning inference, are
+implemented. **[Planned]** The other meaning-inference Generators are not.
 
 Each interpretation or check rule is its own Generator. The rule that derives a key from a primary
 key and the rule that derives an identifier correspondence from a foreign key are separate
@@ -41,9 +41,9 @@ candidate inline depends on the validation methods of its checks, never on its r
 | Data checks | Candidate key discovery | Uniqueness, and a key for a Dataset without a primary key |
 | Data checks | Inclusion discovery | Existence of an undeclared identifier correspondence |
 | Data checks | Set relationship check | An identifier correspondence's set relationship |
-| Meaning inference | Row meaning inference | The four row-meaning predicates |
-| Meaning inference | Field meaning inference | Meaning, value kind, unit, meaning of null, represented concept, time meaning and time zone |
-| Meaning inference | Concept inference | Concepts, their meaning, and concept relationships with multiplicity |
+| Meaning inference | Row meaning inference | Row kind, row grain, and row inclusion |
+| Meaning inference | Field meaning inference | Meaning, value kind, unit, meaning of null, time meaning and time zone |
+| Meaning inference | Concept inference | Concepts, their meaning, the concepts rows and Fields represent, and concept relationships with multiplicity |
 | Meaning inference | Analytical semantics inference | Measures, Dimensions, business terms, and their predicates |
 | Meaning inference | Identifier correspondence inference | Undeclared identifier correspondences, including normalization, and their business definitions |
 | Meaning inference | Correction interpretation | A revised value or applicability scope for a related Fact |
@@ -131,8 +131,8 @@ the declaration that lets uniqueness from an unenforced constraint be adopted in
 schema observation would drop the data check again.
 
 **Data observations.** A Generator that reads data values does so through the application's SQL
-execution: the data checks do, and **[Planned]** so will the Generators that pass statistics to a
-model. It records what
+execution: the data checks do, and so do the Generators that pass statistics to a model. It records
+what
 it read as a **data observation** in the same commit as its results, because a `data-check` needs
 an observation to reference. Data observations have one Input Resource per kind and target of check
 (a Field set or a correspondence), because one check can read several tables and different queries
@@ -298,7 +298,9 @@ coincidental correspondence. For the same reason, keys from candidate key discov
 
 ## Meaning inference
 
-**[Planned]** This section describes design that is not implemented yet.
+Row and Field meaning inference are implemented. **[Planned]** Concept inference, analytical
+semantics inference, identifier correspondence inference, correction interpretation, `document`
+checks, and the document and feedback triggers are not.
 
 Meaning inference uses a model for predicates that declarations and data cannot decide. For a target
 element it passes names and types, confirmed Facts, relevant document parts, feedback, and permitted
@@ -312,7 +314,7 @@ each.
 | --- | --- |
 | Row meaning inference | Confirmed Dataset existence, documents, feedback without related Facts |
 | Field meaning inference | Confirmed Field existence, documents, feedback without related Facts |
-| Concept inference | Confirmed represented concepts of rows and Fields, documents, feedback without related Facts |
+| Concept inference | Confirmed row meaning and Field meaning, documents, feedback without related Facts |
 | Analytical semantics inference | Documents, feedback without related Facts, confirmed Field meaning |
 | Identifier correspondence inference | Confirmed Field meaning and represented concept, documents, feedback without related Facts |
 | Correction interpretation | Feedback with related Facts, including corrections from review |
@@ -320,10 +322,13 @@ each.
 All of them also run when a Fact they depend on stops being selected. They create a free-description
 predicate only when the input states something the closed core cannot express.
 
-Concept inference stays separate from row meaning inference although both name concepts. Row meaning
-reads one Dataset, while the relationships between concepts, including the multiplicity the business
-allows, need the confirmed row meanings of several. Fewer model calls come from passing several
-targets in one call, not from merging rules.
+The concept a row or a Field represents refers to a Concept element, so concept inference, which
+creates Concepts, also proposes these references; row and Field meaning inference do not. Deciding
+that two tables' rows or two Fields stand for the same business concept, such as e-commerce
+customers and POS members, needs several Datasets in view at once, and Concepts created by
+several Generators would duplicate one another. The relationships between concepts, including the
+multiplicity the business allows, likewise need the confirmed meanings of several Datasets. Fewer
+model calls come from passing several targets in one call, not from merging rules.
 
 Apart from correction interpretation, meaning inference does not propose uniqueness or set
 relationships, which data checks decide. It also does not propose a Fact
@@ -355,8 +360,10 @@ correction.
 ## Generation strategy
 
 What concerns deterministic Generators is implemented: order through declared inputs, targets from
-observations and confirmations, and producing for every target. **[Planned]** The rest, including
-the conditions and bounds for non-deterministic Generators, is not.
+observations and confirmations, and producing for every target. The conditions and bounds for
+non-deterministic Generators are implemented for row and Field meaning inference, which confirmations
+trigger. **[Planned]** The other triggers of non-deterministic Generators are not: feedback, a Fact
+no longer selected, an impact judgement, a rejection, retirement, or cascade, and a document.
 
 **Order.** The strategy defines no global order. Order emerges because a later Generator declares as
 input the confirmation of what an earlier one produces. When the e-commerce database is registered:
@@ -399,11 +406,15 @@ A non-deterministic Generator produces only for targets that meet all of these c
 - The latest candidate was not answered unknown, or a depended-on Input Resource has a newer
   observation since.
 
+A candidate answered unknown stays a `candidate`, so row and Field meaning inference treat it as
+pending. **[Planned]** Producing again for it once a depended-on input has a newer observation needs
+the observation triggers that are not implemented yet.
+
 Meaning inference runs only when it has a target and only with input that meets the handling
 conditions below. Input that does not is left out and recorded as missing.
 
-Meaning inference creates new elements only from specific inputs. Concepts come from confirmed
-represented concepts, documents, and feedback. Measures, Dimensions, and business terms come from
+Meaning inference creates new elements only from specific inputs. Concepts come from confirmed row
+and Field meaning, documents, and feedback. Measures, Dimensions, and business terms come from
 documents and feedback. Datasets and Fields come only from table and column ingestion. Creating
 Measures from confirmed Facts alone would let each confirmation trigger another inference and grow
 elements without bound.
@@ -415,6 +426,8 @@ recorded. Without new input, construction therefore produces no new records. Non
 Generators are bounded by initial behavior:
 
 - One candidate per Fact Address per run.
+- One model call asks about the targets of one table, at most 25 of them, so a large catalog becomes
+  several calls a model can answer in time rather than one that fails each time it is resumed.
 - After a rejection, as opposed to a correction, at most one further candidate with another value
   until a depended-on input gets a newer observation.
 - One candidate per correction.
@@ -443,7 +456,8 @@ and a Physical Catalog reference never moves; a renamed table likewise becomes a
 The policy evaluation model (see
 [`construction.md`](construction.md#choosing-the-confirmation-path)) calls a language model through
 an **adapter**, the only part of the Semantic Catalog that knows how a model is reached.
-**[Planned]** Meaning inference, impact judgement, and the duplicate check call it the same way. A
+Row and Field meaning inference call it the same way. **[Planned]** So will the other
+meaning-inference Generators, impact judgement, and the duplicate check. A
 caller passes a prompt and receives the model's answer; it never depends on a particular provider,
 so the provider can change without changing a Generator.
 
@@ -493,7 +507,9 @@ noticed.
 
 ## Input passed to external models
 
-**[Planned]** This section describes design that is not implemented yet.
+Row and Field meaning inference apply the settings for data count statistics and value samples, and
+record what they pass as inputs read. **[Planned]** Length and shape distributions, the usage
+feedback setting, turning data checks off, and documents are not implemented.
 
 The policy evaluation model's subject holds Fact content and what the candidate's Generator recorded
 as read; it expands no observation content. The settings below apply wherever observation content is
@@ -505,11 +521,11 @@ far as the domain's settings allow:
 
 | Input | Content | Default |
 | --- | --- | --- |
-| Physical schema | Table and column names, source types, constraints | Passed |
+| Physical schema | Table and column names, source types, constraints, and the connector's source metadata as the connector wrote it | Passed |
 | Confirmed Facts | Values and scopes of selected Fact Revisions | Passed |
 | Documents | Relevant parts | Passed |
 | Data count statistics | Row count, null ratio, distinct count, from a bounded sample | Passed; can be stopped |
-| Value distributions and samples | Length and shape distributions, some distinct values | Not passed unless the domain opts in |
+| Value distributions and samples | Length and shape distributions, some distinct values (up to five per column, each cut to 100 characters) | Not passed unless the domain opts in |
 | Usage feedback | Content, session purpose, context summary, related Facts | Passed; can be stopped |
 
 Value distributions and samples are withheld by default because values that must not leave the

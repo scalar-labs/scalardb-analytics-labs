@@ -213,7 +213,7 @@ class SchemaInterpretationTest extends StoreScenarioTest {
 
   private static BuildRun.Summary drain(Scenario s, PolicyEvaluationModel model) {
     return store.runBuildTasks(
-        s.domain, new BuildRun.Environment(model, OVER_LIMIT), BuildRun.drain(), task -> {});
+        s.domain, ScriptedModel.silent(model, OVER_LIMIT), BuildRun.drain(), task -> {});
   }
 
   // Reading what was confirmed

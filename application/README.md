@@ -57,6 +57,7 @@ scalardb-analytics workspace init \
 | `sampleSize` | `100000` | The most rows construction-run SQL reads of a sampled table, at most `10000000` |
 | `constructionQueryTimeLimitSeconds` | `60` | How long one construction-run query may take, at most `86400` |
 | `languageModel` | none | The language model the build tasks call; `semantic build` needs it |
+| `modelInput` | see below | Which data reads reach the language model |
 
 `languageModel` names the adapter that reaches the model and the concrete model it uses (see
 [`../docs/semantic-catalog/generators.md`](../docs/semantic-catalog/generators.md#reaching-a-language-model)):
@@ -74,6 +75,15 @@ Each also takes `timeoutSeconds`, how long one answer may take, `300` by default
   "languageModel": { "adapter": "claude", "model": "claude-sonnet-5-5" }
 }
 ```
+
+`modelInput` decides which data reads meaning inference passes to the model (see
+[`../docs/semantic-catalog/generators.md`](../docs/semantic-catalog/generators.md#input-passed-to-external-models)).
+A withheld read is not made and is listed among the build task's missing inputs:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `countStatistics` | `true` | Row count, and each column's null ratio and distinct count, over the sample |
+| `valueSamples` | `false` | Up to five distinct values of each column, over the sample |
 
 Register, inspect, and query sources:
 

@@ -6,6 +6,7 @@ package com.scalar.db.analytics.labs.semantic.generator.data;
 
 import com.scalar.db.analytics.labs.semantic.ConstructionSql;
 import com.scalar.db.analytics.labs.semantic.generator.Acceptances;
+import com.scalar.db.analytics.labs.semantic.generator.DataObservations.Observed;
 import com.scalar.db.analytics.labs.semantic.generator.GeneratorContext;
 import com.scalar.db.analytics.labs.semantic.generator.GeneratorContext.Fact;
 import com.scalar.db.analytics.labs.semantic.generator.GeneratorContext.Trigger;

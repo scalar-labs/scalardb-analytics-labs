@@ -4,6 +4,7 @@
  */
 package com.scalar.db.analytics.labs.semantic;
 
+import com.scalar.db.analytics.labs.semantic.llm.LanguageModel;
 import com.scalar.db.analytics.labs.semantic.model.BuildTask;
 import com.scalar.db.analytics.labs.semantic.policy.PolicyEvaluationModel;
 import java.time.Duration;
@@ -22,9 +23,14 @@ public final class BuildRun {
    *
    * @param policyEvaluationModel the policy evaluation model that evaluation tasks call
    * @param constructionSql the application's SQL execution for tasks that read data values
+   * @param languageModel the language model that model-backed Generators call
+   * @param modelInput the domain's settings for which data reads reach the language model
    */
   public record Environment(
-      PolicyEvaluationModel policyEvaluationModel, ConstructionSql constructionSql) {}
+      PolicyEvaluationModel policyEvaluationModel,
+      ConstructionSql constructionSql,
+      LanguageModel languageModel,
+      ModelInputSettings modelInput) {}
 
   /** When a run returns. */
   public sealed interface Mode {

@@ -74,11 +74,14 @@ public final class BuildTaskRun {
                         "LANGUAGE_MODEL_NOT_CONFIGURED",
                         "Build tasks need a language model; set semanticCatalog.languageModel in"
                             + " the workspace configuration."));
+    var model = LanguageModel.open(languageModel);
     var environment =
         new BuildRun.Environment(
-            new LanguageModelPolicyEvaluation(LanguageModel.open(languageModel)),
+            new LanguageModelPolicyEvaluation(model),
             new EngineConstructionSql(
-                runtime, workspace.catalogName(), workspace.constructionSqlSettings()));
+                runtime, workspace.catalogName(), workspace.constructionSqlSettings()),
+            model,
+            workspace.modelInputSettings());
     var runMode =
         switch (mode) {
           case Mode.Drain ignored -> BuildRun.drain();

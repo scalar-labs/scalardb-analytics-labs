@@ -6,6 +6,7 @@ package com.scalar.db.analytics.labs.semantic.generator.data;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.scalar.db.analytics.labs.semantic.ConstructionSql;
+import com.scalar.db.analytics.labs.semantic.generator.DataObservations.Observed;
 import com.scalar.db.analytics.labs.semantic.generator.GeneratorContext;
 import com.scalar.db.analytics.labs.semantic.generator.GeneratorContext.Trigger;
 import com.scalar.db.analytics.labs.semantic.generator.Output;

@@ -191,7 +191,7 @@ class DataChecksTest extends StoreScenarioTest {
       Scenario s, PolicyEvaluationModel model, ConstructionSql sql) {
     var summary =
         store.runBuildTasks(
-            s.domain, new BuildRun.Environment(model, sql), BuildRun.drain(), task -> {});
+            s.domain, ScriptedModel.silent(model, sql), BuildRun.drain(), task -> {});
     assertThat(summary.finished())
         .allSatisfy(
             task -> assertThat(task.status()).isInstanceOf(BuildTask.Status.Succeeded.class));

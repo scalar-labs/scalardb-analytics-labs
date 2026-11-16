@@ -6,6 +6,8 @@ package com.scalar.db.analytics.labs.semantic.generator.schema;
 
 import com.scalar.db.analytics.labs.semantic.generator.Generator;
 import java.util.List;
+import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /** The schema-interpretation Generators, in the order their build tasks are created. */
 public final class SchemaInterpretation {
@@ -18,5 +20,13 @@ public final class SchemaInterpretation {
         new UniquenessDeclarationIngestion(),
         new CorrespondenceFromForeignKey(),
         new ValueKindFromSourceType());
+  }
+
+  /**
+   * The value kind a column's Analytics type fixes, if it fixes one: the Fact Address that value
+   * kind from source type fills from the declaration, which meaning inference leaves to it.
+   */
+  public static Optional<String> declaredValueKind(@Nullable String analyticsKind) {
+    return ValueKindFromSourceType.valueKind(analyticsKind);
   }
 }
