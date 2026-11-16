@@ -2,12 +2,10 @@
 assertj = "3.27.7"
 arrow-java = "19.0.0"
 checker-framework = "3.53.1"
-# One DuckDB release: the JDBC binding, the product extension, and the scanner extensions must all
-# target this core version. The scanner entries pin the upstream commits DuckDB builds them from.
+# One DuckDB release: the JDBC binding and the product extension must both target this core
+# version.
 duckdb = "1.5.6"
 duckdb-jdbc = "1.5.6.0"
-duckdb-mysql-scanner = "99c2e091b153b7f1cbd449988332232e75684b41"
-duckdb-postgres-scanner = "318dabb2474fc3789b0199301a2e661e19c1b4fc"
 # The scalardb-analytics-connectors distribution carried in connector/distribution: the connector
 # API library, its DuckDB extension (built for the duckdb version above), and the ADBC drivers.
 scalardb-analytics-connectors = "0.1.0"

@@ -62,9 +62,9 @@ also quote it. The boundary handles this in one place, at the edge of the in-pro
 Only `PhysicalCatalog.resolveConnection` returns a registered data source's credentials. It reads
 the catalog through the upstream use case rather than the in-process gRPC server, so no serialized
 call can reach it. `ApplicationRuntime` resolves every data source of a catalog there when it starts
-the Query Engine, and hands each connection to the read path it chooses for that data source. The
-read path passes the secret to DuckDB as a bound parameter and never writes it into SQL text; see
-[`query-engine.md`](query-engine.md#source-attachment-and-read-paths).
+the Query Engine, and hands each connection to the connector path, which passes the secret to
+DuckDB as a bound parameter and never writes it into SQL text; see
+[`query-engine.md`](query-engine.md#source-attachment-and-the-connector-path).
 
 ## Failure and lifecycle
 
@@ -108,9 +108,8 @@ metadata through the connector's metadata retrieval rather than the upstream `sc
 connector reads the source's own catalog and returns source types and Analytics types, and the
 catalog stores the parts used for planning and execution without reinterpreting them. `DataType` and
 `ColumnSchema` become able to hold structured types (`ARRAY`, `MAP`, `STRUCT`) and extension-encoded
-types, and the gRPC `ColumnSchema.type` becomes a structured message. Until a source's connector is
-complete, the interim scanner path produces table metadata of the same shape; see
-[`query-engine.md`](query-engine.md#interim-scanner-path).
+types, and the gRPC `ColumnSchema.type` becomes a structured message. Every source type has a
+connector, so no other component produces table metadata.
 
 A connector returns each table in two layers: **source metadata**, what it read in a shape only that
 connector defines, and **table metadata**, the source-independent subset it derives from the source

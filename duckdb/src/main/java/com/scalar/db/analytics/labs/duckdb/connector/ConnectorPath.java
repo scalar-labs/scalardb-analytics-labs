@@ -4,13 +4,11 @@
  */
 package com.scalar.db.analytics.labs.duckdb.connector;
 
-import com.scalar.db.analytics.labs.connector.ConnectorPackage;
 import com.scalar.db.analytics.labs.duckdb.AttachSession;
 import com.scalar.db.analytics.labs.duckdb.SourceAttachException;
 import com.scalar.db.analytics.labs.duckdb.SourceAttachment;
 import com.scalar.db.analytics.labs.physical.DataSourceConnection;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -35,52 +33,30 @@ public final class ConnectorPath {
   private ConnectorPath() {}
 
   /**
-   * Returns the attachment of a data source whose source type has a Connector in the connectors
-   * package, or empty when it has none and stays on another read path.
+   * Returns the attachment that reads a data source through its Connector. Every source type the
+   * Physical Catalog registers has a Connector in the connectors package.
    *
    * @param name the data source name, under which SQL addresses the source
    * @param connection the source's connection settings as resolved from the Physical Catalog
    */
-  public static Optional<SourceAttachment> attachment(
-      String name, DataSourceConnection connection) {
-    return switch (connection) {
-      case DataSourceConnection.PostgreSql postgreSql ->
-          Optional.of(new PostgreSqlAttachment(name, postgreSql));
-      case DataSourceConnection.MySql ignored -> Optional.empty();
-    };
+  public static SourceAttachment attachment(String name, DataSourceConnection connection) {
+    return new ConnectorAttachment(name, connection);
   }
 
-  private record PostgreSqlAttachment(String name, DataSourceConnection.PostgreSql connection)
+  private record ConnectorAttachment(String name, DataSourceConnection connection)
       implements SourceAttachment {
-    @Override
-    public ReadPath readPath() {
-      return new ReadPath(ReadPath.Kind.CONNECTOR, ConnectorPackage.EXTENSION_NAME);
-    }
-
     @Override
     public void attach(AttachSession session) throws SourceAttachException {
       var secret = "scalardb_analytics_source_" + UUID.randomUUID().toString().replace("-", "");
       try {
-        session.setVariable(HOST_VARIABLE, connection.host());
-        session.setVariable(PORT_VARIABLE, connection.port());
-        session.setVariable(DATABASE_VARIABLE, connection.database());
-        session.setVariable(USER_VARIABLE, connection.username());
-        session.setVariable(PASSWORD_VARIABLE, connection.password().reveal());
+        var providerAndOptions = bindSettings(session);
         // The Connector is the secret's provider, and its declared options are the parameters.
         session.execute(
             "CREATE TEMPORARY SECRET "
                 + secret
-                + " (TYPE scalardb_analytics_connectors, PROVIDER postgresql, host getvariable('"
-                + HOST_VARIABLE
-                + "'), port getvariable('"
-                + PORT_VARIABLE
-                + "'), database getvariable('"
-                + DATABASE_VARIABLE
-                + "'), user getvariable('"
-                + USER_VARIABLE
-                + "'), password getvariable('"
-                + PASSWORD_VARIABLE
-                + "'))");
+                + " (TYPE scalardb_analytics_connectors, PROVIDER "
+                + providerAndOptions
+                + ")");
         // An ATTACH through a secret takes its Connector and options from the secret alone.
         session.execute(
             "ATTACH '' AS "
@@ -95,10 +71,55 @@ public final class ConnectorPath {
       }
     }
 
+    /**
+     * Binds the connection settings as variables and returns the secret's provider, the Connector,
+     * followed by the options that read them.
+     */
+    private String bindSettings(AttachSession session) throws SourceAttachException {
+      return switch (connection) {
+        case DataSourceConnection.PostgreSql postgreSql -> {
+          session.setVariable(HOST_VARIABLE, postgreSql.host());
+          session.setVariable(PORT_VARIABLE, postgreSql.port());
+          session.setVariable(DATABASE_VARIABLE, postgreSql.database());
+          session.setVariable(USER_VARIABLE, postgreSql.username());
+          session.setVariable(PASSWORD_VARIABLE, postgreSql.password().reveal());
+          yield String.join(
+              ", ",
+              "postgresql",
+              variableOption("host", HOST_VARIABLE),
+              variableOption("port", PORT_VARIABLE),
+              variableOption("database", DATABASE_VARIABLE),
+              variableOption("user", USER_VARIABLE),
+              variableOption("password", PASSWORD_VARIABLE));
+        }
+        // The MySQL Connector reads the whole server and qualifies every table with its database,
+        // so it takes no database, and a registered one does not narrow the attached catalog.
+        case DataSourceConnection.MySql mySql -> {
+          session.setVariable(HOST_VARIABLE, mySql.host());
+          session.setVariable(PORT_VARIABLE, mySql.port());
+          session.setVariable(USER_VARIABLE, mySql.username());
+          session.setVariable(PASSWORD_VARIABLE, mySql.password().reveal());
+          yield String.join(
+              ", ",
+              "mysql",
+              variableOption("host", HOST_VARIABLE),
+              variableOption("port", PORT_VARIABLE),
+              variableOption("user", USER_VARIABLE),
+              variableOption("password", PASSWORD_VARIABLE),
+              // MySQL declares BOOL and BOOLEAN as tinyint(1), which therefore reads as BOOLEAN.
+              "tinyint1_as_boolean true");
+        }
+      };
+    }
+
     @Override
     public String toString() {
       // The connection holds the credential.
-      return "PostgreSqlAttachment[name=" + name + "]";
+      return "ConnectorAttachment[name=" + name + "]";
+    }
+
+    private static String variableOption(String option, String variable) {
+      return option + " getvariable('" + variable + "')";
     }
 
     private static String quoteIdentifier(String identifier) {

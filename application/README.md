@@ -79,10 +79,10 @@ scalardb-analytics query \
   --sql 'SELECT * FROM warehouse.public.orders LIMIT 10'
 ```
 
-Registering a PostgreSQL source also retrieves the table metadata of its registered tables through
-the PostgreSQL connector and passes it to the Semantic Catalog; the `tableMetadata` member of the
-output says what the Semantic Catalog recorded for each table. MySQL sources have no connector yet,
-so their retrieval is skipped. `metadata retrieve` runs the retrieval again for a registered source.
+Registering a source also retrieves the table metadata of its registered tables through the
+source's connector and passes it to the Semantic Catalog; the `tableMetadata` member of the output
+says what the Semantic Catalog recorded for each table. `metadata retrieve` runs the retrieval again
+for a registered source.
 See [`../docs/application.md`](../docs/application.md#table-metadata-retrieval).
 
 `query` accepts exactly one of `--sql`, `--file`, or `--stdin`. Successful commands and classified

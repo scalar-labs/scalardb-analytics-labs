@@ -148,8 +148,7 @@ Run the query-path acceptance suite:
 ```
 
 It runs the archive in the same restricted environment against a PostgreSQL and a MySQL source
-loaded with business fixtures; PostgreSQL is read through its Connector and MySQL through the
-interim scanner. Starting from an empty workspace, it registers both sources and
+loaded with business fixtures, both read through their Connectors. Starting from an empty workspace, it registers both sources and
 queries them with the commands of Query Agent Skill v0. It checks type and value fidelity in the
 JSON output, a cross-source join, deterministic output and exit codes, pushdown in the SQL each
 source server logs, the time limit, output truncation, SIGINT cancellation, unsafe-SQL rejection,

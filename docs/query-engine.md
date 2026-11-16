@@ -58,44 +58,36 @@ those variants to stable uppercase error codes in its versioned JSON envelope. Q
 expose the execution ID and a redacted typed error; DuckDB diagnostics that can contain submitted
 SQL or connection details do not cross the public exception boundary.
 
-Runtime extension installation and automatic loading are disabled. Required product, scanner, and
-connector artifacts are version-aligned parts of the distribution rather than network-fetched
-runtime dependencies. Catalog administration is explicit: loading an extension or attaching a
-source does not implicitly create product catalog state.
+Runtime extension installation and automatic loading are disabled. Required product and connector
+artifacts are version-aligned parts of the distribution rather than network-fetched runtime
+dependencies. Catalog administration is explicit: loading an extension or attaching a source does
+not implicitly create product catalog state.
 
-Scanner connections are both query paths and metadata boundaries. Source schema discovery may use
-the same scanner connection used for reads, but scanner-normalized types must not be represented as
-source-native metadata without an explicit mapping owned by the relevant catalog integration.
-
-## Source attachment and read paths
+## Source attachment and the connector path
 
 `DuckDbQueryEngine` takes the data sources to make queryable as `SourceAttachment` values when it
-starts. An attachment has a name, attaches its source through one read path, and names that path
-and the DuckDB extension that reads through it; the engine knows nothing else about the source, so
-its API does not depend on source types. The engine reports each attached source with its read
-path and the version DuckDB gives for that extension, which construction-run SQL records with what
-it read. Each source becomes a
-DuckDB database named after the data source, and SQL addresses its tables as
-`source.schema.table` whichever read path serves it. The application resolves the data sources of
-one Physical Catalog catalog and chooses the read path for each of them.
+starts. An attachment has a name and attaches its source; the engine knows nothing else about the
+source, so its API does not depend on source types. The engine reports each attached source with
+the connectors' DuckDB extension that reads it and the version DuckDB gives for that extension,
+which construction-run SQL records with what it read. Each source becomes a DuckDB database named
+after the data source, and SQL addresses its tables as `source.schema.table`. The application
+resolves the data sources of one Physical Catalog catalog and attaches each of them through its
+Connector.
 
 ```text
 application --resolveConnection--> Physical Catalog
      |
-     +-- read path per data source --> SourceAttachment --> DuckDbQueryEngine
-                                           |
-                                           +-- connector path --secret + ATTACH--> connectors extension --> Connector --> PostgreSQL
-                                           +-- interim scanner path --secret + ATTACH (READ_ONLY)--> MySQL
+     +-- one attachment per data source --> SourceAttachment --> DuckDbQueryEngine
+                                               |
+                                               +-- connector path --secret + ATTACH--> connectors extension --> Connector --> PostgreSQL, MySQL
 ```
 
-A data source whose source type has a Connector in the connectors distribution reads
-through the connector path; any other reads through the interim scanner path. Today PostgreSQL has
-a Connector and MySQL does not.
+Every source type reads through the connector path, and a new source type is added as a Connector
+in the connectors distribution.
 
 Attachment happens once, before external access is disabled. DuckDB refuses source attachments
 afterwards but keeps attached sources queryable, so a running engine sees exactly the sources it
-started with. Moving a data source to another read path therefore takes a new engine.
-Initialization fails with a typed error that names only the data source if any source cannot be
+started with. Initialization fails with a typed error that names only the data source if any source cannot be
 attached, including when its name would collide with another source or a DuckDB built-in database
 or schema. An attachment reaches the connection only through `AttachSession`, which binds values
 such as credentials as statement parameters and reports failures without DuckDB diagnostics.
@@ -125,11 +117,25 @@ which then stays initialized until the process exits.
   the variables, and attaches the source with `ATTACH '' AS <name> (TYPE
   scalardb_analytics_connectors, SECRET ..., READ_ONLY)`. No connection value appears in SQL
   text, and `duckdb_secrets()` shows the password redacted.
-- The attached catalog reads namespaces, tables, and table metadata from the Connector itself.
-  **[Planned]** It is to read the table metadata the Physical Catalog registered instead.
+- A MySQL source is attached with `tinyint1_as_boolean` set, so `tinyint(1)`, which MySQL's `BOOL`
+  and `BOOLEAN` declare, reads as `BOOLEAN`. A `tinyint(1)` value
+  other than 0 and 1 then fails the read as a data error rather than being read as some value.
+  The MySQL Connector takes no database: it reads the whole server, every database a schema, and
+  qualifies each table with its database.
+- The attached catalog reads namespaces, tables, and table metadata from the Connector itself, so
+  it shows everything the source account can see. A MySQL source registered with a database
+  therefore shows every database the account can see, not only that one. **[Planned]** It is to
+  read the table metadata the Physical Catalog registered instead.
 - Each scan offers its filters and projection to the Connector's pushdown planning and reads the
-  remote execution's Arrow stream. Columns without an Analytics type are not visible, and a table
-  whose shape no longer matches the source fails with a stale registration. The extension's
+  remote execution's Arrow stream. Limits, sorts, aggregations, and joins are not offered to
+  Connectors yet, so DuckDB applies them. A Connector runs remotely only the comparisons its source
+  evaluates the same way, so, for example, MySQL receives a text comparison only on a column under
+  a binary collation. The SQL Connectors (PostgreSQL and MySQL) move a scan's filter condition to
+  the source only when the whole condition can run there; otherwise the whole condition runs in
+  DuckDB. Splitting an AND into the parts that can run remotely is a known gap of their shared
+  planner, which the connector contract allows. Columns without an Analytics type, such as MySQL
+  `time` and `set`, are not visible, and a table whose shape no longer matches the source fails
+  with a stale registration. The extension's
   [README](https://github.com/scalar-labs/scalardb-analytics-connectors/blob/main/adapters/duckdb/README.md)
   describes its catalog, planning, and type mapping.
 - The extension's definitions-file pragma and scan function are denied by query validation, so SQL
@@ -139,76 +145,13 @@ which then stays initialized until the process exits.
   default. A request already sent to the source is not interrupted by a query time limit or
   cancellation; it ends when the source answers.
 
-### Interim scanner path
-
-Until a connector serves a source type, its sources are read through DuckDB's packaged scanners.
-Today this is MySQL; the path also still supports PostgreSQL. Every source-type-specific decision of this path lives in the
-`com.scalar.db.analytics.labs.duckdb.scanner` package, which is removed once connectors replace it:
-
-- `ScannerPath` turns a Physical Catalog `DataSourceConnection` into a read-only scanner
-  attachment. Connection settings reach DuckDB as bound session variables; a temporary DuckDB
-  secret is created from them and the variables are reset, so no connection value appears in SQL
-  text. `duckdb_secrets()` shows the password as redacted.
-- The scanners also provide functions that connect to arbitrary connection strings, pass SQL
-  through to a source, or reset scanner state, and some of them work even with external access
-  disabled. Their function policies deny every `postgres_*` and `mysql_*` function and
-  `pg_clear_cache`.
-- The scanners cache source schemas, and resetting that cache is not allowed from SQL, so schema
-  changes need a new engine. Schema and table listings through `information_schema` or
-  `duckdb_tables()` come from the scanner connections and show scanner-normalized types. A MySQL
-  source registered without a database exposes every database on the server.
-- The scanners push projections, filters, and limits into the SQL that each source receives, which
-  the scanner tests assert from the source servers' statement logs. Row, byte, time, and memory
-  limits and cancellation apply as to any other query, but DuckDB cannot interrupt a scanner while
-  it waits for the source, so a time limit or cancellation takes effect once the source returns
-  data.
-
-The scanner path does not yet derive table metadata from its own connections, and the Physical
-Catalog still resolves source schemas when a data source is registered.
-
-**[Planned]** The scanner path is to keep the rule that one party interprets each source: the
-scanner both reads rows and, over the same connection, produces table metadata in the shape the
-connector contract defines. A source belongs to exactly one path at a time, and only DuckDB reads
-through the scanner path. The path is held to the connector path's results:
-
-- A column the scanner path types must have the same Analytics type and values as on the connector
-  path, using only value-preserving conversions; MySQL `INT UNSIGNED` arrives as `UINTEGER` and can
-  be widened to `BIGINT`. Any other column is unsupported, with the same reason a connector gives.
-- Scanner settings that change types or values, such as reading MySQL `TINYINT(1)` as boolean or
-  the MySQL session time zone, are fixed as part of the path.
-- Values are verified against the connector conformance fixtures by a separate test runner.
-- Its retrieval information names the scanner path implementation and the DuckDB extension and
-  version, with no ADBC driver. It returns no read provenance and performs no schema check; DuckDB's
-  type comparison stands in for the latter.
-
-**[Planned]** A source moves to the connector path once its connector passes the metadata and
-data-read conformance tests, covers at least the scanner path's columns, and returns at least the
-same items, such as constraints and source-side identifiers. Switching then changes only the
-retrieval information, turns some unsupported columns into typed ones, starts read provenance and
-the schema check, and leaves every typed column's type and values unchanged. The application
-switches one source as one administrative operation:
-
-1. Retrieve the table metadata of every registered table of the source through the connector. If
-   this fails, nothing switches.
-2. Stop accepting new queries on the source and wait for running ones.
-3. Store the new table metadata in the Physical Catalog and switch reading to the connector. If this
-   fails, restore the previous metadata and scanner reading.
-4. Resume accepting queries.
-
-The changed retrieval information makes a new version, which reaches the Semantic Catalog like any
-other retrieval. MySQL starts on the scanner path with DuckDB's official extension. PostgreSQL moved
-to the connector path without this operation, because no table metadata of the scanner path is
-stored yet.
-**[Planned]** SQLite, Parquet, Iceberg, and Delta Lake are to start there too; Oracle has no such
-extension and is connector-only.
-
 ## Extension model
 
 Product query behavior integrates with DuckDB through loadable extensions. The `duckdb` build
 produces a product-owned C++ extension against the same DuckDB release used by the Java binding,
 packages it with the module, and loads it when the Query Engine starts. Keeping that boundary allows
-the distribution to use DuckDB's published scanner extensions and to add product behavior without
-fixing every extension into the application executable. The distribution owns inclusion of the
+the distribution to load the connectors' extension and to add product behavior without fixing every
+extension into the application executable. The distribution owns inclusion of the
 verified artifacts, and the Query Engine owns loading and using them.
 
 See [`design/duckdb-distribution.md`](design/duckdb-distribution.md) for the packaging decision and

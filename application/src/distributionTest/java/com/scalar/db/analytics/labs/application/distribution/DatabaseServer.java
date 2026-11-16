@@ -96,8 +96,8 @@ sealed interface DatabaseServer {
       return container
           .getLogs()
           .lines()
-          // The scanner path sends simple queries ("statement: "), and the connector path's ADBC
-          // driver sends extended-protocol ones ("execute <name>: ").
+          // Statements the tests run through psql are simple queries ("statement: "), and the
+          // connector path's ADBC driver sends extended-protocol ones ("execute <name>: ").
           .filter(
               line ->
                   (line.contains("statement: ") || EXTENDED_EXECUTE.matcher(line).find())

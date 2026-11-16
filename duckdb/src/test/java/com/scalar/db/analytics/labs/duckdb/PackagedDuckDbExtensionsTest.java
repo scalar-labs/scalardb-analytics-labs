@@ -23,13 +23,9 @@ class PackagedDuckDbExtensionsTest {
   void loadsThePackagedExtensionSetFromAnApplicationOwnedDirectory() throws Exception {
     try (var queryEngine = new DuckDbQueryEngine()) {
       // duckdb_extensions() scans the extension directory, which the engine forbids after startup,
-      // so each extension is observed through a function it registers.
-      assertThat(
-              functionNames(
-                  queryEngine,
-                  "'postgres_scan', 'mysql_query', 'scalardb_analytics_is_read_only_query'"))
-          .containsExactlyInAnyOrder(
-              "postgres_scan", "mysql_query", "scalardb_analytics_is_read_only_query");
+      // so the extension is observed through a function it registers.
+      assertThat(functionNames(queryEngine, "'scalardb_analytics_is_read_only_query'"))
+          .containsExactly("scalardb_analytics_is_read_only_query");
 
       var settings =
           queryRows(
@@ -69,28 +65,11 @@ class PackagedDuckDbExtensionsTest {
           .isIn(PackagedDuckDbExtensions.SUPPORTED_PLATFORMS);
       assertThat(provenance.getProperty("extensionAbi")).as(name).isEqualTo("CPP");
     }
-    for (var scanner : List.of("postgres_scanner", "mysql_scanner")) {
-      var provenance = new Properties();
-      try (var input =
-          getClass()
-              .getResourceAsStream(
-                  "/META-INF/scalardb-analytics-labs/duckdb-extensions/"
-                      + scanner
-                      + ".properties")) {
-        provenance.load(input);
-      }
-      assertThat(provenance.getProperty("sourceSha256")).as(scanner).matches("[0-9a-f]{64}");
-      assertThat(provenance.getProperty("sha256")).as(scanner).matches("[0-9a-f]{64}");
-      assertThat(provenance.getProperty("upstreamCommit")).as(scanner).matches("[0-9a-f]{40}");
-      assertThat(provenance.getProperty("signed")).as(scanner).isEqualTo("true");
-      assertThat(provenance.getProperty("license")).as(scanner).isEqualTo("MIT");
-      assertThat(provenance.getProperty("bundledLicenses")).as(scanner).isNotBlank();
-    }
   }
 
   @Test
   void rejectsExtensionsBuiltForAnotherSupportedPlatform() {
-    var packaged = List.of(new PackagedExtension("postgres_scanner", "v1.5.6", "osx_arm64"));
+    var packaged = List.of(new PackagedExtension("scalardb_analytics", "v1.5.6", "osx_arm64"));
 
     assertThatThrownBy(
             () -> PackagedDuckDbExtensions.verifyCompatibility(packaged, "v1.5.6", "linux_amd64"))
@@ -103,7 +82,7 @@ class PackagedDuckDbExtensionsTest {
 
   @Test
   void rejectsAnUnsupportedPlatform() {
-    var packaged = List.of(new PackagedExtension("postgres_scanner", "v1.5.6", "osx_arm64"));
+    var packaged = List.of(new PackagedExtension("scalardb_analytics", "v1.5.6", "osx_arm64"));
 
     assertThatThrownBy(
             () -> PackagedDuckDbExtensions.verifyCompatibility(packaged, "v1.5.6", "windows_amd64"))
@@ -116,14 +95,15 @@ class PackagedDuckDbExtensionsTest {
 
   @Test
   void rejectsExtensionsBuiltForAnotherDuckDbRelease() {
-    var packaged = List.of(new PackagedExtension("mysql_scanner", "v1.5.5", "osx_arm64"));
+    var packaged = List.of(new PackagedExtension("scalardb_analytics", "v1.5.5", "osx_arm64"));
 
     assertThatThrownBy(
             () -> PackagedDuckDbExtensions.verifyCompatibility(packaged, "v1.5.6", "osx_arm64"))
         .isInstanceOf(IncompatibleExtensionsException.class)
         .hasMessage(
-            "The packaged DuckDB extension mysql_scanner is built for DuckDB v1.5.5, but the"
-                + " embedded DuckDB is v1.5.6. Build the distribution from one DuckDB version set.");
+            "The packaged DuckDB extension scalardb_analytics is built for DuckDB v1.5.5, but"
+                + " the embedded DuckDB is v1.5.6. Build the distribution from one DuckDB version"
+                + " set.");
   }
 
   private static List<String> functionNames(DuckDbQueryEngine queryEngine, String names)

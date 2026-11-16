@@ -10,18 +10,14 @@ root Gradle build will delegate their compilation to the DuckDB extension toolch
 them with the application. Runtime extension downloads remain disabled; required extensions must
 come from the verified product distribution.
 
-The packaged extension set is the product extension plus DuckDB's official PostgreSQL and MySQL
-scanner extensions, all bound to one DuckDB release:
+The packaged extension is the product extension, bound to one DuckDB release:
 
-- `gradle/libs.versions.toml` owns the version set: the DuckDB release (`duckdb`), the JDBC
-  binding (`duckdb-jdbc`), and the upstream commits of the scanners. `verifyDuckDbVersionSet` fails
+- `gradle/libs.versions.toml` owns the version set: the DuckDB release (`duckdb`) and the JDBC
+  binding (`duckdb-jdbc`). `verifyDuckDbVersionSet` fails
   the build when the JDBC binding does not embed that release, and the dependency is pinned
   strictly.
 - `buildNativeExtension` downloads the official DuckDB source amalgamation and platform static
   library, verifies their SHA-256 digests, and produces `scalardb_analytics.duckdb_extension`.
-- `acquireScannerExtensions` downloads the signed scanner binaries, verifies their pinned SHA-256
-  digests, and checks each footer for the CPP ABI, the DuckDB release, the platform, the scanner
-  commit, and a signature.
 - The native scripts pin checksums per DuckDB release and fail for a release they have not pinned.
 
 Verified downloads are cached under `<gradle-user-home>/caches/scalardb-analytics-labs/duckdb`,
@@ -35,18 +31,18 @@ diagnostic that names the mismatch.
 
 At runtime the Query Engine opens DuckDB with automatic installation and loading and community
 extensions disabled, and with an application-owned `extension_directory` instead of the per-user
-default. It loads each packaged extension by absolute path, attaches the given `SourceAttachment`s,
-and then disables external access. When a source reads through a Connector, it also loads the DuckDB
-extension of the connectors distribution, which the `connector` module stages once per process. The connector read path lives in the `connector` package and the
-interim scanner read path in the `scanner` package.
+default. It loads the product extension by absolute path from a copy staged for the engine, into
+which the engine registers its own catalog host, attaches the given `SourceAttachment`s, and then
+disables external access. When it has sources, it also loads the DuckDB extension of the connectors
+distribution, which the `connector` module stages once per process. The connector read path lives
+in the `connector` package.
 
-The connector and scanner tests start PostgreSQL and MySQL with Testcontainers, so `:duckdb:test` requires a
+The connector tests start PostgreSQL and MySQL with Testcontainers, so `:duckdb:test` requires a
 Docker-compatible daemon.
 
-The extension's host ABI is declared in `src/main/cpp/include/scalardb_analytics_host.h`. Each
-packaged extension's provenance (source, checksums, platform, DuckDB release, licenses, and, for
-the scanners, upstream commit and statically linked components) is recorded in
-`META-INF/scalardb-analytics-labs/duckdb-extensions/<extension>.properties`. The license texts of
-DuckDB and of the components statically linked into the scanners are in `META-INF/licenses/`.
+The extension's host ABI is declared in `src/main/cpp/include/scalardb_analytics_host.h`. The
+product extension's provenance (source, checksums, platform, DuckDB release, and licenses) is
+recorded in `META-INF/scalardb-analytics-labs/duckdb-extensions/scalardb_analytics.properties`. The
+DuckDB license text is in `META-INF/licenses/`.
 
 See [`../docs/query-engine.md`](../docs/query-engine.md) for the Query Engine mental model.

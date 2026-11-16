@@ -95,8 +95,9 @@ class ScalarDbAnalyticsCliIntegrationTest {
                 MYSQL_USER,
                 MYSQL_PASSWORD);
         var statement = connection.createStatement()) {
-      statement.execute("CREATE TABLE customers (id INT PRIMARY KEY, name VARCHAR(50))");
-      statement.execute("INSERT INTO customers VALUES (1, 'alice'), (2, 'bob')");
+      statement.execute(
+          "CREATE TABLE customers (id INT PRIMARY KEY, name VARCHAR(50), active BOOLEAN)");
+      statement.execute("INSERT INTO customers VALUES (1, 'alice', TRUE), (2, 'bob', FALSE)");
     }
   }
 
@@ -177,7 +178,6 @@ class ScalarDbAnalyticsCliIntegrationTest {
   void registrationPassesPostgreSqlTableMetadataToTheSemanticCatalog() throws Exception {
     var output = OBJECT_MAPPER.readTree(postgresRegistration.standardOutput().strip());
     var tableMetadata = output.get("tableMetadata");
-    assertThat(tableMetadata.get("state").asText()).isEqualTo("retrieved");
     var tables = new HashMap<String, JsonNode>();
     tableMetadata
         .get("tables")
@@ -210,10 +210,37 @@ class ScalarDbAnalyticsCliIntegrationTest {
   }
 
   @Test
-  void registrationSkipsMySqlSourcesWithoutAConnector() throws Exception {
+  void registrationPassesMySqlTableMetadataToTheSemanticCatalog() throws Exception {
     var output = OBJECT_MAPPER.readTree(mysqlRegistration.standardOutput().strip());
-    assertThat(output.get("tableMetadata").get("state").asText()).isEqualTo("skipped");
-    assertThat(output.get("tableMetadata").get("reason").asText()).contains("MySQL");
+    var tableMetadata = output.get("tableMetadata");
+    var tables = tableMetadata.get("tables");
+    assertThat(tables).hasSize(1);
+    var customers = tables.get(0);
+    assertThat(customers.get("tableIdentifier").asText()).isEqualTo("crm.sales.customers");
+    assertThat(customers.get("recorded").asText()).isEqualTo("observation");
+
+    var domain = catalogName.replace('_', '-');
+    try (var store =
+        SemanticCatalogStore.open(
+            new StoreSettings(STORE.getJdbcUrl(), STORE.getUsername(), STORE.getPassword()))) {
+      var observation =
+          store
+              .observationContent(domain, customers.get("inputObservation").asText())
+              .orElseThrow();
+      assertThat(observation.get("sourceMetadata").get("connector").asText()).isEqualTo("mysql");
+      assertThat(observation.get("sourceMetadata").get("document").toString())
+          .contains("customers", "tinyint(1)");
+      assertThat(
+              store.derivedRecord(domain, "crm.sales.customers", customers.get("version").asLong()))
+          .hasValueSatisfying(
+              derived -> {
+                var derivedMetadata = derived.get("tableMetadata").toString();
+                assertThat(derivedMetadata).contains("primary-key");
+                // BOOLEAN is tinyint(1) in MySQL, read as the query path reads it.
+                assertThat(derivedMetadata).containsIgnoringCase("\"boolean\"");
+              });
+    }
+    assertThat(mysqlRegistration.allOutput()).doesNotContain(MYSQL_PASSWORD);
   }
 
   @Test
@@ -237,9 +264,13 @@ class ScalarDbAnalyticsCliIntegrationTest {
     assertThat(tables).hasSize(2);
     tables.forEach(table -> assertThat(table.get("recorded").asText()).isEqualTo("derived-record"));
 
-    var skipped =
+    var mysql =
         execute("", "metadata", "retrieve", "--workspace", workspace.toString(), "--source", "crm");
-    assertSuccessful(skipped, "scalardb-analytics/table-metadata-retrieval");
+    assertSuccessful(mysql, "scalardb-analytics/table-metadata-retrieval");
+    var mysqlTables =
+        OBJECT_MAPPER.readTree(mysql.standardOutput().strip()).get("tableMetadata").get("tables");
+    assertThat(mysqlTables).hasSize(1);
+    assertThat(mysqlTables.get(0).get("recorded").asText()).isEqualTo("derived-record");
 
     var missing =
         execute(

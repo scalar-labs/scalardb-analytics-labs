@@ -17,11 +17,13 @@ import java.util.Properties;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Loads the DuckDB extension set packaged with this module: the product extension and DuckDB's
- * official PostgreSQL and MySQL scanners, all built for one DuckDB release and platform.
+ * Loads the DuckDB extension set packaged with this module, the product extension, built for one
+ * DuckDB release and platform.
  *
  * <p>Extensions are loaded only from these packaged files. The connection must be opened with
  * {@link #connectionProperties(Path)} so DuckDB never installs or loads an extension on its own.
+ * Each engine stages and loads its own copy of the product extension, because it registers its own
+ * catalog host into that copy.
  */
 final class PackagedDuckDbExtensions {
   static final String PRODUCT_EXTENSION = "scalardb_analytics";
@@ -33,21 +35,16 @@ final class PackagedDuckDbExtensions {
    */
   static final String CONNECTORS_EXTENSION = ConnectorPackage.EXTENSION_NAME;
 
-  static final List<String> EXTENSIONS =
-      List.of("postgres_scanner", "mysql_scanner", PRODUCT_EXTENSION);
+  static final List<String> EXTENSIONS = List.of(PRODUCT_EXTENSION);
   static final List<String> SUPPORTED_PLATFORMS =
       List.of("osx_arm64", "linux_amd64", "linux_arm64");
 
   /**
-   * The functions of each packaged extension that query validation rejects. The scanners provide
-   * functions that connect to any connection string, pass SQL through to a source, or change
-   * scanner state, and some of them keep working after external access is disabled. Sources are
-   * therefore queryable only through their attached databases.
+   * The functions of each packaged extension that query validation rejects, so that sources are
+   * queryable only through their attached databases.
    */
   static final List<FunctionPolicy> FUNCTION_POLICIES =
       List.of(
-          new FunctionPolicy("postgres_scanner", List.of("postgres_"), List.of("pg_clear_cache")),
-          new FunctionPolicy("mysql_scanner", List.of("mysql_"), List.of()),
           new FunctionPolicy(PRODUCT_EXTENSION, List.of(), List.of()),
           // The connectors' extension attaches Data Sources from a definitions file through its
           // pragma, and its scan function reads a source directly; sources are queryable only
@@ -97,8 +94,7 @@ final class PackagedDuckDbExtensions {
    */
   static Properties connectionProperties(Path extensionDirectory) {
     var properties = new Properties();
-    // The product extension is not signed by DuckDB. The packaged scanners are verified against
-    // pinned checksums at build time.
+    // The product extension is not signed by DuckDB.
     properties.setProperty("allow_unsigned_extensions", "true");
     properties.setProperty("allow_community_extensions", "false");
     properties.setProperty("autoinstall_known_extensions", "false");

@@ -261,7 +261,9 @@ source schemas through the upstream `schema-resolver` at registration), the appl
 - The Semantic Catalog domain is the workspace's catalog name, lowercased, with every run of other
   characters than letters and digits replaced by one hyphen. The first retrieval creates the domain
   when `workspace init` has not.
-- Only PostgreSQL sources have a connector. A MySQL source is skipped, and the output says so.
+- PostgreSQL and MySQL sources are retrieved through their connectors, with the connection options
+  the connector path attaches them with, so the table metadata has the types queries read. A MySQL
+  source reads `tinyint(1)` as `Boolean`. Every source type has a connector.
 
 `source register` runs the retrieval operation after the Physical Catalog registration succeeds and
 reports what the Semantic Catalog recorded for each table. If the retrieval fails, the data source
@@ -275,9 +277,8 @@ delivers whatever version is then current.
 **Re-retrieval** runs the retrieval operation again for registered tables. The application starts it
 when:
 
-1. **[Planned]** a query read finds that a column's type differs from the Physical Catalog's. On the connector
-   path this is a "stale registration" error from the connector's schema check; on the scanner path
-   it is a mismatch in DuckDB's type comparison;
+1. **[Planned]** a query read finds that a column's type differs from the Physical Catalog's, which
+   is a "stale registration" error from the connector's schema check;
 2. a user or administrator requests it, which `metadata retrieve --source <name>` does for every
    registered table of a data source; or
 3. **[Planned]** the Semantic Catalog requests it.
@@ -332,9 +333,9 @@ One process does not mean one set of privileges or connections:
     capped at 10,000 rows and 64 MiB. A statement over a limit returns nothing and leaves its items
     undecidable. The engine runs one query at a time, so these queries run one after another.
   - The result says, for each declared table, whether it was read through a sample or whole, how
-    many rows were read, and when. Neither read path returns read provenance yet, so it carries the
-    read path of each data source read and the name and version of the DuckDB extension that read
-    it. **[Planned]** On the connector path, it is to carry the connector's read provenance.
+    many rows were read, and when. The connector path does not return read provenance yet, so it
+    carries the name and version of the DuckDB extension that read each data source.
+    **[Planned]** It is to carry the connector's read provenance.
   - The Query Engine for these reads is started with every data source of the catalog attached, on
     the first such read, the same way as for a user's query.
 - External files, URLs, automatic extension downloads, and arbitrary `ATTACH` are denied by default.

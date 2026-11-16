@@ -17,7 +17,6 @@ import com.scalar.db.analytics.labs.semantic.ConstructionSql.ConstructionSqlExce
 import com.scalar.db.analytics.labs.semantic.ConstructionSql.Extent;
 import com.scalar.db.analytics.labs.semantic.ConstructionSql.Input;
 import com.scalar.db.analytics.labs.semantic.ConstructionSql.Outcome;
-import com.scalar.db.analytics.labs.semantic.ConstructionSql.ReadPath;
 import com.scalar.db.analytics.labs.semantic.ConstructionSql.Reading;
 import com.scalar.db.analytics.labs.semantic.ConstructionSql.Request;
 import com.scalar.db.analytics.labs.semantic.model.PhysicalCatalogReference;
@@ -38,8 +37,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Construction-run SQL as a build task uses it, over a PostgreSQL source on the connector path and
- * a MySQL source on the scanner path.
+ * Construction-run SQL as a build task uses it, over a PostgreSQL and a MySQL source, both read
+ * through their Connectors.
  */
 @Testcontainers
 class EngineConstructionSqlIntegrationTest {
@@ -187,7 +186,6 @@ class EngineConstructionSqlIntegrationTest {
     assertThat(read.sources()).hasSize(1);
     var source = read.sources().get(0);
     assertThat(source.registration()).isEqualTo("warehouse");
-    assertThat(source.readPath()).isEqualTo(ReadPath.CONNECTOR);
     assertThat(source.extension()).isEqualTo("scalardb_analytics_connectors");
   }
 
@@ -225,7 +223,7 @@ class EngineConstructionSqlIntegrationTest {
   }
 
   @Test
-  void recordsTheScannerPathOfAScannerSource() {
+  void readsAMySqlSourceThroughItsConnector() {
     var read =
         (Outcome.Read)
             constructionSql()
@@ -237,8 +235,7 @@ class EngineConstructionSqlIntegrationTest {
     assertThat(read.rows().get(0).get(0).asLong()).isEqualTo(2);
     var source = read.sources().get(0);
     assertThat(source.registration()).isEqualTo("crm");
-    assertThat(source.readPath()).isEqualTo(ReadPath.SCANNER);
-    assertThat(source.extension()).isEqualTo("mysql_scanner");
+    assertThat(source.extension()).isEqualTo("scalardb_analytics_connectors");
   }
 
   @Test

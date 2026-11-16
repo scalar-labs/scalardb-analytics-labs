@@ -17,7 +17,6 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Properties;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
@@ -44,15 +43,6 @@ import org.junit.jupiter.api.io.TempDir;
 class DistributionSmokeTest {
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final String SOURCE = "source";
-  // "<name> <version> (<license>)", as the scanner provenance records each bundled component.
-  private static final Pattern BUNDLED_COMPONENT =
-      Pattern.compile("(.+) ([0-9][0-9.]*) \\(([^)]+)\\)");
-  private static final Map<String, String> NATIVE_LICENSE_FILES =
-      Map.of(
-          "libpq", "libpq.txt",
-          "OpenSSL", "openssl.txt",
-          "MariaDB Connector/C", "mariadb-connector-c.txt",
-          "zlib", "zlib.txt");
   private static final Pattern INVENTORY_ENTRY =
       Pattern.compile("\\*\\*Name:\\*\\* `([^`]+)` \\*\\*Version:\\*\\* `([^`]+)`");
 
@@ -113,30 +103,10 @@ class DistributionSmokeTest {
     assertThat(distribution.resolve("provenance/physical-catalog.properties")).isRegularFile();
     assertThat(Files.readString(distribution.resolve("provenance/distribution.properties")))
         .contains("platform=" + platform, "javaRuntime=25 or later");
-    for (var extension : List.of("scalardb_analytics", "postgres_scanner", "mysql_scanner")) {
-      assertThat(
-              Files.readString(
-                  distribution.resolve(
-                      "provenance/duckdb-extensions/" + extension + ".properties")))
-          .contains("platform=" + platform);
-    }
-    // Components statically linked into the scanners are versioned and ship their license text.
-    for (var scanner : List.of("postgres_scanner", "mysql_scanner")) {
-      var provenance = new Properties();
-      try (var input =
-          Files.newInputStream(
-              distribution.resolve("provenance/duckdb-extensions/" + scanner + ".properties"))) {
-        provenance.load(input);
-      }
-      for (var component : provenance.getProperty("bundledLicenses", "").split(",\\s*")) {
-        var matcher = BUNDLED_COMPONENT.matcher(component);
-        assertThat(matcher.matches()).as("%s: %s", scanner, component).isTrue();
-        assertThat(NATIVE_LICENSE_FILES).as(component).containsKey(matcher.group(1));
-        assertThat(distribution.resolve("licenses/" + NATIVE_LICENSE_FILES.get(matcher.group(1))))
-            .as(component)
-            .isNotEmptyFile();
-      }
-    }
+    assertThat(
+            Files.readString(
+                distribution.resolve("provenance/duckdb-extensions/scalardb_analytics.properties")))
+        .contains("platform=" + platform);
     // Every bundled jar is inventoried with its license.
     var inventory = Files.readString(distribution.resolve("licenses/third-party/THIRD-PARTY.md"));
     assertThat(inventory).doesNotContain("## Unknown");
@@ -268,8 +238,8 @@ class DistributionSmokeTest {
     expectedCodes.put("INSTALL httpfs", "INVALID_QUERY");
     expectedCodes.put("COPY (SELECT 1) TO '" + exported + "'", "INVALID_QUERY");
     expectedCodes.put("ATTACH ':memory:' AS other", "INVALID_QUERY");
-    expectedCodes.put("SELECT * FROM postgres_query('warehouse', 'SELECT 1')", "INVALID_QUERY");
     expectedCodes.put("DELETE FROM warehouse.public.orders", "INVALID_QUERY");
+    expectedCodes.put("SELECT * FROM scalardb_analytics_scan('warehouse')", "INVALID_QUERY");
     expectedCodes.put("SELECT * FROM read_csv('https://example.com/data.csv')", "EXECUTION_FAILED");
     var codes = new LinkedHashMap<String, String>();
     for (var sql : expectedCodes.keySet()) {

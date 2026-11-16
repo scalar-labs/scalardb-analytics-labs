@@ -156,15 +156,13 @@ class DuckDbQueryEngineTest {
 
   @Test
   void rejectsEveryPackagedExtensionFunctionThatCouldBypassAttachedSources() throws Exception {
-    // Functions reviewed as unable to reach a source or run SQL supplied as a value. A scanner
-    // upgrade that adds any other function fails here until it is reviewed.
+    // Functions reviewed as unable to reach a source or run SQL supplied as a value. An extension
+    // change that adds any other function fails here until it is reviewed.
     var reviewed =
         Set.of(
             "scalardb_analytics_version",
             "scalardb_analytics_is_read_only_query",
-            "scalardb_analytics_catalog_status",
-            // Reads a file, which disabled external access refuses.
-            "read_postgres_binary");
+            "scalardb_analytics_catalog_status");
     var coreFunctions = new HashSet<String>();
     try (var connection = DriverManager.getConnection("jdbc:duckdb:");
         var statement = connection.createStatement();
@@ -190,7 +188,7 @@ class DuckDbQueryEngineTest {
         }
       }
 
-      assertThat(extensionFunctions).contains("postgres_scan", "mysql_query");
+      assertThat(extensionFunctions).contains("scalardb_analytics_is_read_only_query");
       for (var name : extensionFunctions) {
         if (reviewed.contains(name)) {
           continue;

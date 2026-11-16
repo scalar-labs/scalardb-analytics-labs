@@ -21,7 +21,6 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -96,8 +95,8 @@ public final class DuckDbQueryEngine implements QueryEngine {
   /**
    * Creates an engine that also attaches the given data sources.
    *
-   * <p>Each source is attached through its own read path while the engine starts, and is queryable
-   * as {@code name.schema.table}. External access is disabled afterwards, so SQL can reach no other
+   * <p>Each source is attached through its Connector while the engine starts, and is queryable as
+   * {@code name.schema.table}. External access is disabled afterwards, so SQL can reach no other
    * source, file, or network location, and sources cannot be added to a running engine.
    * Initialization fails with a typed error that names only the source if any source cannot be
    * attached, including when two source names differ only in letter case or a name is reserved by
@@ -136,12 +135,13 @@ public final class DuckDbQueryEngine implements QueryEngine {
       List<AttachedSource> attachedSources) {}
 
   /**
-   * A data source the engine attached, with the read path it reads through.
+   * A data source the engine attached, with the DuckDB extension that reads it.
    *
-   * @param extensionVersion the version DuckDB reports for the path's extension
+   * @param extension the extension's name, as {@code duckdb_extensions()} lists it: the connectors'
+   *     DuckDB extension, through which every source is read
+   * @param extensionVersion the version DuckDB reports for that extension
    */
-  public record AttachedSource(
-      String name, SourceAttachment.ReadPath readPath, String extensionVersion) {}
+  public record AttachedSource(String name, String extension, String extensionVersion) {}
 
   private static OpenedConnection openConnection(
       @Nullable NativeCatalogProvider catalogProvider, List<SourceAttachment> sources) {
@@ -158,7 +158,7 @@ public final class DuckDbQueryEngine implements QueryEngine {
       openedConnection = DriverManager.getConnection("jdbc:duckdb:", properties);
       registration =
           PackagedDuckDbExtensions.load(openedConnection, extensionDirectory, catalogProvider);
-      if (sources.stream().anyMatch(SourceAttachment::usesConnectorsExtension)) {
+      if (!sources.isEmpty()) {
         // The extension loads the package's library and, when a Data Source opens, its ADBC
         // drivers relative to itself, from the package staged once for the process.
         PackagedDuckDbExtensions.loadConnectors(openedConnection, ConnectorPackage.forProcess());
@@ -421,26 +421,26 @@ public final class DuckDbQueryEngine implements QueryEngine {
 
   private static List<AttachedSource> attachedSources(
       Connection connection, List<SourceAttachment> sources) throws SQLException {
-    var versions = new HashMap<String, String>();
-    try (var statement = connection.createStatement();
-        var resultSet =
-            statement.executeQuery(
-                "SELECT extension_name, extension_version FROM duckdb_extensions() WHERE loaded")) {
-      while (resultSet.next()) {
-        versions.put(
-            resultSet.getString(1), Objects.requireNonNullElse(resultSet.getString(2), ""));
+    if (sources.isEmpty()) {
+      return List.of();
+    }
+    var extension = PackagedDuckDbExtensions.CONNECTORS_EXTENSION;
+    final String version;
+    try (var statement =
+        connection.prepareStatement(
+            "SELECT extension_version FROM duckdb_extensions() "
+                + "WHERE loaded AND extension_name = ?")) {
+      statement.setString(1, extension);
+      try (var resultSet = statement.executeQuery()) {
+        if (!resultSet.next()) {
+          throw new SQLException("The extension of the attached sources is not loaded");
+        }
+        version = Objects.requireNonNullElse(resultSet.getString(1), "");
       }
     }
-    var attached = new ArrayList<AttachedSource>(sources.size());
-    for (var source : sources) {
-      var readPath = source.readPath();
-      var version = versions.get(readPath.extension());
-      if (version == null) {
-        throw new SQLException("The extension of an attached source is not loaded");
-      }
-      attached.add(new AttachedSource(source.name(), readPath, version));
-    }
-    return List.copyOf(attached);
+    return sources.stream()
+        .map(source -> new AttachedSource(source.name(), extension, version))
+        .toList();
   }
 
   static boolean isMemoryLimitFailure(Throwable failure) {
@@ -513,7 +513,7 @@ public final class DuckDbQueryEngine implements QueryEngine {
   }
 
   private static void configureConnection(Connection connection) throws SQLException {
-    // Sources must be attached before this point: DuckDB refuses scanner attachments without
+    // Sources must be attached before this point: DuckDB refuses source attachments without
     // external access, while sources attached earlier stay queryable.
     try (Statement statement = connection.createStatement()) {
       statement.execute("SET enable_external_access = false");

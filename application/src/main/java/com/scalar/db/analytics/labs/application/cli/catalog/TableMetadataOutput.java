@@ -13,12 +13,9 @@ import org.jspecify.annotations.Nullable;
 /**
  * The JSON form of what a table metadata retrieval did for one data source.
  *
- * @param state {@code retrieved}, or {@code skipped} when no connector serves the source
- * @param reason why the source was skipped
  * @param tables one entry per registered table, in listed order
  */
-@JsonInclude(JsonInclude.Include.NON_NULL)
-record TableMetadataOutput(String state, @Nullable String reason, List<TableOutput> tables) {
+record TableMetadataOutput(List<TableOutput> tables) {
   /**
    * One table's result.
    *
@@ -37,15 +34,8 @@ record TableMetadataOutput(String state, @Nullable String reason, List<TableOutp
       @Nullable String reason) {}
 
   static TableMetadataOutput of(TableMetadataRetrieval.Outcome outcome) {
-    return switch (outcome) {
-      case TableMetadataRetrieval.Outcome.Skipped skipped ->
-          new TableMetadataOutput("skipped", skipped.reason(), List.of());
-      case TableMetadataRetrieval.Outcome.Retrieved retrieved ->
-          new TableMetadataOutput(
-              "retrieved",
-              null,
-              retrieved.tables().stream().map(TableMetadataOutput::output).toList());
-    };
+    return new TableMetadataOutput(
+        outcome.tables().stream().map(TableMetadataOutput::output).toList());
   }
 
   private static TableOutput output(TableMetadataRetrieval.TableOutcome outcome) {

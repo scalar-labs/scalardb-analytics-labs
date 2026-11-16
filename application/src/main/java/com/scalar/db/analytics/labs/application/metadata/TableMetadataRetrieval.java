@@ -67,16 +67,12 @@ public final class TableMetadataRetrieval {
 
   private TableMetadataRetrieval() {}
 
-  /** What one retrieval did for a data source. */
-  public sealed interface Outcome {
-    /** The data source has no Connector, so nothing was retrieved. */
-    record Skipped(String reason) implements Outcome {}
-
-    /** The registered tables were retrieved, in their listed order. */
-    record Retrieved(List<TableOutcome> tables) implements Outcome {
-      public Retrieved {
-        tables = List.copyOf(tables);
-      }
+  /**
+   * What one retrieval did for a data source: one outcome per registered table, in listed order.
+   */
+  public record Outcome(List<TableOutcome> tables) {
+    public Outcome {
+      tables = List.copyOf(tables);
     }
   }
 
@@ -116,28 +112,26 @@ public final class TableMetadataRetrieval {
             .resolveConnection(workspace.catalogName(), sourceName)
             .orElseThrow(
                 () -> new ApplicationFailure("SOURCE_NOT_FOUND", "The data source was not found."));
-    return switch (connection) {
-      case DataSourceConnection.MySql ignored ->
-          new Outcome.Skipped(
-              "No connector serves MySQL data sources yet, so their table metadata is not"
-                  + " retrieved.");
-      case DataSourceConnection.PostgreSql postgreSql -> {
-        var domain = workspace.semanticCatalogDomain();
-        try (var semanticCatalog = SemanticCatalogStore.open(workspace.semanticCatalogSettings())) {
-          yield retrieve(
-              catalog,
-              workspace.catalogName(),
-              sourceName,
-              library(runtime),
-              semanticCatalog,
-              domain,
-              "postgresql",
-              postgreSqlOptions(postgreSql));
-        } catch (SemanticCatalogException e) {
-          throw registrationFailed();
-        }
-      }
-    };
+    var connector =
+        switch (connection) {
+          case DataSourceConnection.PostgreSql postgreSql -> "postgresql";
+          case DataSourceConnection.MySql mySql -> "mysql";
+        };
+    var options = connectorOptions(connection);
+    var domain = workspace.semanticCatalogDomain();
+    try (var semanticCatalog = SemanticCatalogStore.open(workspace.semanticCatalogSettings())) {
+      return retrieve(
+          catalog,
+          workspace.catalogName(),
+          sourceName,
+          library(runtime),
+          semanticCatalog,
+          domain,
+          connector,
+          options);
+    } catch (SemanticCatalogException e) {
+      throw registrationFailed();
+    }
   }
 
   private static ConnectorLibrary library(ApplicationRuntime runtime) {
@@ -236,7 +230,7 @@ public final class TableMetadataRetrieval {
         throw registrationFailed();
       }
     }
-    return new Outcome.Retrieved(outcomes);
+    return new Outcome(outcomes);
   }
 
   /**
@@ -259,13 +253,29 @@ public final class TableMetadataRetrieval {
     return "\"" + name.replace("\"", "\"\"") + "\"";
   }
 
-  private static Map<String, String> postgreSqlOptions(DataSourceConnection.PostgreSql connection) {
+  /**
+   * The Connector's connection options, as the connector path's attachment gives them, so that the
+   * retrieved table metadata matches the types queries read.
+   */
+  private static Map<String, String> connectorOptions(DataSourceConnection connection) {
     var options = new LinkedHashMap<String, String>();
-    options.put("host", connection.host());
-    options.put("port", Integer.toString(connection.port()));
-    options.put("database", connection.database());
-    options.put("user", connection.username());
-    options.put("password", connection.password().reveal());
+    switch (connection) {
+      case DataSourceConnection.PostgreSql postgreSql -> {
+        options.put("host", postgreSql.host());
+        options.put("port", Integer.toString(postgreSql.port()));
+        options.put("database", postgreSql.database());
+        options.put("user", postgreSql.username());
+        options.put("password", postgreSql.password().reveal());
+      }
+      // The MySQL Connector takes no database: the registered tables name theirs.
+      case DataSourceConnection.MySql mySql -> {
+        options.put("host", mySql.host());
+        options.put("port", Integer.toString(mySql.port()));
+        options.put("user", mySql.username());
+        options.put("password", mySql.password().reveal());
+        options.put("tinyint1_as_boolean", "true");
+      }
+    }
     return options;
   }
 

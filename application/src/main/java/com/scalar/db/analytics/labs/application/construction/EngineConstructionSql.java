@@ -270,15 +270,9 @@ public final class EngineConstructionSql implements ConstructionSql {
         throw new ConstructionSqlException(
             "The data source of " + input.table().canonical() + " is not attached.");
       }
-      var readPath =
-          switch (source.readPath().kind()) {
-            case CONNECTOR -> ReadPath.CONNECTOR;
-            case SCANNER -> ReadPath.SCANNER;
-          };
       sources.put(
           registration,
-          new SourceRead(
-              registration, readPath, source.readPath().extension(), source.extensionVersion()));
+          new SourceRead(registration, source.extension(), source.extensionVersion()));
     }
     return List.copyOf(sources.values());
   }

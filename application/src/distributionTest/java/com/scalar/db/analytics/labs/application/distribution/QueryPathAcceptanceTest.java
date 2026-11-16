@@ -435,23 +435,27 @@ class QueryPathAcceptanceTest {
 
   @Test
   @Order(8)
-  void pushesProjectionFilterAndLimitIntoMySql() throws Exception {
-    var marker = "pushdown-" + UUID.randomUUID();
+  void pushesProjectionAndFilterIntoMySql() throws Exception {
+    var marker = uniqueCustomerId();
     var output =
-        query(
-            "SELECT name FROM crm.crm.customers WHERE region <> '"
-                + marker
-                + "' AND customer_id > 1 LIMIT 2");
+        query("SELECT name FROM crm.crm.customers WHERE customer_id <> " + marker + " LIMIT 2");
     assertThat(output.get("rows")).hasSize(2);
 
-    var received = env().server(CRM).statementsContaining(marker);
+    // MySQL is read through its Connector, whose DuckDB adapter offers the scan's projection and
+    // filter but not the limit, which DuckDB applies. A text comparison on these columns would not
+    // run at MySQL, since they compare under a collation that is not binary.
+    var received = env().server(CRM).statementsContaining(Long.toString(marker));
     assertThat(received).hasSize(1);
     assertThat(received.getFirst())
-        .contains("SELECT `region`, `customer_id`, `name` FROM `crm`.`customers`")
-        .contains("WHERE `region` != '" + marker + "'")
-        .contains("AND `customer_id` > 1")
-        .contains("LIMIT 2")
-        .doesNotContain("credit_limit", "signed_up");
+        .contains("FROM `crm`.`customers`")
+        .contains("`customer_id` <> " + marker)
+        .contains("`name`")
+        .doesNotContain("region", "credit_limit", "signed_up", "LIMIT");
+  }
+
+  /** A customer ID no fixture row uses, unique enough to find the statement it appears in. */
+  private static long uniqueCustomerId() {
+    return 1_000_000_000L + (UUID.randomUUID().getMostSignificantBits() >>> 1) % 1_000_000_000L;
   }
 
   @Test
@@ -460,7 +464,9 @@ class QueryPathAcceptanceTest {
     var marker = "live-" + UUID.randomUUID();
     var warehouseCount =
         "SELECT count(*) FROM warehouse.sales.orders WHERE note = '" + marker + "'";
-    var crmCount = "SELECT count(*) FROM crm.crm.customers WHERE name = '" + marker + "'";
+    // The Connector pushes the integer filter to MySQL, so the customer ID marks the statement.
+    var customerId = uniqueCustomerId();
+    var crmCount = "SELECT count(*) FROM crm.crm.customers WHERE customer_id = " + customerId;
     assertThat(query(warehouseCount).get("rows").toString()).isEqualTo("[[0]]");
     assertThat(query(crmCount).get("rows").toString()).isEqualTo("[[0]]");
 
@@ -473,17 +479,22 @@ class QueryPathAcceptanceTest {
             + marker
             + "', NULL)");
     crm.execute(
-        CRM, "INSERT INTO customers VALUES (100001, '" + marker + "', 'east', '2026-01-01', 1, 1)");
+        CRM,
+        "INSERT INTO customers VALUES ("
+            + customerId
+            + ", '"
+            + marker
+            + "', 'east', '2026-01-01', 1, 1)");
     try {
       assertThat(query(warehouseCount).get("rows").toString()).isEqualTo("[[1]]");
       assertThat(query(crmCount).get("rows").toString()).isEqualTo("[[1]]");
     } finally {
       warehouse.execute(WAREHOUSE, "DELETE FROM sales.orders WHERE order_id = 100001");
-      crm.execute(CRM, "DELETE FROM customers WHERE customer_id = 100001");
+      crm.execute(CRM, "DELETE FROM customers WHERE customer_id = " + customerId);
     }
     // Each query reached its source; none was answered from data held elsewhere.
     assertThat(warehouse.statementsContaining(marker)).hasSizeGreaterThanOrEqualTo(3);
-    assertThat(crm.statementsContaining(marker)).hasSizeGreaterThanOrEqualTo(3);
+    assertThat(crm.statementsContaining(Long.toString(customerId))).hasSizeGreaterThanOrEqualTo(3);
   }
 
   @Test
@@ -562,10 +573,6 @@ class QueryPathAcceptanceTest {
             "INSTALL httpfs",
             "LOAD httpfs",
             "ATTACH '" + storeConnection + "' AS store (TYPE postgres)",
-            "SELECT * FROM postgres_scan('" + storeConnection + "', 'public', 'pg_class')",
-            "SELECT * FROM postgres_query('warehouse', 'SELECT 1')",
-            "SELECT * FROM mysql_query('crm', 'SELECT 1')",
-            "SELECT (SELECT pg_clear_cache())",
             "SELECT * FROM query('SELECT 1')",
             "SELECT * FROM query_table('warehouse.sales.orders')",
             "SELECT json_execute_serialized_sql('{}')");

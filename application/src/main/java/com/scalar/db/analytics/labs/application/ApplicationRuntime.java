@@ -10,8 +10,6 @@ import com.scalar.db.analytics.labs.duckdb.DuckDbQueryEngine;
 import com.scalar.db.analytics.labs.duckdb.NativeCatalogProvider;
 import com.scalar.db.analytics.labs.duckdb.SourceAttachment;
 import com.scalar.db.analytics.labs.duckdb.connector.ConnectorPath;
-import com.scalar.db.analytics.labs.duckdb.scanner.ScannerPath;
-import com.scalar.db.analytics.labs.physical.DataSourceConnection;
 import com.scalar.db.analytics.labs.physical.PhysicalCatalog;
 import com.scalar.db.analytics.labs.physical.PhysicalCatalogError;
 import com.scalar.db.analytics.labs.physical.PhysicalCatalogException;
@@ -76,9 +74,8 @@ public final class ApplicationRuntime implements AutoCloseable {
    * Starts the Query Engine over the data sources currently registered in a catalog.
    *
    * <p>Each data source is queryable as {@code name.schema.table}. A runtime starts at most one
-   * engine, which it owns and closes before the catalog. Sources registered after the engine
-   * starts, and source schema changes the scanners have already cached, are visible only to a new
-   * runtime.
+   * engine, which it owns and closes before the catalog. Sources registered after the engine starts
+   * are visible only to a new runtime. Every data source is read through its Connector.
    *
    * @throws PhysicalCatalogException if the catalog cannot list or resolve its data sources
    * @throws com.scalar.db.analytics.labs.query.QueryEngineException if the engine cannot start or
@@ -89,7 +86,7 @@ public final class ApplicationRuntime implements AutoCloseable {
       throw new IllegalStateException("A Query Engine is already running");
     }
     var attachments = sourceAttachments(catalogName);
-    if (attachments.stream().anyMatch(SourceAttachment::usesConnectorsExtension)) {
+    if (!attachments.isEmpty()) {
       // The extension uses the library initialized in the process when it loads, so the runtime
       // initializes it first and keeps the settings and the shutdown.
       try {
@@ -166,18 +163,9 @@ public final class ApplicationRuntime implements AutoCloseable {
                       new PhysicalCatalogException(
                           new PhysicalCatalogError.OperationFailed(
                               "A data source was removed while the Query Engine started.")));
-      attachments.add(readPath(dataSource.name(), connection));
+      attachments.add(ConnectorPath.attachment(dataSource.name(), connection));
     }
     return attachments;
-  }
-
-  /**
-   * Chooses how the engine reads one data source: through its Connector when the connectors package
-   * has one for its source type, and through the interim scanner path otherwise.
-   */
-  private static SourceAttachment readPath(String name, DataSourceConnection connection) {
-    return ConnectorPath.attachment(name, connection)
-        .orElseGet(() -> ScannerPath.attachment(name, connection));
   }
 
   private static NativeCatalogProvider nativeCatalogProvider(PhysicalCatalog physicalCatalog) {

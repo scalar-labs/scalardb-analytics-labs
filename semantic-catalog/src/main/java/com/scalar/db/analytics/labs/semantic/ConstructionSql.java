@@ -134,28 +134,19 @@ public interface ConstructionSql {
   }
 
   /**
-   * How one data source was read. Neither read path returns read provenance yet, so a read records
-   * the path and the DuckDB extension it read through instead.
+   * How one data source was read. The connector path does not return read provenance yet, so a read
+   * records the DuckDB extension it read through instead.
    *
    * @param registration the data-source registration
-   * @param readPath the read path the source is attached through
    * @param extension the DuckDB extension that read it
    * @param extensionVersion that extension's version as DuckDB reports it
    */
-  record SourceRead(
-      String registration, ReadPath readPath, String extension, String extensionVersion) {
+  record SourceRead(String registration, String extension, String extensionVersion) {
     public SourceRead {
       Objects.requireNonNull(registration, "registration");
-      Objects.requireNonNull(readPath, "readPath");
       Objects.requireNonNull(extension, "extension");
       Objects.requireNonNull(extensionVersion, "extensionVersion");
     }
-  }
-
-  /** The read path a data source is attached through (see {@code docs/query-engine.md}). */
-  enum ReadPath {
-    CONNECTOR,
-    SCANNER
   }
 
   /** A statement was rejected before it ran, or failed while running. */
