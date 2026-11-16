@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.scalar.db.analytics.labs.semantic.generator.GeneratorContext;
 import com.scalar.db.analytics.labs.semantic.generator.GeneratorContext.Table;
 import com.scalar.db.analytics.labs.semantic.generator.Output;
+import com.scalar.db.analytics.labs.semantic.generator.SetRelationships;
 import com.scalar.db.analytics.labs.semantic.model.Check;
 import com.scalar.db.analytics.labs.semantic.model.Dependency;
 import com.scalar.db.analytics.labs.semantic.model.ElementIdentity;
@@ -18,6 +19,7 @@ import com.scalar.db.analytics.labs.semantic.model.Ref;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.CheckResult;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ValidationMethod;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -43,6 +45,13 @@ import java.util.stream.Collectors;
  * correspondence is never adopted inline. A key whose referenced table is registered later is
  * interpreted once that table's Fields are confirmed, because a run triggered by a table also
  * interprets the tables whose keys reference it.
+ *
+ * <p>A key on non-null columns also declares that every referencing value appears on the referenced
+ * side, one validation item of the correspondence's set relationship. Once the set relationship
+ * check proposes a set relationship that claims it, this Generator supports that item with the
+ * key's validation method, undecidable on the same terms as the pairs. The other items, whether
+ * every referenced value is referenced and whether the referencing side repeats, are left to data
+ * checks.
  */
 final class CorrespondenceFromForeignKey extends SchemaGenerator {
   static final String NAME = "correspondence-from-foreign-key";
@@ -55,7 +64,9 @@ final class CorrespondenceFromForeignKey extends SchemaGenerator {
   @Override
   public List<Input> inputs() {
     return List.of(
-        new Input.PhysicalSchema(), new Input.Confirmed(ElementKind.FIELD, Vocabulary.EXISTENCE));
+        new Input.PhysicalSchema(),
+        new Input.Confirmed(ElementKind.FIELD, Vocabulary.EXISTENCE),
+        new Input.Accepted(ElementKind.IDENTIFIER_CORRESPONDENCE, Vocabulary.SET_RELATIONSHIP));
   }
 
   /** The triggered tables and every table with a foreign key referencing one of them. */
@@ -243,6 +254,14 @@ final class CorrespondenceFromForeignKey extends SchemaGenerator {
     }
     var read = inputsRead(table, revisions);
     var edge = output.add(new LogRecord.Element(identity));
+    // Inclusion discovery may support the same correspondence; its support is kept.
+    var restated =
+        restate(
+            context,
+            existing.flatMap(
+                found -> context.closedRangeFact(found, Vocabulary.EXISTENCE, EXISTS_KEY)),
+            dependencies,
+            checks);
     var existence =
         acceptClosedRange(
             context,
@@ -250,8 +269,8 @@ final class CorrespondenceFromForeignKey extends SchemaGenerator {
             address(output, edge, Vocabulary.EXISTENCE),
             JSON.textNode(EXISTS),
             EXISTS_KEY,
-            dependencies,
-            checks,
+            restated.dependencies(),
+            restated.checks(),
             read);
     // The definition is fixed by the correspondence, so this Generator's earlier Fact with the
     // same text is the same claim and is accepted again rather than proposed anew.
@@ -272,6 +291,71 @@ final class CorrespondenceFromForeignKey extends SchemaGenerator {
             definitionChecks,
             read,
             context.provenance()));
+    if (existing.isPresent()) {
+      supportContainment(context, output, table, declared, statement, existing.get(), undecidable);
+    }
+  }
+
+  /**
+   * Supports the item that every referencing value is matched, on each set relationship proposed
+   * for the correspondence that claims it, when the key's columns are non-null.
+   *
+   * @param undecidable the pairs not known to compare as the key compares them
+   */
+  private void supportContainment(
+      GeneratorContext context,
+      Output output,
+      Table table,
+      Declarations declared,
+      Statement statement,
+      String edge,
+      JsonNode undecidable) {
+    var nonNull =
+        statement.from().stream()
+            .allMatch(
+                field ->
+                    declared.column(field.column()).map(found -> !found.nullable()).orElse(false));
+    if (!nonNull) {
+      return;
+    }
+    var item = SetRelationships.everyValueMatched(SetRelationships.End.FROM);
+    for (var fact : context.factsAt(edge, Vocabulary.SET_RELATIONSHIP)) {
+      var active = fact.state() == FactState.CANDIDATE || fact.state() == FactState.CONFIRMED;
+      if (!active || !SetRelationships.claims(fact.value().asText()).contains(item)) {
+        continue;
+      }
+      var checks = new ArrayList<Check>();
+      for (var key : statement.keys()) {
+        var details = JSON.objectNode().put("constraint", key.name());
+        if (undecidable.isEmpty()) {
+          checks.add(declared(key.enforced(), item, table, details));
+        } else {
+          checks.add(
+              new Check(
+                  key.enforced()
+                      ? ValidationMethod.DECLARED_ENFORCED
+                      : ValidationMethod.DECLARED_UNENFORCED,
+                  item,
+                  CheckResult.UNDECIDABLE,
+                  null,
+                  Ref.urn(table.observation()),
+                  details
+                      .deepCopy()
+                      .put(
+                          "reason",
+                          "A pair is not known to compare as the key compares it, so an"
+                              + " equality comparison need not match every referencing value")));
+        }
+      }
+      var restated = restate(context, Optional.of(fact), List.of(onObservation(table)), checks);
+      output.add(
+          new LogRecord.Accept(
+              Ref.urn(fact.urn()),
+              restated.dependencies(),
+              restated.checks(),
+              inputsRead(table, List.of(fact.revision())),
+              context.provenance()));
+    }
   }
 
   /**

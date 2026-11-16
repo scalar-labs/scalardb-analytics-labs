@@ -17,8 +17,6 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Set;
-import java.util.TreeSet;
-import java.util.stream.Collectors;
 
 /**
  * Uniqueness declaration ingestion: a Field set does not repeat when the table declares a primary
@@ -31,7 +29,7 @@ import java.util.stream.Collectors;
  */
 final class UniquenessDeclarationIngestion extends SchemaGenerator {
   static final String NAME = "uniqueness-declaration-ingestion";
-  static final String DOES_NOT_REPEAT = "does-not-repeat";
+  static final String DOES_NOT_REPEAT = Vocabulary.DOES_NOT_REPEAT;
 
   UniquenessDeclarationIngestion() {
     super(NAME);
@@ -42,12 +40,7 @@ final class UniquenessDeclarationIngestion extends SchemaGenerator {
    * joined by commas (see {@link Vocabulary#UNIQUENESS_PREFIX}).
    */
   static String predicate(List<ConfirmedField> fields) {
-    return Vocabulary.UNIQUENESS_PREFIX
-        + fields.stream()
-            .map(ConfirmedField::field)
-            .collect(Collectors.toCollection(TreeSet::new))
-            .stream()
-            .collect(Collectors.joining(","));
+    return Vocabulary.uniqueness(fields.stream().map(ConfirmedField::field).toList());
   }
 
   @Override

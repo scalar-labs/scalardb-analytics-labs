@@ -141,6 +141,7 @@ public final class Projector {
                   Urns.of(domain, Urns.INPUT_RESOURCE, at),
                   resource.inputKind(),
                   resource.tableIdentifier(),
+                  resource.dataCheck(),
                   commit));
       case LogRecord.InputObservation observation -> applyObservation(at, observation);
       case LogRecord.ObservationEvent event -> {

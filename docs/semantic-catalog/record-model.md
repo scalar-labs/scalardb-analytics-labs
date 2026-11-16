@@ -136,10 +136,11 @@ Some values deserve note:
   accepted.
   [`../design/semantic-catalog-expression-values.md`](../design/semantic-catalog-expression-values.md)
   records why.
-- An identifier correspondence's **set relationship** is equal, subset, partial overlap, or
-  disjoint, read from the end it starts from, so subset means that end's values are among the
-  other's. Without it, nobody can tell whether an inner join drops members who appear on one side
-  only.
+- An identifier correspondence's **set relationship** is equal, subset, superset, partial overlap,
+  or disjoint, read from the end it starts from, so subset means that end's values are among the
+  other's and superset that the other's are among that end's. The values are `equal`, `subset`,
+  `superset`, `partial-overlap`, and `disjoint`. Without it, nobody can tell whether an inner join
+  drops members who appear on one side only.
 - A concept relationship's **multiplicity** is what the business allows, such as a member making any
   number of purchases. Data can only show what holds now: if every member has bought once so far,
   the purchase rows' member IDs do not repeat, yet a query that relies on that double-counts as soon

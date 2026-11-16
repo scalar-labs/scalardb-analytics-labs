@@ -346,7 +346,11 @@ public final class CommitResolver {
           lookup.closedRangeFact(
               fact.address().urnValue(), requireKey(fact.identityKey()).canonical());
       case LogRecord.InputResource resource ->
-          lookup.inputResourceByTable(requireKey(resource.tableIdentifier()));
+          resource.tableIdentifier() != null
+              ? lookup.inputResourceByTable(resource.tableIdentifier())
+              : resource.dataCheck() != null
+                  ? lookup.inputResourceByDataCheck(resource.dataCheck())
+                  : Optional.empty();
       default -> Optional.empty();
     };
   }
@@ -388,10 +392,7 @@ public final class CommitResolver {
             ? Optional.empty()
             : Optional.of("fact " + fact.address().urnValue() + " " + key.canonical());
       }
-      case LogRecord.InputResource resource ->
-          resource.tableIdentifier() == null
-              ? Optional.empty()
-              : Optional.of("table " + resource.tableIdentifier());
+      case LogRecord.InputResource resource -> resource.identity();
       default -> Optional.empty();
     };
   }

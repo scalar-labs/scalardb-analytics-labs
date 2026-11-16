@@ -300,12 +300,14 @@ public final class StoreTransaction {
       case InputResourceRow resource ->
           jdbc.sql(
                   "INSERT INTO semantic_catalog.input_resources"
-                      + " (domain, input_resource, kind, table_identifier, created_commit)"
-                      + " VALUES (:domain, :resource, :kind, :table, :created)")
+                      + " (domain, input_resource, kind, table_identifier, data_check,"
+                      + " created_commit)"
+                      + " VALUES (:domain, :resource, :kind, :table, :check, :created)")
               .param("domain", domain)
               .param("resource", resource.inputResource())
               .param("kind", resource.kind().name())
               .param("table", resource.tableIdentifier(), Types.VARCHAR)
+              .param("check", resource.dataCheck(), Types.VARCHAR)
               .param("created", resource.createdCommit())
               .update();
     }
@@ -1390,6 +1392,16 @@ public final class StoreTransaction {
     }
 
     @Override
+    public Optional<String> inputResourceByDataCheck(String dataCheck) {
+      return jdbc.sql(
+              "SELECT input_resource FROM semantic_catalog.input_resources"
+                  + " WHERE domain = ? AND data_check = ?")
+          .params(domain, dataCheck)
+          .query(String.class)
+          .optional();
+    }
+
+    @Override
     public boolean taken(String urn) {
       var kind = Urns.kind(urn);
       var sql =
@@ -1438,7 +1450,7 @@ public final class StoreTransaction {
       "SELECT fact, fact_address, identity_key, created_commit FROM semantic_catalog.facts";
 
   private static final String RESOURCES =
-      "SELECT input_resource, kind, table_identifier, created_commit"
+      "SELECT input_resource, kind, table_identifier, data_check, created_commit"
           + " FROM semantic_catalog.input_resources";
 
   private static final String RECORDS =
@@ -1513,6 +1525,7 @@ public final class StoreTransaction {
         rs.getString("input_resource"),
         InputKind.valueOf(rs.getString("kind")),
         rs.getString("table_identifier"),
+        rs.getString("data_check"),
         rs.getLong("created_commit"));
   }
 

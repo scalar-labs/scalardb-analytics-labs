@@ -46,6 +46,9 @@ public interface IdentityLookup {
   /** The Input Resource of a table's physical schema, by the Physical Catalog's identifier. */
   Optional<String> inputResourceByTable(String tableIdentifier);
 
+  /** The data-observation Input Resource of a kind of data check on a target. */
+  Optional<String> inputResourceByDataCheck(String dataCheck);
+
   /**
    * Whether a name-based URN of an element, a Fact Address, or a Fact is already issued, so a new
    * record must take another one.

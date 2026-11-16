@@ -7,11 +7,13 @@ package com.scalar.db.analytics.labs.semantic.generator.schema;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.scalar.db.analytics.labs.semantic.generator.Generator;
+import com.scalar.db.analytics.labs.semantic.generator.Acceptances;
 import com.scalar.db.analytics.labs.semantic.generator.GeneratorContext;
 import com.scalar.db.analytics.labs.semantic.generator.GeneratorContext.Fact;
 import com.scalar.db.analytics.labs.semantic.generator.GeneratorContext.Table;
 import com.scalar.db.analytics.labs.semantic.generator.Output;
+import com.scalar.db.analytics.labs.semantic.generator.Proposals;
+import com.scalar.db.analytics.labs.semantic.generator.StoreGenerator;
 import com.scalar.db.analytics.labs.semantic.model.Check;
 import com.scalar.db.analytics.labs.semantic.model.Dependency;
 import com.scalar.db.analytics.labs.semantic.model.IdentityKey;
@@ -43,7 +45,7 @@ import org.jspecify.annotations.Nullable;
  * proposal, unless a data check also supports it, since what the data confirmed does not change
  * when a declaration goes.
  */
-abstract class SchemaGenerator implements Generator {
+abstract class SchemaGenerator implements StoreGenerator {
   static final JsonNodeFactory JSON = JsonNodeFactory.instance;
   static final String EXISTS = "exists";
   static final IdentityKey EXISTS_KEY = IdentityKey.choice(EXISTS);
@@ -72,6 +74,12 @@ abstract class SchemaGenerator implements Generator {
         case GeneratorContext.Trigger.Observed observed -> tables.add(observed.inputResource());
         case GeneratorContext.Trigger.Confirmed confirmed ->
             context.physicalSchemaOf(confirmed.fact()).ifPresent(tables::add);
+        // An acceptance about a correspondence points to the table of the end it starts from.
+        case GeneratorContext.Trigger.Accepted accepted ->
+            context.matchingCondition(accepted.element()).stream()
+                .flatMap(condition -> condition.fromFields().stream().limit(1))
+                .flatMap(field -> context.column(field.urnValue()).stream())
+                .forEach(column -> tables.add(column.table().inputResource()));
       }
     }
     return tables;
@@ -203,7 +211,7 @@ abstract class SchemaGenerator implements Generator {
 
   /** A dependency on the Fact Revision of a Fact's latest acceptance. */
   static Dependency on(Fact fact) {
-    return new Dependency.OnFact(Ref.urn(fact.urn()), Ref.urn(fact.revision()));
+    return Proposals.on(fact);
   }
 
   /** A check that the table metadata declares a value, enforced by the source or not. */
@@ -264,50 +272,34 @@ abstract class SchemaGenerator implements Generator {
       List<Check> checks,
       List<String> revisions,
       Table table) {
+    var atAddress = Proposals.atAddress(context, element, predicate, key);
     var withReplaced = new ArrayList<>(dependencies);
+    withReplaced.addAll(atAddress.dependencies());
     var read = new ArrayList<>(revisions);
-    var others = context.factsAt(element, predicate);
-    var same =
-        others.stream().filter(other -> key.canonical().equals(other.identityKey())).findFirst();
-    for (var other : others) {
-      if (key.canonical().equals(other.identityKey())) {
-        continue;
-      }
-      // A replacement read earlier stays, so a run after the replaced Fact is retired records
-      // nothing new.
-      var replacedEarlier =
-          same.map(
-                  found ->
-                      found.dependencies().stream()
-                          .anyMatch(
-                              dependency ->
-                                  dependency instanceof Dependency.OnFact onFact
-                                      && onFact.fact().urnValue().equals(other.urn())))
-              .orElse(false);
-      if (other.state() == FactState.CONFIRMED || replacedEarlier) {
-        var dependency =
-            same.flatMap(
-                    found ->
-                        found.dependencies().stream()
-                            .filter(
-                                earlier ->
-                                    earlier instanceof Dependency.OnFact onFact
-                                        && onFact.fact().urnValue().equals(other.urn()))
-                            .findFirst())
-                .orElse(on(other));
-        withReplaced.add(dependency);
-        read.add(dependency.version().urnValue());
-      }
-    }
+    read.addAll(atAddress.revisions());
+    var restated = restate(context, atAddress.same(), withReplaced, checks);
     return acceptClosedRange(
         context,
         output,
         address(output, Ref.urn(element), predicate),
         value,
         key,
-        withReplaced,
-        checks,
+        restated.dependencies(),
+        restated.checks(),
         inputsRead(table, read));
+  }
+
+  /**
+   * What an acceptance of a Fact states: this Generator's declarations and dependencies, and what
+   * other Generators, such as data checks, stated in the Fact's latest acceptance.
+   */
+  static Acceptances.Restated restate(
+      GeneratorContext context,
+      Optional<Fact> same,
+      List<Dependency> dependencies,
+      List<Check> checks) {
+    return Acceptances.restate(
+        same, Acceptances.schemaInterpretation(context), dependencies, checks);
   }
 
   /** A proposed Fact and its acceptance, by temporary numbers. */

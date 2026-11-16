@@ -4,6 +4,7 @@
  */
 package com.scalar.db.analytics.labs.semantic.generator;
 
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
 import java.util.List;
 
@@ -14,6 +15,9 @@ import java.util.List;
  * <p>A Generator runs inside a build task and never writes: it returns its proposals as the records
  * of one commit, which the Semantic Catalog accepts after matching them against existing records.
  * Producing again from unchanged input therefore records nothing.
+ *
+ * <p>How a run reads decides how it is run: a {@link StoreGenerator} reads only the store, and a
+ * {@link DataGenerator} also reads data values through construction-run SQL.
  */
 public interface Generator {
   /** The Generator's name, recorded in provenance and naming its build tasks. */
@@ -28,20 +32,28 @@ public interface Generator {
   /** What the Generator reads, from which its build tasks are created. */
   List<Input> inputs();
 
-  /**
-   * Produces candidates and retirement proposals for the targets the run's triggers point to.
-   *
-   * @param context what the run reads
-   * @param output where the run puts what it produces
-   */
-  void run(GeneratorContext context, Output output);
-
   /** An input kind a Generator declares it reads. */
   sealed interface Input {
     /** A new physical schema observation creates a build task. */
     record PhysicalSchema() implements Input {}
 
-    /** The confirmation of a Fact of a predicate of an element kind creates a build task. */
+    /**
+     * The confirmation of a Fact of a predicate of an element kind creates a build task. The
+     * predicate {@link Vocabulary#UNIQUENESS_PREFIX} stands for the uniqueness of every Field set.
+     */
     record Confirmed(ElementKind kind, String predicate) implements Input {}
+
+    /**
+     * An acceptance of a Fact of a predicate of an element kind that changes it creates a build
+     * task, so a Generator can add its support to a candidate another Generator proposed.
+     */
+    record Accepted(ElementKind kind, String predicate) implements Input {}
+
+    /** Whether an input declared for a predicate covers a Fact's predicate. */
+    static boolean covers(String declared, String predicate) {
+      return declared.equals(predicate)
+          || (declared.equals(Vocabulary.UNIQUENESS_PREFIX)
+              && predicate.startsWith(Vocabulary.UNIQUENESS_PREFIX));
+    }
   }
 }

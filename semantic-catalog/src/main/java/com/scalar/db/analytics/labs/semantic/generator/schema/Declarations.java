@@ -21,17 +21,17 @@ import org.jspecify.annotations.Nullable;
  * @param constraints the constraints; empty when the table metadata reports them missing or does
  *     not offer them, so nothing is concluded from their absence
  */
-record Declarations(
+public record Declarations(
     List<Column> columns, boolean columnsComplete, Optional<List<Constraint>> constraints) {
-  Declarations {
+  public Declarations {
     columns = List.copyOf(columns);
     constraints = constraints.map(List::copyOf);
   }
 
   /** One column. */
-  record Column(String name, boolean nullable, Type type) {
+  public record Column(String name, boolean nullable, Type type) {
     /** The kind of its Analytics type, such as {@code date}; absent unless the type is mapped. */
-    @Nullable String analyticsKind() {
+    public @Nullable String analyticsKind() {
       return type instanceof Type.Mapped mapped ? mapped.analyticsKind() : null;
     }
 
@@ -40,7 +40,7 @@ record Declarations(
      * other than text. Text compares under a collation the table metadata does not state, and an
      * unmapped or unread type could be text.
      */
-    boolean comparesExactly() {
+    public boolean comparesExactly() {
       return type instanceof Type.Mapped mapped
           && !"text".equals(mapped.analyticsKind())
           && !"enum".equals(mapped.analyticsKind());
@@ -48,7 +48,7 @@ record Declarations(
   }
 
   /** What the table metadata states about a column's type. */
-  sealed interface Type {
+  public sealed interface Type {
     /** The type maps to an Analytics type of this kind. */
     record Mapped(String analyticsKind) implements Type {}
 
@@ -60,7 +60,7 @@ record Declarations(
   }
 
   /** One declared constraint. */
-  sealed interface Constraint {
+  public sealed interface Constraint {
     String name();
 
     boolean enforced();
@@ -92,7 +92,7 @@ record Declarations(
   }
 
   /** Reads the declarations of table metadata in the connectors' JSON form. */
-  static Declarations of(JsonNode tableMetadata) {
+  public static Declarations of(JsonNode tableMetadata) {
     var columns = new ArrayList<Column>();
     for (var column : tableMetadata.path("columns")) {
       var kind = column.path("analyticsType").path("kind");
@@ -148,7 +148,7 @@ record Declarations(
     return values;
   }
 
-  Optional<Column> column(String name) {
+  public Optional<Column> column(String name) {
     return columns.stream().filter(column -> column.name().equals(name)).findFirst();
   }
 }

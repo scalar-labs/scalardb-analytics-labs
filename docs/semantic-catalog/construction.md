@@ -246,8 +246,8 @@ used knowing so.
 The following each write one commit, so a half-written state is never a readable point:
 
 - One Generator run: all acceptances and retirement proposals from it, the inline evaluations of
-  those that can be evaluated, and the confirmations and retirements they adopt. **[Planned]** The
-  data observations it read.
+  those that can be evaluated, and the confirmations and retirements they adopt, with the data
+  observations it read.
 - One evaluation by the policy evaluation model: its `evaluate-policy`, the confirmation or
   retirement it adopts, and the transitions they cause. **[Planned]** Any data observations it read.
 - One submission of answers with the transitions they cause. Answers apply in dependency order, and
@@ -369,7 +369,7 @@ No operation sets the selected Fact directly. Selection changes only as the rule
 | Operation | Writes in one commit | Not accepted when | Creates build tasks for |
 | --- | --- | --- | --- |
 | Register an observation | Input Observation and Observation Event | Content equals the previous observation, which records nothing; a physical schema whose source metadata is unchanged records only a derived record; a table metadata version no newer than one received records nothing | Generators that read that input kind; **[Planned]** an impact judgement for a new physical schema or document observation |
-| Record a Generator's results (inside a build task) | **[Planned]** Data observations; acceptances, retirement proposals, inline evaluations, machine-judgement transitions, cascades | A dependency cycle, a missing referenced record, a check reference that is not a dependency, or an expression value that does not parse; the task fails | Evaluations by the policy evaluation model; Generators that read the newly confirmed predicates |
+| Record a Generator's results (inside a build task) | Data observations; acceptances, retirement proposals, inline evaluations, machine-judgement transitions, cascades | A data observation equal to its predecessor apart from when it was read, which is not recorded again; a dependency cycle, a missing referenced record, a check reference that is not a dependency, or an expression value that does not parse, which fails the task | Evaluations by the policy evaluation model; Generators that read the newly confirmed or accepted predicates |
 | Record an evaluation by the policy evaluation model (inside a build task) | Evaluation with its reason and review material, machine-judgement transitions, cascades; **[Planned]** data observations it read | The Fact no longer waits for the model, which records nothing; inline evaluation now decides it, which records that inline evaluation instead; or the material it read changed, which creates a new evaluation task | Evaluations of dependents left undecided; Generators that read the newly confirmed predicates |
 | Submit answers | Answers, resulting transitions, cascades, and feedback for each correction | An answer lacks an authority-check reference | Evaluations left undecided; Generators that read newly confirmed predicates; **[Planned]** Generators of rejected, corrected, retired, and cascaded Facts; Generators that read the feedback |
 | Resolve a conflict | `resolve-conflict` | The chosen and passed-over Facts were not the eligible Facts at the previous commit, or no authority-check reference | **[Planned]** Generators of Facts depending on Facts no longer selected |

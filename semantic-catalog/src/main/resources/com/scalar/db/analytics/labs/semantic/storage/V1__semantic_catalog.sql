@@ -121,14 +121,16 @@ CREATE INDEX facts_by_matching_value
     WHERE identity_key IS NOT NULL;
 
 -- Usage feedback is a new Input Resource at each registration, so nothing identifies an Input
--- Resource by a question. latest_table_metadata_version is the newest table metadata version
--- received for a physical schema, which is not derived from the log: it equals the highest version
--- among the table's derived records.
+-- Resource by a question. A physical schema is identified by its table identifier and a data
+-- observation resource by data_check, the kind and target of its check. latest_table_metadata_version
+-- is the newest table metadata version received for a physical schema, which is not derived from the
+-- log: it equals the highest version among the table's derived records.
 CREATE TABLE semantic_catalog.input_resources (
     domain text NOT NULL,
     input_resource text NOT NULL,
     kind text NOT NULL,
     table_identifier text,
+    data_check text,
     created_commit bigint NOT NULL,
     latest_table_metadata_version bigint,
     PRIMARY KEY (domain, input_resource)
@@ -137,6 +139,10 @@ CREATE TABLE semantic_catalog.input_resources (
 CREATE UNIQUE INDEX input_resources_table
     ON semantic_catalog.input_resources (domain, table_identifier)
     WHERE table_identifier IS NOT NULL;
+
+CREATE UNIQUE INDEX input_resources_data_check
+    ON semantic_catalog.input_resources (domain, data_check)
+    WHERE data_check IS NOT NULL;
 
 -- The Fact Records, materialized from the Fact Events in the log.
 

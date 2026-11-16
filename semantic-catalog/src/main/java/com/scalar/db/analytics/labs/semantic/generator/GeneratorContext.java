@@ -9,8 +9,11 @@ import com.scalar.db.analytics.labs.semantic.model.Check;
 import com.scalar.db.analytics.labs.semantic.model.ElementIdentity;
 import com.scalar.db.analytics.labs.semantic.model.IdentityKey;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
+import com.scalar.db.analytics.labs.semantic.model.LogRecordJson;
+import com.scalar.db.analytics.labs.semantic.model.MatchingCondition;
 import com.scalar.db.analytics.labs.semantic.model.PhysicalCatalogReference;
 import com.scalar.db.analytics.labs.semantic.model.Urns;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.InputKind;
@@ -68,6 +71,10 @@ public final class GeneratorContext {
 
     /** The confirmation of a Fact of a predicate of an element. */
     record Confirmed(String fact, String element, ElementKind kind, String predicate)
+        implements Trigger {}
+
+    /** An acceptance of a Fact of a predicate of an element. */
+    record Accepted(String fact, String element, ElementKind kind, String predicate)
         implements Trigger {}
   }
 
@@ -238,7 +245,135 @@ public final class GeneratorContext {
     return Optional.empty();
   }
 
+  // Input Resources and data observations
+
+  /** The kind of an Input Resource, if it exists. */
+  public Optional<InputKind> inputKind(String inputResource) {
+    return projection.inputResource(inputResource).map(row -> row.kind());
+  }
+
+  /** The check and target a data-observation Input Resource records, if it is one. */
+  public Optional<String> dataCheck(String inputResource) {
+    return projection
+        .inputResource(inputResource)
+        .filter(row -> row.kind() == InputKind.DATA_OBSERVATION)
+        .map(row -> row.dataCheck());
+  }
+
+  /** The data-observation Input Resource of a check and target, if one exists. */
+  public Optional<String> dataObservationResource(String dataCheck) {
+    return lookup.inputResourceByDataCheck(dataCheck);
+  }
+
+  /** The latest observation of an Input Resource, if it has one. */
+  public Optional<String> latestObservation(String inputResource) {
+    return projection.latestObservation(inputResource);
+  }
+
+  /** The content of an Input Observation. */
+  public Optional<JsonNode> observationContent(String observation) {
+    if (!Urns.kind(observation).equals(Urns.INPUT_OBSERVATION)) {
+      return Optional.empty();
+    }
+    return transaction
+        .logRecordAt(domain, Urns.position(observation))
+        .map(positioned -> positioned.record())
+        .filter(LogRecord.InputObservation.class::isInstance)
+        .map(record -> ((LogRecord.InputObservation) record).content());
+  }
+
   // Elements
+
+  /** The kind of an element, if it exists. */
+  public Optional<ElementKind> elementKind(String element) {
+    return projection.element(element).map(row -> row.kind());
+  }
+
+  /** The Dataset a Field belongs to, if it exists. */
+  public Optional<String> parent(String element) {
+    return projection.element(element).map(row -> row.parent());
+  }
+
+  /** The matching condition of an identifier correspondence, if the edge is one. */
+  public Optional<MatchingCondition> matchingCondition(String correspondence) {
+    return projection
+        .element(correspondence)
+        .filter(row -> row.kind() == ElementKind.IDENTIFIER_CORRESPONDENCE)
+        .flatMap(row -> Optional.ofNullable(row.edge()))
+        .map(edge -> LogRecordJson.fromStored(edge.identifyingPart(), ElementIdentity.class))
+        .filter(ElementIdentity.IdentifierCorrespondence.class::isInstance)
+        .map(identity -> ((ElementIdentity.IdentifierCorrespondence) identity).condition());
+  }
+
+  /**
+   * A Field's column as data checks read it: the table whose latest physical schema observation its
+   * existence rests on, and the column's name in that table.
+   *
+   * @param existence the Field's existence Fact
+   */
+  public record Column(
+      String field,
+      String dataset,
+      Table table,
+      PhysicalCatalogReference.Table reference,
+      String name,
+      Fact existence) {}
+
+  /** The column of a Field, when its existence and table are known. */
+  public Optional<Column> column(String field) {
+    var row = projection.element(field);
+    if (row.isEmpty() || row.get().kind() != ElementKind.FIELD || row.get().parent() == null) {
+      return Optional.empty();
+    }
+    var canonical = row.get().physicalCatalogReference();
+    var existence = closedRangeFact(field, Vocabulary.EXISTENCE, IdentityKey.choice(EXISTS));
+    if (canonical == null || existence.isEmpty()) {
+      return Optional.empty();
+    }
+    var table = physicalSchemaOf(existence.get().urn()).flatMap(this::table);
+    if (table.isEmpty() || table.get().reference().isEmpty()) {
+      return Optional.empty();
+    }
+    var reference = table.get().reference().get();
+    var prefix = reference.canonical() + ".";
+    if (!canonical.startsWith(prefix)) {
+      return Optional.empty();
+    }
+    var name = canonical.substring(prefix.length());
+    if (!stillObserved(table.get(), name)) {
+      return Optional.empty();
+    }
+    return Optional.of(
+        new Column(
+            field,
+            requireNonNull(row.get().parent()),
+            table.get(),
+            reference,
+            name,
+            existence.get()));
+  }
+
+  /**
+   * Whether the table's latest observation still has the column: the table was read and lists it,
+   * or may hide columns. A column the source no longer has is not read, even while the retirement
+   * of its Field waits for consent.
+   */
+  private static boolean stillObserved(Table table, String column) {
+    if (!(table.observed() instanceof Observed.Read read)) {
+      return false;
+    }
+    if (read.tableMetadata().path("columnsMayBeHidden").asBoolean(false)) {
+      return true;
+    }
+    for (var listed : read.tableMetadata().path("columns")) {
+      if (column.equals(listed.path("name").asText())) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static final String EXISTS = "exists";
 
   /** The Dataset or Field a Physical Catalog reference identifies, if one exists. */
   public Optional<String> element(PhysicalCatalogReference reference) {
@@ -322,6 +457,24 @@ public final class GeneratorContext {
         .toList();
   }
 
+  /** The predicates of an element's empty-scope Fact Addresses, such as its uniqueness ones. */
+  public List<String> predicates(String element) {
+    return transaction.addressesOf(domain, List.of(element), Long.MAX_VALUE).stream()
+        .filter(row -> row.scopeDescription() == null && row.scopeEntities().isEmpty())
+        .map(row -> row.predicate())
+        .distinct()
+        .toList();
+  }
+
+  /** The Facts whose dependencies in effect name a Fact. */
+  public List<Fact> dependents(String fact) {
+    return projection.dependents(fact).stream()
+        .sorted()
+        .map(this::fact)
+        .flatMap(Optional::stream)
+        .toList();
+  }
+
   /** The Facts that depend on an observation of an Input Resource, oldest first. */
   public List<Fact> factsDependingOn(String inputResource) {
     return transaction.factsDependingOn(domain, inputResource).stream()
@@ -344,22 +497,33 @@ public final class GeneratorContext {
               new Trigger.Observed(
                   observation.inputResource().urnValue(),
                   Urns.of(domain, Urns.INPUT_OBSERVATION, record.get().position())));
-      case LogRecord.Confirm confirm -> {
-        var fact = confirm.fact().urnValue();
-        var address = projection.factAddress(fact).flatMap(projection::address);
-        if (address.isEmpty()) {
-          yield Optional.empty();
-        }
-        var element = address.get().row().element();
-        yield projection
-            .element(element)
-            .map(
-                row ->
-                    new Trigger.Confirmed(
-                        fact, element, row.kind(), address.get().row().predicate()));
-      }
+      case LogRecord.Confirm confirm ->
+          factTrigger(confirm.fact().urnValue())
+              .map(
+                  found ->
+                      new Trigger.Confirmed(
+                          found.fact(), found.element(), found.kind(), found.predicate()));
+      case LogRecord.Accept accept ->
+          factTrigger(accept.fact().urnValue())
+              .map(
+                  found ->
+                      new Trigger.Accepted(
+                          found.fact(), found.element(), found.kind(), found.predicate()));
       default -> Optional.empty();
     };
+  }
+
+  private record FactTrigger(String fact, String element, ElementKind kind, String predicate) {}
+
+  private Optional<FactTrigger> factTrigger(String fact) {
+    var address = projection.factAddress(fact).flatMap(projection::address);
+    if (address.isEmpty()) {
+      return Optional.empty();
+    }
+    var element = address.get().row().element();
+    return projection
+        .element(element)
+        .map(row -> new FactTrigger(fact, element, row.kind(), address.get().row().predicate()));
   }
 
   private static String requireNonNull(@Nullable String value) {

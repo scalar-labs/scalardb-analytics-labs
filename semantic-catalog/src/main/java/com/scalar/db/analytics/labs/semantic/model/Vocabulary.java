@@ -43,6 +43,25 @@ public final class Vocabulary {
    */
   public static final String UNIQUENESS_PREFIX = "uniqueness:";
 
+  /** The uniqueness value of a Field set that does not repeat. */
+  public static final String DOES_NOT_REPEAT = "does-not-repeat";
+
+  /** The uniqueness value of a Field set that repeats. */
+  public static final String REPEATS = "repeats";
+
+  /** The uniqueness predicate of a Field set, by its Fields' URNs in any order. */
+  public static String uniqueness(java.util.Collection<String> fields) {
+    return UNIQUENESS_PREFIX + String.join(",", new java.util.TreeSet<>(fields));
+  }
+
+  /** The Field set a uniqueness predicate carries, sorted; empty for another predicate. */
+  public static List<String> uniquenessFields(String predicate) {
+    if (!predicate.startsWith(UNIQUENESS_PREFIX)) {
+      return List.of();
+    }
+    return List.of(predicate.substring(UNIQUENESS_PREFIX.length()).split(","));
+  }
+
   public static final String MEANING = "meaning";
   public static final String VALUE_KIND = "value-kind";
   public static final String UNIT = "unit";
@@ -239,7 +258,14 @@ public final class Vocabulary {
      * including the wording of a correction. Feedback is never revised, so each registration is a
      * new resource with exactly one observation.
      */
-    USAGE_FEEDBACK
+    USAGE_FEEDBACK,
+    /**
+     * The reads of one kind of data check on one target, a Field set or a correspondence,
+     * identified by the check and the target, so that each observation can be compared with its
+     * predecessor (see {@code docs/semantic-catalog/generators.md}, "The Generator contract").
+     * Observations are written with the Generator results that read them and create no build tasks.
+     */
+    DATA_OBSERVATION
   }
 
   /**

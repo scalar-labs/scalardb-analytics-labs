@@ -16,6 +16,7 @@ import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Preset;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.RetirementReason;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Transition;
 import java.util.List;
+import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -149,16 +150,21 @@ public sealed interface LogRecord {
    * @param inputKind what kind of input this is, which decides how it is identified
    * @param tableIdentifier the Physical Catalog's resource identifier of the table whose physical
    *     schema this is; two Input Resources with the same one are the same. Present for a physical
-   *     schema and only for it; every other Input Resource is new when it is registered.
+   *     schema and only for it.
    * @param table the Physical Catalog reference of the table whose physical schema this is, by
    *     which schema interpretation names its Dataset and Fields; fixed for the table identifier,
    *     and absent for a physical schema whose table the application could not name by data-source
    *     registration, namespace, and table, and for every other Input Resource
+   * @param dataCheck the kind and target of check whose reads this data observation resource
+   *     records, in canonical form; two Input Resources with the same one are the same. Present for
+   *     a data observation and only for it. Every Input Resource that has neither this nor a table
+   *     identifier is new when it is registered.
    */
   record InputResource(
       InputKind inputKind,
       @Nullable String tableIdentifier,
-      PhysicalCatalogReference.@Nullable Table table)
+      PhysicalCatalogReference.@Nullable Table table,
+      @Nullable String dataCheck)
       implements LogRecord {
     public InputResource {
       if ((inputKind == InputKind.PHYSICAL_SCHEMA) != (tableIdentifier != null)) {
@@ -168,19 +174,47 @@ public sealed interface LogRecord {
       if (inputKind != InputKind.PHYSICAL_SCHEMA && table != null) {
         throw new IllegalArgumentException("Only a physical schema names a table");
       }
+      if ((inputKind == InputKind.DATA_OBSERVATION) != (dataCheck != null)) {
+        throw new IllegalArgumentException(
+            "A data observation, and only a data observation, names its check and target");
+      }
+      if (dataCheck != null && dataCheck.isBlank()) {
+        throw new IllegalArgumentException("A data observation names its check and target");
+      }
     }
 
     public static InputResource physicalSchema(
         String tableIdentifier, PhysicalCatalogReference.@Nullable Table table) {
-      return new InputResource(InputKind.PHYSICAL_SCHEMA, tableIdentifier, table);
+      return new InputResource(InputKind.PHYSICAL_SCHEMA, tableIdentifier, table, null);
     }
 
     public static InputResource document() {
-      return new InputResource(InputKind.DOCUMENT, null, null);
+      return new InputResource(InputKind.DOCUMENT, null, null, null);
     }
 
     public static InputResource usageFeedback() {
-      return new InputResource(InputKind.USAGE_FEEDBACK, null, null);
+      return new InputResource(InputKind.USAGE_FEEDBACK, null, null, null);
+    }
+
+    /**
+     * The Input Resource of the reads of one kind of data check on one target.
+     *
+     * @param dataCheck the check and its target in canonical form
+     */
+    public static InputResource dataObservation(String dataCheck) {
+      return new InputResource(InputKind.DATA_OBSERVATION, null, null, dataCheck);
+    }
+
+    /** The key under which two Input Resources are the same, if this one has one. */
+    @JsonIgnore
+    public Optional<String> identity() {
+      if (tableIdentifier != null) {
+        return Optional.of("table " + tableIdentifier);
+      }
+      if (dataCheck != null) {
+        return Optional.of("data-check " + dataCheck);
+      }
+      return Optional.empty();
     }
   }
 

@@ -14,7 +14,9 @@ import com.scalar.db.analytics.labs.semantic.TableMetadataObservation.DoesNotExi
 import com.scalar.db.analytics.labs.semantic.TableMetadataObservation.Read;
 import com.scalar.db.analytics.labs.semantic.TableMetadataObservation.SourceMetadata;
 import com.scalar.db.analytics.labs.semantic.TableMetadataRegistration.Observed;
+import com.scalar.db.analytics.labs.semantic.generator.Generator;
 import com.scalar.db.analytics.labs.semantic.generator.Generators;
+import com.scalar.db.analytics.labs.semantic.generator.schema.SchemaInterpretation;
 import com.scalar.db.analytics.labs.semantic.model.BuildTask;
 import com.scalar.db.analytics.labs.semantic.model.Knowledge;
 import com.scalar.db.analytics.labs.semantic.model.Urns;
@@ -202,12 +204,16 @@ class SchemaInterpretationTest extends StoreScenarioTest {
                 "digest-" + version));
   }
 
+  /**
+   * Construction-run SQL whose every query exceeds a limit, so data checks decide nothing and the
+   * scenarios show what declarations alone settle.
+   */
+  static final ConstructionSql OVER_LIMIT =
+      request -> new ConstructionSql.Outcome.LimitExceeded("time limit of 1s exceeded");
+
   private static BuildRun.Summary drain(Scenario s, PolicyEvaluationModel model) {
     return store.runBuildTasks(
-        s.domain,
-        new BuildRun.Environment(model, BuildTasksTest.NO_CONSTRUCTION_SQL),
-        BuildRun.drain(),
-        task -> {});
+        s.domain, new BuildRun.Environment(model, OVER_LIMIT), BuildRun.drain(), task -> {});
   }
 
   // Reading what was confirmed
@@ -257,8 +263,8 @@ class SchemaInterpretationTest extends StoreScenarioTest {
 
     var summary = drain(s, NO_MODEL);
 
-    // Registration created a run of every schema-interpretation Generator in its own commit.
-    assertThat(registered.buildTasks()).hasSize(Generators.all().size());
+    // Registration created a run of every Generator that reads physical schemas in its own commit.
+    assertThat(registered.buildTasks()).hasSize(Generators.readingPhysicalSchema().size());
     assertThat(summary.finished())
         .allSatisfy(
             task -> assertThat(task.status()).isInstanceOf(BuildTask.Status.Succeeded.class));
@@ -553,7 +559,13 @@ class SchemaInterpretationTest extends StoreScenarioTest {
     var summary = drain(s, NO_MODEL);
 
     assertThat(registered.inputObservation()).isNotBlank();
+    // Each schema-interpretation run records the reference as missing; the data checks that read
+    // physical schemas found nothing they had examined there.
+    var interpreting = SchemaInterpretation.generators().stream().map(Generator::name).toList();
     assertThat(summary.finished())
+        .filteredOn(
+            task -> interpreting.contains(((BuildTask.Work.GeneratorRun) task.work()).generator()))
+        .hasSize(interpreting.size())
         .extracting(
             task ->
                 ((BuildTask.Result.Generated)

@@ -79,10 +79,13 @@ Running a build task never holds a transaction while a model or a construction q
    open transaction would collide with answers committed meanwhile and force the whole run to
    restart. A deterministic Generator that reads only the store, such as schema interpretation,
    finishes in milliseconds and runs inside the transaction of step 3 instead, so it reads the
-   state it is recorded on and needs no reconciliation; a collision runs it again.
+   state it is recorded on and needs no reconciliation; a collision runs it again. A data check
+   splits its run: it plans its queries in a read of the latest commit, the queries run outside any
+   transaction, and it interprets the reads inside the transaction of step 3, so a collision keeps
+   the reads and runs no query again.
 3. **Record.** Record the output by the write procedure above, set the task to `succeeded` or
    `failed`, and commit. On a `commits` collision only this step is retried, keeping the run's
-   output.
+   output, or for a data check the reads it interprets.
 
 The output was produced from the state at the start of step 2, so step 3 reconciles it with the
 current state inside the recording transaction:
@@ -94,7 +97,8 @@ current state inside the recording transaction:
 - It finds Datasets and Fields by Physical Catalog reference. Unique constraints cannot express this
   identity, so a search inside the transaction does the matching, and a concurrent writer that
   created the element first is found on retry.
-- It decides whether each data observation equals its predecessor.
+- It decides whether each data observation equals its predecessor; the data check does this as it
+  interprets its reads, and a data-observation Input Resource is matched by its check and target.
 - It runs the consistency check, which fails the task and writes nothing when it finds a dependency
   cycle or a missing reference.
 
@@ -161,7 +165,7 @@ it no longer does.
 | `elements` | Element, kind, parent, the Physical Catalog reference of a Dataset or Field, and for edges the kind, ends, direction, and identifying part | Edge identity, filtering by parent, checking that a Field is a column of its Dataset's table |
 | `fact_addresses` | Fact Address, element, predicate, scope description, scope URNs, predicate definition of a free-description predicate | Finding empty-scope Fact Addresses |
 | `facts` | Fact, Fact Address, identity key | Matching closed-range Facts, finding elements by Physical Catalog reference |
-| `input_resources` | Input Resource, kind, Physical Catalog table identifier, latest table metadata version received | Lookup by table identifier, ignoring versions already received, and serializing registrations for one table |
+| `input_resources` | Input Resource, kind, Physical Catalog table identifier, the check and target of a data observation, latest table metadata version received | Lookup by table identifier or by check and target, ignoring versions already received, and serializing registrations for one table |
 
 Unique constraints enforce the identity rules that can be expressed as uniqueness:
 
@@ -174,7 +178,8 @@ Unique constraints enforce the identity rules that can be expressed as uniquenes
   unique.
 - `facts`: Fact Address and identity key, for rows that have one. The identity key consists of the
   closed choices and references in the value, with sets such as Field sets sorted by URN.
-- `input_resources`: table identifier, where present.
+- `input_resources`: table identifier, or the check and target of a data observation, where
+  present.
 
 Dataset and Field identity depends on the state of physical-catalog-reference Facts, so it is kept by the
 search in the recording transaction together with the `commits` collision.

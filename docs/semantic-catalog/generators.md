@@ -11,7 +11,7 @@ counts that are expected to be tuned from use of the product.
 
 ## One rule per Generator
 
-The schema-interpretation Generators are implemented. **[Planned]** The data-check and
+The schema-interpretation and data-check Generators are implemented. **[Planned]** The
 meaning-inference Generators are not.
 
 Each interpretation or check rule is its own Generator. The rule that derives a key from a primary
@@ -35,7 +35,7 @@ candidate inline depends on the validation methods of its checks, never on its r
 | Schema interpretation | Table and column ingestion | Existence and Physical Catalog references of Datasets and Fields; retirement proposals for elements that disappeared |
 | Schema interpretation | Key from primary key | A Dataset's key |
 | Schema interpretation | Uniqueness declaration ingestion | Uniqueness of a Field set |
-| Schema interpretation | Correspondence from foreign key | Existence of an identifier correspondence and its business definition; **[Planned]** support for the containment of the referencing side in its set relationship |
+| Schema interpretation | Correspondence from foreign key | Existence of an identifier correspondence and its business definition; support for the containment of the referencing side in its set relationship |
 | Schema interpretation | Value kind from source type | Time-or-date and boolean value kinds |
 | Data checks | Uniqueness check | Uniqueness of a Field set |
 | Data checks | Candidate key discovery | Uniqueness, and a key for a Dataset without a primary key |
@@ -57,10 +57,10 @@ never by itself a basis for derivation.
 ## The Generator contract
 
 **Input kinds.** Each Generator declares what it may read, and build tasks are created from these
-declarations. A commit that records a new observation or a confirmation creates, in the same
-transaction, a run of each Generator that reads it, or adds the commit's log record as a trigger to
-the run of that Generator not started yet. **[Planned]** Document and usage-feedback inputs have no
-Generator yet.
+declarations. A commit that records a new observation, a confirmation, or an acceptance creates, in
+the same transaction, a run of each Generator that reads it, or adds the commit's log record as a
+trigger to the run of that Generator not started yet. **[Planned]** Document and usage-feedback
+inputs have no Generator yet.
 
 | Input kind | Creates build tasks when |
 | --- | --- |
@@ -68,7 +68,14 @@ Generator yet.
 | Document | Registering an observation records a new document observation |
 | Usage feedback | Registering an observation records it under a new Input Resource |
 | Confirmed Fact, per predicate | A Fact of that predicate is confirmed |
+| Accepted Fact, per predicate | An acceptance of a Fact of that predicate is recorded |
 | Data observation | Never; data observations are written with the results that read them |
+
+The uniqueness predicates, which each name a Field set, are declared together as one predicate. An
+accepted Fact lets a Generator add its support to a candidate another Generator proposed: correspondence
+from foreign key supports a set relationship only once the set relationship check has proposed one
+(see [Schema interpretation](#schema-interpretation)). Its own acceptance triggers it again, which
+records nothing because the acceptance is unchanged.
 
 Derived records are not an input kind. A dependency can point only to an Input Observation or a Fact
 Revision, so a candidate built from a derived record could not track changes. Schema interpretation
@@ -113,14 +120,32 @@ When a candidate targets a Fact Address that has a selected Fact, the Generator 
 depends on it, so its candidate replaces the selection once confirmed. A later run keeps that dependency
 after the replaced Fact is retired, so producing again does not change the candidate.
 
-**Data observations.** **[Planned]** A Generator that reads data values, through data checks or as statistics
-passed to a model, does so through the application's SQL execution. It records what it read as a
-**data observation** in the same commit as its results, because a `data-check` needs an observation
-to reference. Data observations have one Input Resource per kind and target of check (a Field set or
-a correspondence), because one check can read several tables and different queries in one Input
-Resource could not be compared with their predecessors. An observation holds the query, its result,
-the range it read (a sample or the whole table, how many rows, and when), the physical schema
-observations of the tables read, and the read provenance the application returns. A result equal to the previous observation of the same Input Resource is not recorded again.
+**Several Generators on one Fact.** Each acceptance states the whole validation result and
+dependency set in effect after it (see
+[`record-model.md`](record-model.md#validation-results-and-dependencies)). A Generator that accepts
+a Fact another Generator also supports therefore restates the other's checks and dependencies from
+the Fact's latest acceptance and replaces only its own. Schema interpretation owns the declaration
+checks and the dependencies on physical schema observations; a data check owns the checks that name
+it and the dependencies on its own data observations. Otherwise a data check's acceptance would drop
+the declaration that lets uniqueness from an unenforced constraint be adopted inline, and a later
+schema observation would drop the data check again.
+
+**Data observations.** A Generator that reads data values does so through the application's SQL
+execution: the data checks do, and **[Planned]** so will the Generators that pass statistics to a
+model. It records what
+it read as a **data observation** in the same commit as its results, because a `data-check` needs
+an observation to reference. Data observations have one Input Resource per kind and target of check
+(a Field set or a correspondence), because one check can read several tables and different queries
+in one Input Resource could not be compared with their predecessors. An observation holds the
+queries, their results, the range each read (a sample or the whole table, how many rows, and when),
+the physical schema observations of the tables read, and the read provenance the application
+returns. A result equal to the previous observation of the same Input Resource, apart from when it
+was read, is not recorded again; the results refer to the previous observation instead.
+
+A data-reading run holds no transaction while its queries run. It plans its queries from the latest
+commit, runs them outside any transaction, and interprets the reads inside the transaction that
+records its results, so what it proposes rests on the state it is recorded on; a collision repeats
+only that last step, with the same reads (see [`storage.md`](storage.md#running-build-tasks)).
 
 ## Schema interpretation
 
@@ -164,12 +189,14 @@ because a key can reference a row that an equality comparison does not match. Co
 item of table metadata yet, so every pair of text columns is undecidable. Such correspondences are
 never adopted inline.
 
-**[Planned]** A foreign key on non-null columns also declares that every referencing value appears on the
-referenced side, which is one validation item of the set relationship, so the Generator supports
-that item, once the set relationship check proposes a set relationship to support, with the key's validation method. The set relationship check decides the other direction,
-whether every referenced row is referenced, and schema interpretation never decides whether the
-referencing side repeats; the uniqueness check observes that. With both, an enforced key whose
-referenced side has unreferenced rows yields `subset` by machine judgement under `auto`.
+A foreign key on non-null columns also declares that every referencing value appears on the
+referenced side, which is one validation item of the set relationship. Once the set relationship
+check proposes a set relationship that claims it (`equal` or `subset`), the Generator, which reads
+accepted set relationships, supports that item with the key's validation method, undecidable on the
+same terms as the key's pairs. The set relationship check decides the other direction, whether every
+referenced row is referenced, and schema interpretation never decides whether the referencing side
+repeats; the uniqueness check observes that. With both, an enforced key whose referenced side has
+unreferenced rows yields `subset` by machine judgement under `auto`.
 
 Under the default policy, existence, Physical Catalog references, value kinds, enforced constraints, and
 correspondences from enforced foreign keys are adopted inline. Uniqueness from an unenforced
@@ -179,13 +206,13 @@ of duplicates does not show that a set is a business identifier.
 
 ## Data checks
 
-**[Planned]** This section describes design that is not implemented yet.
-
-Data checks run aggregate queries, counts and set comparisons only, and never read data rows.
+Data checks run aggregate queries, counts and set comparisons only, and never read data rows. No
+data value they read is passed to a model; the counts they record in their checks are, as part of
+a candidate the policy evaluation model evaluates.
 
 | Generator | Triggered by | Query | Method |
 | --- | --- | --- | --- |
-| Uniqueness check | Confirmed Field existence (declared sets containing it), confirmed key, confirmed correspondence existence (the Field set at each end) | Row count, distinct count of the set, rows with null | `data-check` |
+| Uniqueness check | Confirmed Field existence (declared sets containing it), confirmed key, confirmed correspondence existence (the Field set at each end) | Row count, rows with null in the set, and values of the set that repeat, by grouping on the set | `data-check` |
 | Candidate key discovery | Confirmed Field existence in a Dataset without a primary key | Minimal unique column combinations | `data-check` for uniqueness, `inference` for the key |
 | Inclusion discovery | Confirmed Field existence, confirmed uniqueness | Whether one side's values are contained in a unique Field set | `inference`; the inclusion observation is an input read, not a check reference |
 | Set relationship check | Confirmed identifier correspondence existence | Anti-join row counts on the matching condition, after its normalization, both directions | `data-check` |
@@ -194,13 +221,46 @@ How many rows match across a correspondence comes from the uniqueness check on e
 that repeats among purchase rows makes customers to purchases one-to-many. Whether every row takes
 part comes from the set relationship check.
 
+**Uniqueness check.** A repeating value of the set is a counterexample and proposes `repeats`. No
+repetition proposes `does-not-repeat` as an absence. More than one row with null in the set, or no
+rows read, decides nothing, because rows containing null cannot be compared.
+
+**Candidate key discovery.** It explores a table whose metadata reports its constraints and no
+primary key; nothing is concluded from constraints the metadata does not report. It explores every
+single column and every pair of columns, once each column has a Field whose existence is
+confirmed, in two statements so that a pair statement over a limit leaves the single columns
+decided. A set is unique when no row read has null in it and no value repeats; a pair counts only
+when neither of its columns is unique alone. Each minimal set gets a uniqueness candidate, and the
+smallest ones, the single columns if any, each get a key candidate. A set whose value repeats
+refutes the uniqueness Facts already proposed for it.
+
+**Inclusion discovery.** It explores single Fields against single-Field sets confirmed not to
+repeat, when both columns have the same mapped Analytics type, the type is not a boolean, date,
+time, or interval, and the correspondence does not exist yet. The Fields of one table paired with
+one unique set are checked in one statement that reads the table once, and one run plans at most
+100 such statements, an initial bound; the pairs past it are recorded as missing input, because
+otherwise the queries of one run would grow with the square of the catalog and hold the other build
+tasks behind them. When every value read of a Field is found, it proposes the correspondence's
+existence from the contained Field to the unique one.
+
+**Set relationship check.** It examines a direct correspondence, one whose matching condition pairs
+the Fields of its two ends, and leaves unexamined a condition with a normalization step the Query
+Engine has no form for (Unicode NFKC). Rows whose end contains null take no part. The value follows
+from whether every value of each end is matched and whether any is: `equal`, `subset`, `superset`,
+`partial-overlap`, or `disjoint`. An unmatched value or a match found is a counterexample; that
+every value of an end is matched, or that none is, is an absence.
+
 **Sampling.** Every read of data values, by a data check or for statistics passed to a model, is
 bounded by a sample size the domain's settings fix, because scanning whole large tables is not
 practical. A table within the bound is read whole. The observation records which happened, how many
 rows were read, and when. A comparison between two sides samples only the side whose values are
 checked. Each sampled value is looked up in the whole of the other side, because a value missing
-from a sample of the other side would look like a counterexample that is not one. A query that
-exceeds the application's limits on rows, bytes, or time leaves its items undecidable.
+from a sample of the other side would look like a counterexample that is not one. When both sides
+are in one table, the table is read whole for the same reason. A query that exceeds the
+application's limits on rows, bytes, or time leaves its items undecidable: the observation records
+the limit, and the uniqueness check and the set relationship check give each candidate at the
+target an undecidable check. A statement the application rejects or that fails examines nothing of
+its target, which the run records as missing input while it records its other targets.
 
 **What data establishes.** Data can refute a rule but not establish one, and a sample can do even
 less than a whole table:
@@ -212,8 +272,11 @@ less than a whole table:
 
 [`construction.md`](construction.md#choosing-the-confirmation-path) gives the rule and its reason.
 
-Each also runs on a new physical schema observation of its table and re-examines the confirmed Facts
-it supported. Data that changes while the schema stays the same is not re-examined. A uniqueness
+The uniqueness check and the set relationship check also run on a new physical schema observation of
+a table they read and examine again what they examined there, a correspondence whichever of its ends
+the table holds; the uniqueness check also examines the sets the table declares. A column or table
+the latest observation no longer has is not read, even while its Field's retirement waits. The discovery Generators run only on new confirmations. Data that changes
+while the schema stays the same is not re-examined. A uniqueness
 that has since broken stays selected, and a query relying on it can double-count. The Query Agent
 can see from dependencies when the data was observed and how much of it was read.
 
@@ -224,7 +287,10 @@ observation that refutes a confirmed Fact produces a retirement proposal with th
 confirmation was wrong.
 
 The column-set sizes that candidate key discovery and inclusion discovery explore, and the sample
-size, are initial behavior.
+size, are initial behavior. Candidate key discovery explores sets of one and two columns, and
+inclusion discovery single Fields against single-Field unique sets. Larger sets multiply the
+queries or the aggregates of one query by the combinations of columns, so they wait until use shows
+that composite keys left undiscovered matter.
 
 Inclusion never supports a correspondence's existence with `data-check`, because columns whose
 values happen to overlap need not denote the same objects; otherwise `auto` could confirm a
@@ -314,7 +380,7 @@ candidates that could not reach the deciding party anyway.
 
 | Trigger | Targets |
 | --- | --- |
-| An observation or a confirmed Fact | The Generator's predicates for the elements involved |
+| An observation, a confirmed Fact, or an accepted Fact | The Generator's predicates for the elements involved |
 | Feedback with related Facts | Fact Addresses with a related Fact's element and predicate, in the scope the feedback indicates, that the model chooses to address; only correction interpretation produces for them, so one correction yields one candidate and remains in provenance |
 | A Fact no longer selected | The Fact Addresses of Facts that depended on it |
 | An impact judgement | The Fact Addresses of Facts selected for re-examination |

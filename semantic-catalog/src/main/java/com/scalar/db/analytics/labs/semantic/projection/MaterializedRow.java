@@ -138,7 +138,11 @@ public sealed interface MaterializedRow {
    * @param createdCommit the commit that created the Input Resource
    */
   record InputResourceRow(
-      String inputResource, InputKind kind, @Nullable String tableIdentifier, long createdCommit)
+      String inputResource,
+      InputKind kind,
+      @Nullable String tableIdentifier,
+      @Nullable String dataCheck,
+      long createdCommit)
       implements MaterializedRow {
     @Override
     public RowKey key() {

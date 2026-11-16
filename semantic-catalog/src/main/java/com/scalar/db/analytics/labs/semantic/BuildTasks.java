@@ -55,9 +55,11 @@ final class BuildTasks {
   /**
    * Creates or triggers the Generator runs a commit calls for (see {@code
    * docs/semantic-catalog/generators.md}, "The Generator contract"): each new physical schema
-   * observation triggers the Generators that read physical schemas, and each confirmation triggers
-   * the Generators that read confirmed Facts of its predicate and element kind. The trigger is the
-   * log record of the observation or the confirmation.
+   * observation triggers the Generators that read physical schemas, each confirmation triggers the
+   * Generators that read confirmed Facts of its predicate and element kind, and each acceptance
+   * written triggers those that read accepted ones. The trigger is the log record of the
+   * observation, the confirmation, or the acceptance. A data observation triggers nothing, because
+   * it is written with the results that read it.
    *
    * @param records the commit's log records
    * @return the numbers of the tasks, each once
@@ -80,6 +82,7 @@ final class BuildTasks {
                     ? Generators.readingPhysicalSchema()
                     : List.<Generator>of();
             case LogRecord.Confirm confirm -> confirmedReaders(projection, confirm);
+            case LogRecord.Accept accept -> acceptedReaders(projection, accept);
             default -> List.<Generator>of();
           };
       for (var generator : generators) {
@@ -100,6 +103,17 @@ final class BuildTasks {
     return projection
         .element(address.get().row().element())
         .map(row -> Generators.readingConfirmed(row.kind(), address.get().row().predicate()))
+        .orElse(List.of());
+  }
+
+  private static List<Generator> acceptedReaders(Projection projection, LogRecord.Accept accept) {
+    var address = projection.factAddress(accept.fact().urnValue()).flatMap(projection::address);
+    if (address.isEmpty()) {
+      return List.of();
+    }
+    return projection
+        .element(address.get().row().element())
+        .map(row -> Generators.readingAccepted(row.kind(), address.get().row().predicate()))
         .orElse(List.of());
   }
 

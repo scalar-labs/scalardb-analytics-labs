@@ -4,8 +4,10 @@
  */
 package com.scalar.db.analytics.labs.semantic.generator;
 
+import com.scalar.db.analytics.labs.semantic.generator.data.DataChecks;
 import com.scalar.db.analytics.labs.semantic.generator.schema.SchemaInterpretation;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -14,9 +16,15 @@ import java.util.Optional;
  * change runs the Generators that produce a premise before those that read its confirmation.
  */
 public final class Generators {
-  private static final List<Generator> ALL = SchemaInterpretation.generators();
+  private static final List<Generator> ALL = all(SchemaInterpretation.generators());
 
   private Generators() {}
+
+  private static List<Generator> all(List<Generator> schemaInterpretation) {
+    var all = new ArrayList<>(schemaInterpretation);
+    all.addAll(DataChecks.generators());
+    return List.copyOf(all);
+  }
 
   public static List<Generator> all() {
     return ALL;
@@ -35,7 +43,29 @@ public final class Generators {
 
   /** The Generators that read confirmed Facts of a predicate of an element kind. */
   public static List<Generator> readingConfirmed(ElementKind kind, String predicate) {
-    var input = new Generator.Input.Confirmed(kind, predicate);
-    return ALL.stream().filter(generator -> generator.inputs().contains(input)).toList();
+    return ALL.stream()
+        .filter(
+            generator ->
+                generator.inputs().stream()
+                    .anyMatch(
+                        input ->
+                            input instanceof Generator.Input.Confirmed confirmed
+                                && confirmed.kind() == kind
+                                && Generator.Input.covers(confirmed.predicate(), predicate)))
+        .toList();
+  }
+
+  /** The Generators that read acceptances of Facts of a predicate of an element kind. */
+  public static List<Generator> readingAccepted(ElementKind kind, String predicate) {
+    return ALL.stream()
+        .filter(
+            generator ->
+                generator.inputs().stream()
+                    .anyMatch(
+                        input ->
+                            input instanceof Generator.Input.Accepted accepted
+                                && accepted.kind() == kind
+                                && Generator.Input.covers(accepted.predicate(), predicate)))
+        .toList();
   }
 }
