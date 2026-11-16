@@ -7,6 +7,7 @@ package com.scalar.db.analytics.labs.application.cli;
 import com.scalar.db.analytics.labs.application.cli.catalog.MetadataCommand;
 import com.scalar.db.analytics.labs.application.cli.catalog.SourceCommand;
 import com.scalar.db.analytics.labs.application.cli.query.QueryCommand;
+import com.scalar.db.analytics.labs.application.cli.semantic.SemanticCommand;
 import com.scalar.db.analytics.labs.application.cli.workspace.WorkspaceCommand;
 import java.io.InputStream;
 import java.io.PrintStream;
@@ -18,6 +19,7 @@ import picocli.CommandLine;
 public final class ScalarDbAnalyticsCli implements AutoCloseable {
   private final CommandLine commandLine;
   private final QueryCommand queryCommand;
+  private final SemanticCommand.SemanticBuildCommand buildCommand;
 
   public ScalarDbAnalyticsCli(PrintStream standardOutput, PrintStream standardError) {
     this(System.in, standardOutput, standardError, System.getenv());
@@ -41,6 +43,8 @@ public final class ScalarDbAnalyticsCli implements AutoCloseable {
     commandLine.addSubcommand("workspace", WorkspaceCommand.create(environment));
     commandLine.addSubcommand("source", SourceCommand.create(standardInput, environment));
     commandLine.addSubcommand("metadata", MetadataCommand.create(environment));
+    buildCommand = new SemanticCommand.SemanticBuildCommand(environment);
+    commandLine.addSubcommand("semantic", SemanticCommand.create(buildCommand));
     commandLine.setOut(new java.io.PrintWriter(standardOutput, true, StandardCharsets.UTF_8));
     commandLine.setErr(new java.io.PrintWriter(standardError, true, StandardCharsets.UTF_8));
   }
@@ -49,8 +53,12 @@ public final class ScalarDbAnalyticsCli implements AutoCloseable {
     return commandLine.execute(arguments);
   }
 
+  /**
+   * Delivers an interrupt: cancels a running query, or asks a watching build run to stop after its
+   * current task. Returns false when nothing took the interrupt, so the process stops at once.
+   */
   public boolean cancel() {
-    return queryCommand.cancel();
+    return queryCommand.cancel() || buildCommand.requestStop();
   }
 
   @Override

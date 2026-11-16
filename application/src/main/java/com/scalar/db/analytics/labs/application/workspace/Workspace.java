@@ -5,6 +5,8 @@
 package com.scalar.db.analytics.labs.application.workspace;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonSubTypes;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.scalar.db.analytics.labs.application.ApplicationFailure;
@@ -13,6 +15,7 @@ import com.scalar.db.analytics.labs.application.construction.ConstructionSqlSett
 import com.scalar.db.analytics.labs.physical.PhysicalCatalogSettings;
 import com.scalar.db.analytics.labs.physical.Secret;
 import com.scalar.db.analytics.labs.semantic.StoreSettings;
+import com.scalar.db.analytics.labs.semantic.llm.LanguageModelSettings;
 import java.io.IOException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -284,6 +287,18 @@ public final class Workspace {
             : Duration.ofSeconds(semanticCatalog.constructionQueryTimeLimitSeconds()));
   }
 
+  /**
+   * The language model the domain's build tasks call, as {@code semanticCatalog.languageModel} sets
+   * it; empty when the workspace configuration sets none.
+   */
+  public Optional<LanguageModelSettings> languageModelSettings() {
+    var semanticCatalog = configuration.semanticCatalog();
+    if (semanticCatalog == null || semanticCatalog.languageModel() == null) {
+      return Optional.empty();
+    }
+    return Optional.of(semanticCatalog.languageModel().settings());
+  }
+
   private PhysicalCatalogSettings catalogSettings() {
     return new PhysicalCatalogSettings(
         configuration.storeJdbcUrl(),
@@ -323,18 +338,81 @@ public final class Workspace {
    *
    * @param sampleSize the most rows read of a sampled table in construction-run SQL
    * @param constructionQueryTimeLimitSeconds how long one construction query may take
+   * @param languageModel the language model the domain's build tasks call
    */
   @JsonInclude(JsonInclude.Include.NON_NULL)
   record SemanticCatalogConfiguration(
-      @Nullable Long sampleSize, @Nullable Long constructionQueryTimeLimitSeconds) {
+      @Nullable Long sampleSize,
+      @Nullable Long constructionQueryTimeLimitSeconds,
+      @Nullable LanguageModelConfiguration languageModel) {
 
     boolean isValid() {
-      return (sampleSize == null
+      return (languageModel == null || languageModel.isValid())
+          && (sampleSize == null
               || (sampleSize > 0 && sampleSize <= ConstructionSqlSettings.MAX_SAMPLE_SIZE))
           && (constructionQueryTimeLimitSeconds == null
               || (constructionQueryTimeLimitSeconds > 0
                   && constructionQueryTimeLimitSeconds
                       <= ConstructionSqlSettings.MAX_TIME_LIMIT.toSeconds()));
+    }
+  }
+
+  /**
+   * The language model the domain's build tasks call, by the adapter that reaches it (see {@code
+   * docs/semantic-catalog/generators.md}, "Reaching a language model"). An unset {@code
+   * timeoutSeconds}, how long one answer may take, takes {@link #DEFAULT_TIMEOUT_SECONDS}.
+   */
+  @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "adapter")
+  @JsonSubTypes({
+    @JsonSubTypes.Type(value = LanguageModelConfiguration.Claude.class, name = "claude"),
+    @JsonSubTypes.Type(value = LanguageModelConfiguration.Codex.class, name = "codex"),
+    @JsonSubTypes.Type(value = LanguageModelConfiguration.Command.class, name = "command")
+  })
+  @JsonInclude(JsonInclude.Include.NON_NULL)
+  sealed interface LanguageModelConfiguration {
+    long DEFAULT_TIMEOUT_SECONDS = 300;
+
+    LanguageModelSettings settings();
+
+    default boolean isValid() {
+      try {
+        settings();
+        return true;
+      } catch (IllegalArgumentException | NullPointerException e) {
+        return false;
+      }
+    }
+
+    private static Duration timeout(@Nullable Long timeoutSeconds) {
+      return Duration.ofSeconds(
+          Objects.requireNonNullElse(timeoutSeconds, DEFAULT_TIMEOUT_SECONDS));
+    }
+
+    /** A locally installed, signed-in {@code claude} CLI. */
+    record Claude(String model, @Nullable Long timeoutSeconds)
+        implements LanguageModelConfiguration {
+      @Override
+      public LanguageModelSettings settings() {
+        return new LanguageModelSettings.Claude(model, timeout(timeoutSeconds));
+      }
+    }
+
+    /** A locally installed, signed-in {@code codex} CLI. */
+    record Codex(String model, @Nullable Long timeoutSeconds)
+        implements LanguageModelConfiguration {
+      @Override
+      public LanguageModelSettings settings() {
+        return new LanguageModelSettings.Codex(model, timeout(timeoutSeconds));
+      }
+    }
+
+    /** A shell command that reads the prompt on standard input and writes the answer. */
+    record Command(String command, String model, @Nullable Long timeoutSeconds)
+        implements LanguageModelConfiguration {
+      @Override
+      public LanguageModelSettings settings() {
+        return new LanguageModelSettings.Command(command, model, timeout(timeoutSeconds));
+      }
     }
   }
 }

@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.scalar.db.analytics.labs.application.ApplicationFailure;
 import com.scalar.db.analytics.labs.application.ApplicationRuntime;
+import com.scalar.db.analytics.labs.application.SemanticCatalogDomains;
 import com.scalar.db.analytics.labs.application.workspace.Workspace;
 import com.scalar.db.analytics.labs.connector.ConnectorException;
 import com.scalar.db.analytics.labs.connector.ConnectorLibrary;
@@ -172,7 +173,7 @@ public final class TableMetadataRetrieval {
               + ").");
     }
     var retrieval = (JsonNode) TableMetadataJson.of(result.retrieval());
-    ensureDomain(semanticCatalog, domain);
+    SemanticCatalogDomains.ensure(semanticCatalog, domain);
     var outcomes = new ArrayList<TableOutcome>();
     for (var record : result.records()) {
       var identifier = tableIdentifier(sourceName, record.table());
@@ -277,20 +278,6 @@ public final class TableMetadataRetrieval {
       }
     }
     return options;
-  }
-
-  /** Creates the workspace's domain on its first retrieval. */
-  private static void ensureDomain(SemanticCatalogStore semanticCatalog, String domain) {
-    try {
-      if (!semanticCatalog.domainExists(domain)) {
-        semanticCatalog.createDomain(domain);
-      }
-    } catch (SemanticCatalogException e) {
-      // Another process may have created it between the check and the creation.
-      if (!semanticCatalog.domainExists(domain)) {
-        throw registrationFailed();
-      }
-    }
   }
 
   private static ApplicationFailure registrationFailed() {

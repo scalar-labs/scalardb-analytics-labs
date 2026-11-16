@@ -15,9 +15,12 @@ The source packages expose the same ownership boundaries as the runtime flow:
   failures.
 - `application.workspace` owns workspace validation, persistence, and initialization consistency.
 - `application.cli` composes picocli and owns the shared machine-readable output contract.
-- `application.cli.workspace`, `.catalog`, and `.query` contain the command adapters for their
-  respective use cases. Command implementations remain package-local behind small command-tree
-  factories; only the composition surfaces cross package boundaries.
+- `application.metadata` owns table metadata retrieval, and `application.construction` owns what
+  the Semantic Catalog's build tasks run with and running them.
+- `application.cli.workspace`, `.catalog`, `.query`, and `.semantic` contain the command adapters
+  for their respective use cases. Command implementations remain package-local behind small
+  command-tree factories; only the composition surfaces cross package boundaries, such as the
+  build command that takes interrupts.
 
 Dependencies point from the CLI adapters toward the workspace and application runtime. The
 workspace opens the runtime without exposing its persisted password or Physical Catalog settings.
@@ -53,6 +56,24 @@ scalardb-analytics workspace init \
 | --- | --- | --- |
 | `sampleSize` | `100000` | The most rows construction-run SQL reads of a sampled table, at most `10000000` |
 | `constructionQueryTimeLimitSeconds` | `60` | How long one construction-run query may take, at most `86400` |
+| `languageModel` | none | The language model the build tasks call; `semantic build` needs it |
+
+`languageModel` names the adapter that reaches the model and the concrete model it uses (see
+[`../docs/semantic-catalog/generators.md`](../docs/semantic-catalog/generators.md#reaching-a-language-model)):
+
+| `adapter` | Other keys |
+| --- | --- |
+| `claude` | `model`, a model ID starting with `claude-` that is not an alias |
+| `codex` | `model`, passed to `codex exec -m` |
+| `command` | `command`, run with `sh -c`, reading the prompt on stdin and writing the answer to stdout; `model`, the identity of the model it reaches |
+
+Each also takes `timeoutSeconds`, how long one answer may take, `300` by default:
+
+```json
+"semanticCatalog": {
+  "languageModel": { "adapter": "claude", "model": "claude-sonnet-5-5" }
+}
+```
 
 Register, inspect, and query sources:
 
@@ -84,6 +105,24 @@ source's connector and passes it to the Semantic Catalog; the `tableMetadata` me
 says what the Semantic Catalog recorded for each table. `metadata retrieve` runs the retrieval again
 for a registered source.
 See [`../docs/application.md`](../docs/application.md#table-metadata-retrieval).
+
+Registration creates Semantic Catalog build tasks; `semantic build` runs them:
+
+```console
+scalardb-analytics semantic build --workspace ./analytics-workspace
+scalardb-analytics semantic build --workspace ./analytics-workspace --watch
+```
+
+It prints one `scalardb-analytics/build-task-event` line per finished build task, with the task,
+its result or failure reason, and `awaitingReview`, the number of items awaiting review once it
+finished, and then one `scalardb-analytics/build-run` line with the tasks a stopped run had left
+`running` and returned to `created` (`reset`) and the numbers that `succeeded` and `failed`. A failed
+task is reported, not a command failure. Without `--watch` it returns once no created task remains;
+with `--watch` it keeps picking up new tasks until interrupted: the first `SIGINT` stops it after
+the current task, and a second stops the process at once. Only one process runs the workspace's
+build tasks at a time; another fails at once with `BUILD_RUN_IN_PROGRESS`. Without
+`semanticCatalog.languageModel` it fails with `LANGUAGE_MODEL_NOT_CONFIGURED` before running any
+task.
 
 `query` accepts exactly one of `--sql`, `--file`, or `--stdin`. Successful commands and classified
 operational failures write versioned JSON to stdout and return exit code `0` or `1`, respectively.

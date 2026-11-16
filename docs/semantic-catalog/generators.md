@@ -399,8 +399,9 @@ are interim; the later phase below replaces the CLIs.
 
 The subprocess inherits the process environment, which is how a CLI finds its own sign-in,
 so the product holds and passes no provider credential. The Semantic Catalog takes the adapter, the
-model, and how long one answer may take as settings. **[Planned]** Which adapter and model a domain
-uses is set in the workspace configuration, and the application passes it to the Semantic Catalog.
+model, and how long one answer may take as settings. Which adapter and model a domain uses is set
+in the workspace configuration, and the application passes it to the Semantic Catalog when it runs
+build tasks.
 
 A caller's version includes the model, so an adapter is configured with a concrete model and reports
 it. A model alias that the provider may point elsewhere later, such as `sonnet`, is refused, because

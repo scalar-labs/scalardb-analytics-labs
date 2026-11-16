@@ -9,7 +9,7 @@ import java.util.Objects;
 
 /**
  * Which adapter reaches the model, the concrete model it uses, and how long one answer may take.
- * Whoever opens the model passes them in; the application is to read them from the workspace
+ * Whoever opens the model passes them in; the application reads them from the workspace
  * configuration. No credential is part of them, because each adapter runs a program that is already
  * signed in.
  *

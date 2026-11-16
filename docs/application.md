@@ -22,8 +22,8 @@ The application provides:
 - the retrieval of table metadata and its hand-off to both catalogs, including re-retrieval;
 - the capabilities the Semantic Catalog needs from outside it: SQL execution for data checks,
   and **[Planned]** name resolution and re-retrieval;
-- **[Planned]** the operations that run Semantic Catalog build tasks and expose their state and
-  failures;
+- the operation that runs Semantic Catalog build tasks and reports their results and failures, and
+  **[Planned]** the operations that expose their state;
 - a versioned Agent Skill that teaches a Query Agent to use the CLI safely;
 - structured errors and diagnostics; and
 - assembly of the executable and distribution.
@@ -52,15 +52,15 @@ in from the workspace. How workspace, catalog, and domain relate beyond this one
 correspondence is not settled.
 
 The workspace configuration holds what the Semantic Catalog needs from the application, per domain.
-Today it holds the sample size and the time limit of construction-run SQL, under
+Today it holds the sample size and the time limit of construction-run SQL, and the language-model
+adapter and the concrete model it uses (see
+[`semantic-catalog/generators.md`](semantic-catalog/generators.md#reaching-a-language-model)), under
 `semanticCatalog` in `workspace.json` (see
 [`../application/README.md`](../application/README.md#standalone-cli)). **[Planned]** It is also to
 hold:
 
 - the semantics owners, and the Query Agents an administrator permits (see
   [Callers and authority](#callers-and-authority));
-- the language-model adapter and the concrete model it uses (see
-  [`semantic-catalog/generators.md`](semantic-catalog/generators.md#reaching-a-language-model));
 - which inputs reach Generators and models: count statistics (on by default), value samples and
   distributions (off by default), and usage feedback (on by default) (see
   [`semantic-catalog/generators.md`](semantic-catalog/generators.md#input-passed-to-external-models));
@@ -124,7 +124,8 @@ machine-readable operations. The Web UI lets a person compare candidates, valida
 conflicts, applicability, and impact before deciding. It owns no state transitions or decision rules
 of its own.
 
-**[Planned]** Running Semantic Catalog build tasks has two modes:
+Running Semantic Catalog build tasks (`semantic build`, see
+[`../application/README.md`](../application/README.md#standalone-cli)) has two modes:
 
 - By default, it runs the domain's created build tasks, including those created while it runs, until
   none remain, and exits. Scripts and CI use this mode.
@@ -137,9 +138,12 @@ of its own.
 Both print one event line per finished build task, with its result and the number of items awaiting
 review. Only one process runs a domain's build tasks at a time; a second attempt fails at once with
 a product error saying so, while answers, reads, and other operations proceed (see
-[`semantic-catalog/construction.md`](semantic-catalog/construction.md#build-tasks)). A watching run
-outlives changes that other processes write to the Physical Catalog, so each build task it runs uses
-the name resolution and table metadata current when that task starts.
+[`semantic-catalog/construction.md`](semantic-catalog/construction.md#build-tasks)). The workspace
+configuration's language model is the policy evaluation model the tasks call; without one, the run
+fails before it starts. **[Planned]** A watching run outlives changes that other processes write to
+the Physical Catalog, so each build task it runs uses the name resolution and table metadata current
+when that task starts. Today construction-run SQL starts its Query Engine on first use, with the data
+sources registered at that point, and keeps it for the rest of the run.
 
 ## Callers and authority
 
