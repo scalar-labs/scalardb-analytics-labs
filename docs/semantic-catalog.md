@@ -95,7 +95,7 @@ The surrounding components keep the following responsibilities:
   table's retrieval, exactly as the connector returned it, to both; the Semantic Catalog keeps the
   connector's source metadata as its input and holds the table metadata only as a side record,
   until the Physical Catalog keeps the table metadata it is built from. A
-  Dataset reaches a queryable table through a technical reference to a Physical Catalog table, never
+  Dataset reaches a queryable table through a Physical Catalog reference to a Physical Catalog table, never
   through a table name. See [`physical-catalog.md`](physical-catalog.md).
 - **Application.** It decides when build tasks run, one process per domain at a time, because it
   owns startup, shutdown, and resource release as one lifecycle. It provides the Semantic Catalog
@@ -131,7 +131,7 @@ governed by the domain owner's policy, that never lets one domain change another
 data source registration / re-retrieval / documents / feedback
         |
         v
-register observation ---> build tasks ---> Generators (outside the writer)
+register observation ---> build tasks ---> Generators
                                                  |
                                                  v
                                   duplicate check, acceptance as candidates

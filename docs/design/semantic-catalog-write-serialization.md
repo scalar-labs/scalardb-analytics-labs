@@ -39,5 +39,9 @@ that commits a new observation.
 - Writes that add no commit must collide on the rows they write instead. Build task and review
   presentation numbers are unique by primary key, and build task claims and added triggers update
   the same `build_tasks` row.
-- Generators and model calls must run outside any transaction. A build task is claimed, run, and
-  recorded in separate steps, and only the recording step retries on a collision.
+- Generators that call a model or the application's SQL execution, and model calls, must run
+  outside any transaction. Such a build task is claimed, run, and recorded in separate steps, and
+  only the recording step retries on a collision.
+- A deterministic Generator that reads only the store finishes in milliseconds, so it runs inside
+  the transaction that records its output. It then reads exactly the state it is recorded on and
+  needs no reconciliation; a collision runs it again, which gives the same output on the same state.

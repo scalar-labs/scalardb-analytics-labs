@@ -382,7 +382,7 @@ class AgentReadsTest extends StoreScenarioTest {
             Vocabulary.ROW_CONCEPT, Vocabulary.ROW_GRAIN, Vocabulary.ROW_INCLUSION, Vocabulary.KEY);
     assertThat(answer.addresses())
         .extracting(Knowledge.AtAddress::predicate)
-        .contains(Vocabulary.EXISTENCE, Vocabulary.TECHNICAL_REFERENCE, Vocabulary.ROW_KIND);
+        .contains(Vocabulary.EXISTENCE, Vocabulary.PHYSICAL_CATALOG_REFERENCE, Vocabulary.ROW_KIND);
     assertThat(answer.addresses())
         .filteredOn(at -> at.predicateDefinition() != null)
         .singleElement()
@@ -540,10 +540,11 @@ class AgentReadsTest extends StoreScenarioTest {
     var field =
         c.add(
             new LogRecord.Element(
-                ElementIdentity.PhysicalObject.field(dataset, Scenario.column(column))));
+                ElementIdentity.PhysicalCatalogObject.field(dataset, Scenario.column(column))));
     c.confirmByMachine(c.closedRangeCandidate(c.address(field, Vocabulary.EXISTENCE), "exists"));
     c.closedRangeCandidate(
-        c.address(field, Vocabulary.TECHNICAL_REFERENCE), Scenario.column(column).canonical());
+        c.address(field, Vocabulary.PHYSICAL_CATALOG_REFERENCE),
+        Scenario.column(column).canonical());
     return field;
   }
 

@@ -69,14 +69,17 @@ only processes on one host, while the store may be reached from several; a runne
 outlives a stopped process until the lease expires; and a row lock needs a transaction open for the
 whole run, which holds back vacuum in watching mode.
 
-Running a build task never holds a transaction while a Generator or a model runs:
+Running a build task never holds a transaction while a model or a construction query runs:
 
 1. **Claim.** Change the task from `created` to `running` and commit. Of two processes claiming one
    task, the later fails on the row update. Adding a trigger updates the same row, so a claimed task
    takes no more triggers.
-2. **Run.** Run the Generator, the model-based duplicate check, the impact judgement, or the
-   policy evaluation model outside any transaction. A model call takes seconds to tens of seconds, and an open transaction would collide
-   with answers committed meanwhile and force the whole run to restart.
+2. **Run.** Run the Generator, the model-based duplicate check, the impact judgement, or the policy
+   evaluation model outside any transaction. A model call takes seconds to tens of seconds, and an
+   open transaction would collide with answers committed meanwhile and force the whole run to
+   restart. A deterministic Generator that reads only the store, such as schema interpretation,
+   finishes in milliseconds and runs inside the transaction of step 3 instead, so it reads the
+   state it is recorded on and needs no reconciliation; a collision runs it again.
 3. **Record.** Record the output by the write procedure above, set the task to `succeeded` or
    `failed`, and commit. On a `commits` collision only this step is retried, keeping the run's
    output.
@@ -88,7 +91,7 @@ current state inside the recording transaction:
   name-based identifier already taken.
 - It matches edges, empty-scope Fact Addresses, and closed-range Facts, including those just written
   by concurrent Generators.
-- It finds Datasets and Fields by technical reference. Unique constraints cannot express this
+- It finds Datasets and Fields by Physical Catalog reference. Unique constraints cannot express this
   identity, so a search inside the transaction does the matching, and a concurrent writer that
   created the element first is found on retry.
 - It decides whether each data observation equals its predecessor.
@@ -154,10 +157,10 @@ it no longer does.
 | `fact_records` | Fact, Fact Address, the position of its latest event, state, awaiting consent, open retirement proposal, unknown answer without new dependency since, the whole Fact Record; always equal to folding the Fact's events | Acceptance checks, current lists and searches, the review list, and reads at a point the Fact has not changed since; a read at an earlier point folds the Fact's events |
 | `presentable_periods` | Fact, commit confirmed, commit retired | Determining eligible Facts |
 | `address_selections` | Fact Address, selected and eligible Facts per commit range | Reads at a point |
-| `dependencies` | Dependent Fact, the Fact or Input Resource depended on, whether in effect, whether used for confirmation; a row neither in effect nor used for confirmation is deleted | Cascades, impact judgement targets, newer-observation checks |
-| `elements` | Element, kind, parent, the technical reference of a Dataset or Field, and for edges the kind, ends, direction, and identifying part | Edge identity, filtering by parent, checking that a Field is a column of its Dataset's table |
+| `dependencies` | Dependent Fact, the Fact or Input Resource depended on, whether in effect, whether used for confirmation; a row neither in effect nor used for confirmation is deleted | Cascades, impact judgement targets, newer-observation checks, the Facts schema interpretation produced from a table |
+| `elements` | Element, kind, parent, the Physical Catalog reference of a Dataset or Field, and for edges the kind, ends, direction, and identifying part | Edge identity, filtering by parent, checking that a Field is a column of its Dataset's table |
 | `fact_addresses` | Fact Address, element, predicate, scope description, scope URNs, predicate definition of a free-description predicate | Finding empty-scope Fact Addresses |
-| `facts` | Fact, Fact Address, identity key | Matching closed-range Facts, finding elements by technical reference |
+| `facts` | Fact, Fact Address, identity key | Matching closed-range Facts, finding elements by Physical Catalog reference |
 | `input_resources` | Input Resource, kind, Physical Catalog table identifier, latest table metadata version received | Lookup by table identifier, ignoring versions already received, and serializing registrations for one table |
 
 Unique constraints enforce the identity rules that can be expressed as uniqueness:
@@ -173,7 +176,7 @@ Unique constraints enforce the identity rules that can be expressed as uniquenes
   closed choices and references in the value, with sets such as Field sets sorted by URN.
 - `input_resources`: table identifier, where present.
 
-Dataset and Field identity depends on the state of technical-reference Facts, so it is kept by the
+Dataset and Field identity depends on the state of physical-catalog-reference Facts, so it is kept by the
 search in the recording transaction together with the `commits` collision.
 
 Records kept outside the log:
@@ -186,7 +189,7 @@ Records kept outside the log:
 | `derived_records` | Domain, Physical Catalog table identifier, table metadata version | Table metadata, completeness, read time, retrieval information, content digest |
 | `call_records` | Domain, call identifier | Operation kind, input, output, time recorded |
 
-`build_tasks` is indexed on state, kind, and evaluated Fact, for build task reads and for finding the `created` task a new trigger joins. `review_presentation_targets` finds
+`build_tasks` is indexed on state, kind, and target (the evaluated Fact or the Generator of a run), for build task reads and for finding the `created` task a new trigger joins. `review_presentation_targets` finds
 earlier presentations per Fact for the review list. `call_records` keeps the input itself and
 compares it directly to detect a reused identifier with different input.
 

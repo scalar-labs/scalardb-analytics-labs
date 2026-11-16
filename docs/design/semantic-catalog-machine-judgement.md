@@ -33,7 +33,7 @@ The judgement calls a model, so it cannot run inside the operation that makes a 
 evaluable, such as an answer submission, without holding that operation up. Running it as a build
 task keeps answers quick and lets an interactive session present what is prepared.
 
-Deterministic signals cover most of a catalog's structure, such as existence, technical references,
+Deterministic signals cover most of a catalog's structure, such as existence, Physical Catalog references,
 and enforced constraints. Adopting those inline keeps model calls for the candidates that need
 judgement.
 

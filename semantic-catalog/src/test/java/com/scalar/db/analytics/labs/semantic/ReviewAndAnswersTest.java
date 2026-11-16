@@ -72,7 +72,7 @@ class ReviewAndAnswersTest extends StoreScenarioTest {
         .containsExactly(orders.existence());
     assertThat(existence.premiseItems()).isEmpty();
     assertThat(existence.cascadesTo()).containsExactly(orders.uniqueness());
-    assertThat(uniqueness.target().technicalReference()).isEqualTo("shop.public.orders");
+    assertThat(uniqueness.target().physicalCatalogReference()).isEqualTo("shop.public.orders");
     assertThat(uniqueness.needArose()).isEqualTo(s.lastCommit());
     assertThat(uniqueness.evaluation().record().result())
         .isEqualTo(Vocabulary.PolicyResult.REQUEST_CONSENT);

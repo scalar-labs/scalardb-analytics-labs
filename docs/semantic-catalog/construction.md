@@ -49,16 +49,18 @@ re-evaluation after a user policy change, with its trigger, inputs, and result.
 | `failed` | Failed, with its reason | `created`, by resuming |
 
 A build task records its kind, its triggers (log records), the Fact an evaluation evaluates, the
-Generator and version and the versions of inputs read, and the observation judged with the Facts
-selected for re-examination for an impact judgement. Its result holds the commits it wrote, the
+Generator a run runs, and the observation judged with the Facts selected for re-examination for an
+impact judgement. The versions of the inputs a Generator read are recorded on the acceptances and
+retirement proposals it produced. Its result holds the commits it wrote, the
 model version of an evaluation, the policy version a re-evaluation ran under, the missing inputs
 when there was no candidate, and any duplicate-check matches with the original values.
-**[Planned]** Generator runs and impact judgements are not implemented yet; evaluations by the
-policy evaluation model and policy re-evaluations are.
+**[Planned]** Impact judgements are not implemented yet; Generator runs, evaluations by the policy
+evaluation model, and policy re-evaluations are. A Generator run records the Generator's version and
+the inputs a target lacked in its result, and the run's commit, if it wrote one.
 
-**[Planned]** No Generator suspends to wait. An answer or new input creates a new build task.
-**[Planned]** A Generator lacking input records that there was no candidate and which inputs were
-missing, and succeeds. An unavailable model fails the task, and resuming runs it again on the latest
+No Generator suspends to wait. An answer or new input creates a new build task.
+A Generator lacking input records that there was no candidate and which inputs were
+missing, and succeeds. **[Planned]** An unavailable model fails the task, and resuming runs it again on the latest
 state. Whether construction is
 in progress, blocked, or awaiting judgement is derived: in progress means some task is `created` or
 `running`, blocked means some task is `failed`, and awaiting judgement means the review list is
@@ -68,8 +70,8 @@ When a new trigger arrives for work that already has a `created` task of the sam
 Generator, the Fact an evaluation evaluates, or the domain's re-evaluation, the trigger is added to
 that task instead of creating another, so several reports of one change do not repeat a run. A task
 that has started running takes no more triggers, because the run has not read the new input.
-**[Planned]** Each new observation gets its own impact judgement. **[Planned]** Every acceptance
-references the build task it came from.
+**[Planned]** Each new observation gets its own impact judgement. Every acceptance references the
+build task it came from in its provenance.
 
 The application decides when build tasks run. Running them is a separate public API operation from
 the operations that create them (see [`public-api.md`](public-api.md)). Only one process runs a
@@ -80,7 +82,7 @@ Exclusivity makes that reset safe, because no other process can be running them.
 
 ## Acceptance and the duplicate check
 
-**[Planned]** A Generator returns **raw candidates**, each with its target, value, inputs read,
+A Generator returns **raw candidates**, each with its target, value, inputs read,
 dependency references, and checks. Raw candidates are temporary and never recorded. New elements and
 candidates in one output refer to each other by temporary numbers, replaced by issued URNs at
 acceptance. Validating its own output is the Generator's responsibility; output naming a missing
@@ -116,10 +118,12 @@ An additional acceptance never depends on its own Fact. Its effect depends on th
 - On a `rejected` or `retired` Fact, it is recorded only if it brings a **new dependency
   reference**, one absent from the Fact Revision at the latest rejection, retirement, or unknown
   answer, or an observation newer than the one depended on. It then returns the Fact to `candidate`.
-  A rejected candidate therefore never returns to the deciding party without new input.
+  Otherwise it records nothing and succeeds. A rejected candidate therefore never returns to the
+  deciding party without new input.
 
-An acceptance whose dependency references and validation result equal those of an existing Fact
-Revision records nothing and succeeds, so resuming a failed build task does not pile up records.
+An acceptance whose dependency references and validation result equal those of the Fact's latest
+acceptance records nothing and succeeds, so a Generator run on unchanged input or a resumed build
+task does not pile up records.
 
 At acceptance the Semantic Catalog checks only what a Generator running outside the serialized write
 cannot know: that dependencies form no cycle among Facts, that every referenced record exists, and
@@ -177,7 +181,7 @@ policy evaluation model.
    just before the evaluating commit.
 
 These conditions do not claim that a value is true. They mark where deterministic signals bear on
-the whole value, which covers most of a catalog's structure, such as existence, technical
+the whole value, which covers most of a catalog's structure, such as existence, Physical Catalog
 references, and enforced constraints, so the policy evaluation model is not called for it. Condition
 2 holds because data can refute a rule but not establish one. A sample, or even a whole table, in
 which each member has bought once shows purchase rows whose member IDs do not repeat; adopting that
@@ -241,9 +245,9 @@ used knowing so.
 
 The following each write one commit, so a half-written state is never a readable point:
 
-- **[Planned]** One Generator run: the data observations it read, all acceptances and retirement
-  proposals from it, the inline evaluations of those that can be evaluated, and the confirmations
-  and retirements they adopt.
+- One Generator run: all acceptances and retirement proposals from it, the inline evaluations of
+  those that can be evaluated, and the confirmations and retirements they adopt. **[Planned]** The
+  data observations it read.
 - One evaluation by the policy evaluation model: its `evaluate-policy`, the confirmation or
   retirement it adopts, and the transitions they cause. **[Planned]** Any data observations it read.
 - One submission of answers with the transitions they cause. Answers apply in dependency order, and
@@ -290,7 +294,7 @@ consent, or one conflict. The Semantic Catalog decides what it contains; the int
 presents it decides its format, such as tables in an agent session or a comparison screen in a Web
 UI. A review item carries:
 
-- **What is claimed:** the target, with exact table and column names from its technical-reference
+- **What is claimed:** the target, with exact table and column names from its physical-catalog-reference
   Facts, the predicate, the value, and the applicability scope.
 - **The records behind it, with their content expanded:** inputs read, including
   rejected or retired Facts at the same Fact Address with their answers; checks, with the quotation,
@@ -364,13 +368,13 @@ No operation sets the selected Fact directly. Selection changes only as the rule
 
 | Operation | Writes in one commit | Not accepted when | Creates build tasks for |
 | --- | --- | --- | --- |
-| Register an observation | Input Observation and Observation Event | Content equals the previous observation, which records nothing; a physical schema whose source metadata is unchanged records only a derived record; a table metadata version no newer than one received records nothing | **[Planned]** Generators that read that input kind; an impact judgement for a new physical schema or document observation |
-| **[Planned]** Record a Generator's results (inside a build task) | Data observations, acceptances, retirement proposals, inline evaluations, machine-judgement transitions, cascades | A dependency cycle, a missing referenced record, a check reference that is not a dependency, or an expression value that does not parse; the task fails | Evaluations by the policy evaluation model; Generators that read the newly confirmed predicates |
-| Record an evaluation by the policy evaluation model (inside a build task) | Evaluation with its reason and review material, machine-judgement transitions, cascades; **[Planned]** data observations it read | The Fact no longer waits for the model, which records nothing; inline evaluation now decides it, which records that inline evaluation instead; or the material it read changed, which creates a new evaluation task | Evaluations of dependents left undecided; **[Planned]** Generators that read the newly confirmed predicates |
-| Submit answers | Answers, resulting transitions, cascades, and feedback for each correction | An answer lacks an authority-check reference | Evaluations left undecided; **[Planned]** Generators of rejected, corrected, retired, and cascaded Facts; Generators that read the feedback; Generators that read newly confirmed predicates |
+| Register an observation | Input Observation and Observation Event | Content equals the previous observation, which records nothing; a physical schema whose source metadata is unchanged records only a derived record; a table metadata version no newer than one received records nothing | Generators that read that input kind; **[Planned]** an impact judgement for a new physical schema or document observation |
+| Record a Generator's results (inside a build task) | **[Planned]** Data observations; acceptances, retirement proposals, inline evaluations, machine-judgement transitions, cascades | A dependency cycle, a missing referenced record, a check reference that is not a dependency, or an expression value that does not parse; the task fails | Evaluations by the policy evaluation model; Generators that read the newly confirmed predicates |
+| Record an evaluation by the policy evaluation model (inside a build task) | Evaluation with its reason and review material, machine-judgement transitions, cascades; **[Planned]** data observations it read | The Fact no longer waits for the model, which records nothing; inline evaluation now decides it, which records that inline evaluation instead; or the material it read changed, which creates a new evaluation task | Evaluations of dependents left undecided; Generators that read the newly confirmed predicates |
+| Submit answers | Answers, resulting transitions, cascades, and feedback for each correction | An answer lacks an authority-check reference | Evaluations left undecided; Generators that read newly confirmed predicates; **[Planned]** Generators of rejected, corrected, retired, and cascaded Facts; Generators that read the feedback |
 | Resolve a conflict | `resolve-conflict` | The chosen and passed-over Facts were not the eligible Facts at the previous commit, or no authority-check reference | **[Planned]** Generators of Facts depending on Facts no longer selected |
 | Set a user policy version | Policy version | None | A policy re-evaluation |
-| Re-evaluate the policy (inside a build task) | Evaluations, machine-judgement confirmations, cascades | None | Evaluations left undecided; **[Planned]** Generators that read newly confirmed predicates |
+| Re-evaluate the policy (inside a build task) | Evaluations, machine-judgement confirmations, cascades | None | Evaluations left undecided; Generators that read newly confirmed predicates |
 | Resume a build task | Nothing in the log | The task is not `failed` | None; the task reruns on the latest state |
 
 **[Planned]** Whenever replacement, a conflict resolution, or a retirement changes the selected
@@ -386,7 +390,8 @@ never leaves outside records disagreeing with commits.
 
 ## Following input changes
 
-**[Planned]** This section describes design that is not implemented yet.
+**[Planned]** Impact judgement is not implemented yet. Changes fixed by declarations, handled by
+schema Generators, are.
 
 When a physical schema or document gets a new observation, an **impact judgement** build task
 compares the old and new observations against the Facts that depend on that Input Resource and
@@ -404,10 +409,10 @@ its presentation.
 A renamed column or table is a new element. If `amount` disappears and `gross_amount` appears, the
 old Field is retired and a new Field is created, and the retirement cascades into the
 correspondences and Measures built on the old Field (see
-[`generators.md`](generators.md#column-changes)). Their Generators then propose them again on the
-new premise, reading the retired Facts as inputs read, and the new Field's own predicates come from
-its Generators as for any new column. Knowledge carries over through ordinary evaluation, which the
-policy evaluation model can adopt, rather than by moving a technical reference. A table rename
+[`generators.md`](generators.md#column-changes)). The new Field's own predicates come from its
+Generators as for any new column. **[Planned]** The Generators of the retired Facts then propose
+them again on the new premise, reading the retired Facts as inputs read. Knowledge carries over through ordinary evaluation, which the
+policy evaluation model can adopt, rather than by moving a Physical Catalog reference. A table rename
 appears as "does not exist" for the old name, and the new name becomes a new Dataset once it is
 registered.
 

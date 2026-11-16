@@ -29,7 +29,7 @@ class LogAndCommitTest extends StoreScenarioTest {
     var c = s.begin();
     var orders = c.dataset("shop.public.orders");
     var rowKind = c.address(orders, "row-kind");
-    var resource = c.add(LogRecord.InputResource.physicalSchema("shop.orders"));
+    var resource = c.add(LogRecord.InputResource.physicalSchema("shop.orders", null));
     var first =
         c.add(
             new LogRecord.InputObservation(
@@ -106,7 +106,7 @@ class LogAndCommitTest extends StoreScenarioTest {
     var customersUrn = written.urn(customers);
     var before = s.lastCommit();
 
-    // A Dataset is found by its technical reference; its empty-scope Fact Addresses and
+    // A Dataset is found by its Physical Catalog reference; its empty-scope Fact Addresses and
     // closed-range Facts are found too, so nothing new is written.
     c = s.begin();
     var again = c.datasetProposal("shop.public.orders");
@@ -155,10 +155,10 @@ class LogAndCommitTest extends StoreScenarioTest {
     assertThat(proposed.urn(otherValue)).isNotEqualTo(edges.urn(setRelationship));
 
     c = s.begin();
-    var table = c.add(LogRecord.InputResource.physicalSchema("shop.orders"));
+    var table = c.add(LogRecord.InputResource.physicalSchema("shop.orders", null));
     var firstResource = s.write(c).urn(table);
     c = s.begin();
-    var sameTable = c.add(LogRecord.InputResource.physicalSchema("shop.orders"));
+    var sameTable = c.add(LogRecord.InputResource.physicalSchema("shop.orders", null));
     var secondResource = s.write(c);
     assertThat(secondResource.urn(sameTable)).isEqualTo(firstResource);
     assertThat(secondResource.commit()).isEmpty();
@@ -188,7 +188,7 @@ class LogAndCommitTest extends StoreScenarioTest {
         field.add(new LogRecord.Element(new ElementIdentity.Unique(ElementKind.CONCEPT, "order")));
     field.add(
         new LogRecord.Element(
-            ElementIdentity.PhysicalObject.field(
+            ElementIdentity.PhysicalCatalogObject.field(
                 concept, Scenario.column("shop.public.orders.id"))));
     assertRejected(s, field, "The parent of a Field is a Dataset");
 
@@ -247,11 +247,11 @@ class LogAndCommitTest extends StoreScenarioTest {
     existingElsewhere.field(Ref.urn(ordersUrn), "shop.public.customers.id");
     assertRejected(s, existingElsewhere, "belongs to Dataset " + written.urn(customers));
 
-    // A technical reference never moves, so a Dataset cannot be pointed at another table.
+    // A Physical Catalog reference never moves, so a Dataset cannot be pointed at another table.
     var moved = s.begin();
-    var reference = moved.address(Ref.urn(ordersUrn), Vocabulary.TECHNICAL_REFERENCE);
+    var reference = moved.address(Ref.urn(ordersUrn), Vocabulary.PHYSICAL_CATALOG_REFERENCE);
     moved.accept(moved.closedRangeFact(reference, Scenario.table("shop.public.sales").canonical()));
-    assertRejected(s, moved, "A technical reference never moves");
+    assertRejected(s, moved, "A Physical Catalog reference never moves");
 
     var proposed = s.begin();
     proposed.add(

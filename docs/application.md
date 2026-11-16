@@ -237,8 +237,9 @@ why. The **retrieval operation** runs as follows:
 3. **[Planned]** The Physical Catalog creates and stores versions and returns a change notification
    per table.
 4. For every table except those not retrieved, the application passes the whole retrieved record,
-   exactly as the connector returned it, with the table's resource identifier and current version,
-   to the Semantic Catalog's observation registration, which observes the source metadata and keeps
+   exactly as the connector returned it, with the table's resource identifier, current version, and
+   Physical Catalog reference (the data source name, namespace, and table name, by which the
+   Semantic Catalog names the table's Dataset), to the Semantic Catalog's observation registration, which observes the source metadata and keeps
    the table metadata in a derived record. Tables whose version did not change are
    passed too; the Semantic Catalog records nothing for a version no newer than one it already has.
 

@@ -493,7 +493,7 @@ public final class CatalogSnapshot {
       }
       return new Hierarchy.ElementKnowledge(
           new Knowledge.Element(row.element(), row.kind(), row.parent()),
-          row.technicalReference(),
+          row.physicalCatalogReference(),
           answer);
     }
 
@@ -973,7 +973,7 @@ public final class CatalogSnapshot {
         return Optional.empty();
       }
       if (row.kind() == ElementKind.DATASET) {
-        return Optional.ofNullable(row.technicalReference());
+        return Optional.ofNullable(row.physicalCatalogReference());
       }
       return row.parent() == null ? Optional.empty() : tableOf(row.parent());
     }
@@ -986,7 +986,7 @@ public final class CatalogSnapshot {
       return new Review.Target(
           address.element(),
           row.kind(),
-          row.technicalReference(),
+          row.physicalCatalogReference(),
           address.factAddress(),
           address.predicate(),
           address.scopeDescription(),

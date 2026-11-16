@@ -29,6 +29,13 @@ metadata does not, while the source metadata keeps what has no source-independen
 comments and view definitions. Observing the source metadata alone keeps each declaration in one
 observation, and a change only in the connector's mapping is not mistaken for a change at the source.
 
+What is observed and what a Generator reads are separate questions. Schema interpretation is
+deterministic and must work for every connector, so it reads the source-independent table metadata
+of the latest version received rather than parsing each connector's source metadata, whose shape only that
+connector defines. It still depends on the Input Observation of the source metadata, so its Facts
+track the observation they were read from. Source metadata is read by meaning inference, which can
+interpret any connector's shape and uses what has no source-independent item, such as comments.
+
 ## Consequences
 
 - The application passes every retrieved table, including unchanged ones, so a hand-off lost between
@@ -38,5 +45,10 @@ observation, and a change only in the connector's mapping is not mistaken for a 
   see the same metadata.
 - Users and Query Agents that need keys and constraints read them from the Semantic Catalog.
 - Until the Physical Catalog keeps the table metadata it is built from, the Semantic Catalog also
-  keeps each version's table metadata in a derived record, which no Generator reads as input.
+  keeps each version's table metadata in a derived record. It is not an input kind: schema
+  interpretation reads the table metadata of the latest version received there, and depends on
+  the latest Input Observation.
+- A change only in the connector's mapping adds a derived record and no observation, so it does not
+  run schema interpretation again; Facts read from the earlier mapping stay until a later
+  observation or confirmation runs it.
 - Credentials stay in the Physical Catalog's registration and never travel with the metadata.

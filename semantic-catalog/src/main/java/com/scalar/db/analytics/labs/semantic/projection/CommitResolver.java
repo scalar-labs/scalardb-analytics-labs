@@ -15,6 +15,7 @@ import com.scalar.db.analytics.labs.semantic.model.LogRecord.Basis;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord.FactEvent;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
 import com.scalar.db.analytics.labs.semantic.model.Urns;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.ElementRow;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -40,11 +41,12 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>Records are resolved in request order. Each record that would create something is first
  * matched against existing records by the identity rules (edges, empty-scope Fact Addresses,
- * closed-range Facts, Input Resources, and Datasets and Fields by technical reference), including
- * records earlier in the same request. A matched record is not written, and references to it lead
- * to the existing record. Every other record gets the next position in the commit. A new element,
- * Fact Address, or Fact is issued a name-based URN, which its log record keeps; it is never decided
- * from URNs whether two records are the same. Temporary numbers are replaced by the URNs issued.
+ * closed-range Facts, Input Resources, and Datasets and Fields by Physical Catalog reference),
+ * including records earlier in the same request. A matched record is not written, and references to
+ * it lead to the existing record. Every other record gets the next position in the commit. A new
+ * element, Fact Address, or Fact is issued a name-based URN, which its log record keeps; it is
+ * never decided from URNs whether two records are the same. Temporary numbers are replaced by the
+ * URNs issued.
  *
  * <p>What a temporary number stands for depends on where it is used. It names the record created or
  * matched where a record is expected, the log record where a basis or a policy version is expected,
@@ -133,6 +135,14 @@ public final class CommitResolver {
       urns.put(index, existing.get());
       return;
     }
+    if (record instanceof LogRecord.Accept accept) {
+      var unchanged = unchangedRevision(accept);
+      if (unchanged.isPresent()) {
+        targets.add(new Target(accept.fact().urnValue(), null, unchanged.get()));
+        urns.put(index, unchanged.get());
+        return;
+      }
+    }
     var at = new LogPosition(commit, written.size() + 1);
     var logRecord = Urns.logRecord(domain, at);
     String created;
@@ -141,9 +151,9 @@ public final class CommitResolver {
         created = issue(named);
         record = withUrn(named, created);
         if (named instanceof LogRecord.Element element
-            && element.identity() instanceof ElementIdentity.PhysicalObject technical
-            && technical.parent() != null) {
-          localParents.put(created, technical.parent().urnValue());
+            && element.identity() instanceof ElementIdentity.PhysicalCatalogObject physical
+            && physical.parent() != null) {
+          localParents.put(created, physical.parent().urnValue());
         }
       }
       case LogRecord.InputResource ignored -> created = Urns.of(domain, Urns.INPUT_RESOURCE, at);
@@ -163,16 +173,49 @@ public final class CommitResolver {
   }
 
   /**
+   * The latest Fact Revision of an existing Fact when an acceptance of it would change nothing, so
+   * it is not written (see {@code docs/semantic-catalog/construction.md}, "Acceptance and the
+   * duplicate check"): its dependency references and validation result equal those in effect, or
+   * the Fact is rejected or retired and the acceptance brings no new dependency reference, which
+   * would return a rejected candidate to the deciding party without new input. A Generator that
+   * produces again from unchanged input, or a resumed build task, therefore records nothing.
+   * References to it lead to the Fact Revision of its latest acceptance, which is what a Generator
+   * depends on, so later evaluations and confirmations do not make the same output look new.
+   */
+  private Optional<String> unchangedRevision(LogRecord.Accept accept) {
+    var fact = accept.fact().urnValue();
+    if (issued.contains(fact)) {
+      return Optional.empty();
+    }
+    var slice = projection.fact(fact);
+    if (slice.isEmpty()) {
+      return Optional.empty();
+    }
+    var record = slice.get().record();
+    var accepted = record.latestAcceptance();
+    if (accepted.isEmpty()) {
+      return Optional.empty();
+    }
+    var inactive = record.is(FactState.REJECTED) || record.is(FactState.RETIRED);
+    var unchanged =
+        inactive
+            ? !record.bringsNewDependency(accept.dependencies())
+            : Set.copyOf(record.dependencies()).equals(Set.copyOf(accept.dependencies()))
+                && Set.copyOf(record.checks()).equals(Set.copyOf(accept.checks()));
+    return unchanged ? Optional.of(Urns.factRevision(fact, accepted.get())) : Optional.empty();
+  }
+
+  /**
    * Requires a proposed Field that matched an existing one to name the same parent Dataset. The
-   * match is found by technical reference alone, and a matched record is not written, so the
+   * match is found by Physical Catalog reference alone, and a matched record is not written, so the
    * projector never checks it against its parent; a proposal under another Dataset would otherwise
    * silently lead to a Field of another table.
    */
   private void requireSameParent(LogRecord record, String existing) {
     if (record instanceof LogRecord.Element element
-        && element.identity() instanceof ElementIdentity.PhysicalObject technical
-        && technical.parent() != null) {
-      var parent = technical.parent().urnValue();
+        && element.identity() instanceof ElementIdentity.PhysicalCatalogObject physical
+        && physical.parent() != null) {
+      var parent = physical.parent().urnValue();
       var existingParent =
           localParents.containsKey(existing)
               ? localParents.get(existing)
@@ -182,7 +225,7 @@ public final class CommitResolver {
             "Field "
                 + existing
                 + " for column "
-                + technical.technicalReference().canonical()
+                + physical.physicalCatalogReference().canonical()
                 + " belongs to Dataset "
                 + existingParent
                 + ", not to "
@@ -227,8 +270,8 @@ public final class CommitResolver {
   private String elementUrn(ElementIdentity identity) {
     return switch (identity) {
       case ElementIdentity.Unique named -> Urns.element(domain, named.kind(), named.slug());
-      case ElementIdentity.PhysicalObject technical ->
-          Urns.element(domain, technical.kind(), technical.technicalReference().canonical());
+      case ElementIdentity.PhysicalCatalogObject physical ->
+          Urns.element(domain, physical.kind(), physical.physicalCatalogReference().canonical());
       case ElementIdentity.Edge edge -> {
         var from = edge.fromEnd().stream().map(Ref::urnValue).toList();
         var to = edge.toEnd().stream().map(Ref::urnValue).toList();
@@ -288,10 +331,11 @@ public final class CommitResolver {
     return switch (record) {
       case LogRecord.Element element ->
           switch (element.identity()) {
-            case ElementIdentity.PhysicalObject technical ->
-                lookup.technicalElement(
-                    technical.kind(),
-                    IdentityKey.choice(technical.technicalReference().canonical()).canonical());
+            case ElementIdentity.PhysicalCatalogObject physical ->
+                lookup.physicalCatalogElement(
+                    physical.kind(),
+                    IdentityKey.choice(physical.physicalCatalogReference().canonical())
+                        .canonical());
             case ElementIdentity.Edge edge ->
                 lookup.edge(edge.kind(), Projection.edgeIdentity(edge));
             case ElementIdentity.Unique ignored -> Optional.empty();
@@ -312,12 +356,12 @@ public final class CommitResolver {
     return switch (record) {
       case LogRecord.Element element ->
           switch (element.identity()) {
-            case ElementIdentity.PhysicalObject technical ->
+            case ElementIdentity.PhysicalCatalogObject physical ->
                 Optional.of(
-                    "technical "
-                        + technical.kind()
+                    "physical-catalog "
+                        + physical.kind()
                         + " "
-                        + technical.technicalReference().canonical());
+                        + physical.physicalCatalogReference().canonical());
             case ElementIdentity.Edge edge -> {
               var identity = Projection.edgeIdentity(edge);
               yield Optional.of(
@@ -371,10 +415,10 @@ public final class CommitResolver {
           new LogRecord.Element(
               switch (element.identity()) {
                 case ElementIdentity.Unique pointed -> pointed;
-                case ElementIdentity.PhysicalObject technical ->
-                    new ElementIdentity.PhysicalObject(
-                        technical.parent() == null ? null : toRecord.apply(technical.parent()),
-                        technical.technicalReference());
+                case ElementIdentity.PhysicalCatalogObject physical ->
+                    new ElementIdentity.PhysicalCatalogObject(
+                        physical.parent() == null ? null : toRecord.apply(physical.parent()),
+                        physical.physicalCatalogReference());
                 case ElementIdentity.Edge edge -> edge.mapRefs(toRecord);
               });
       case LogRecord.FactAddress address ->

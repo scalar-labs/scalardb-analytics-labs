@@ -150,25 +150,37 @@ public sealed interface LogRecord {
    * @param tableIdentifier the Physical Catalog's resource identifier of the table whose physical
    *     schema this is; two Input Resources with the same one are the same. Present for a physical
    *     schema and only for it; every other Input Resource is new when it is registered.
+   * @param table the Physical Catalog reference of the table whose physical schema this is, by
+   *     which schema interpretation names its Dataset and Fields; fixed for the table identifier,
+   *     and absent for a physical schema whose table the application could not name by data-source
+   *     registration, namespace, and table, and for every other Input Resource
    */
-  record InputResource(InputKind inputKind, @Nullable String tableIdentifier) implements LogRecord {
+  record InputResource(
+      InputKind inputKind,
+      @Nullable String tableIdentifier,
+      PhysicalCatalogReference.@Nullable Table table)
+      implements LogRecord {
     public InputResource {
       if ((inputKind == InputKind.PHYSICAL_SCHEMA) != (tableIdentifier != null)) {
         throw new IllegalArgumentException(
             "A physical schema, and only a physical schema, has a table identifier");
       }
+      if (inputKind != InputKind.PHYSICAL_SCHEMA && table != null) {
+        throw new IllegalArgumentException("Only a physical schema names a table");
+      }
     }
 
-    public static InputResource physicalSchema(String tableIdentifier) {
-      return new InputResource(InputKind.PHYSICAL_SCHEMA, tableIdentifier);
+    public static InputResource physicalSchema(
+        String tableIdentifier, PhysicalCatalogReference.@Nullable Table table) {
+      return new InputResource(InputKind.PHYSICAL_SCHEMA, tableIdentifier, table);
     }
 
     public static InputResource document() {
-      return new InputResource(InputKind.DOCUMENT, null);
+      return new InputResource(InputKind.DOCUMENT, null, null);
     }
 
     public static InputResource usageFeedback() {
-      return new InputResource(InputKind.USAGE_FEEDBACK, null);
+      return new InputResource(InputKind.USAGE_FEEDBACK, null, null);
     }
   }
 

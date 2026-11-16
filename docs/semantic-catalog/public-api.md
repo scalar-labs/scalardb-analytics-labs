@@ -109,8 +109,12 @@ output says so.
 
 **[Planned]** Registering an observation has two forms.
 
-- **[Planned]** *Table metadata*, passed by the application for each retrieved table, with the Physical Catalog
-  table identifier and its current table metadata version. The whole record is passed exactly as
+- *Table metadata*, passed by the application for each retrieved table, with the Physical Catalog
+  table identifier and its current table metadata version. With it comes the table's Physical Catalog
+  reference, its data-source registration, namespace, and table name, which the first registration
+  of the table keeps on its Input Resource and by which schema interpretation names its Dataset and
+  Fields; a table whose name path is not a namespace and a table name has none, and is observed but
+  not interpreted. The whole record is passed exactly as
   the connector returned it, not the part the Physical Catalog stored: the connector's source
   metadata, the table metadata, the read time, whether the table was read completely or found not
   to exist, the retrieval information, and the content digest. The source metadata is the
@@ -159,7 +163,8 @@ nothing, then runs `created` tasks one at a time, including those created while 
 each task as it finishes, `succeeded` or `failed`, with its result, the missing inputs when there
 was no candidate, or the reason for failure. It returns when no `created` task remains or, if the
 caller asked to keep waiting, when the caller stops it. A Generator run, an evaluation by the policy
-evaluation model, or a re-evaluation records its result in one commit. An impact judgement creates
+evaluation model, or a re-evaluation records its result in one commit; a Generator run whose output
+is the same as what is recorded writes none. **[Planned]** An impact judgement creates
 build tasks for the Generators of the Facts it selects. Resuming a build task returns a `failed`
 task to `created`, to run on the latest state.
 
@@ -199,7 +204,7 @@ point and a position: the domain root, a data source, a namespace, or a table.
   are the same whichever knowledge is asked for, so a confirmed-only read still shows how much
   awaits review.
 
-The data source, namespace, and table of a Dataset come from its technical reference. Until a
+The data source, namespace, and table of a Dataset come from its Physical Catalog reference. Until a
 method for searching the catalog exists, a recursive read from the root returns the whole catalog,
 which is small enough at first to hand to a language model; reading from a lower position keeps a
 read bounded as the catalog grows.

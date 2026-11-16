@@ -51,7 +51,10 @@ public record IdentityKey(List<Part> parts) {
     @JsonSubTypes.Type(value = Part.References.class, name = "references")
   })
   public sealed interface Part {
-    /** A closed choice, such as a row kind or the physical object a technical reference names. */
+    /**
+     * A closed choice, such as a row kind or the physical object a Physical Catalog reference
+     * names.
+     */
     record Choice(String value) implements Part {}
 
     /** A reference to one record, such as a Measure's base Dataset. */

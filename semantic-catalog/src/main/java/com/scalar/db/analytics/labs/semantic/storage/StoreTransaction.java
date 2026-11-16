@@ -250,7 +250,7 @@ public final class StoreTransaction {
         var edge = element.edge();
         jdbc.sql(
                 "INSERT INTO semantic_catalog.elements (domain, element, kind, parent,"
-                    + " technical_reference, created_commit, edge_end_a, edge_end_b,"
+                    + " physical_catalog_reference, created_commit, edge_end_a, edge_end_b,"
                     + " edge_directed, edge_identity_key, edge_identifying_part)"
                     + " VALUES (:domain, :element, :kind, :parent, :reference, :created, :a, :b,"
                     + " :directed, :key, CAST(:part AS jsonb))")
@@ -258,7 +258,7 @@ public final class StoreTransaction {
             .param("element", element.element())
             .param("kind", element.kind().name())
             .param("parent", element.parent(), Types.VARCHAR)
-            .param("reference", element.technicalReference(), Types.VARCHAR)
+            .param("reference", element.physicalCatalogReference(), Types.VARCHAR)
             .param("created", element.createdCommit())
             .param("a", edge == null ? null : edge.endA(), Types.VARCHAR)
             .param("b", edge == null ? null : edge.endB(), Types.VARCHAR)
@@ -420,6 +420,49 @@ public final class StoreTransaction {
         .params(domain, inputResource)
         .query(this::positioned)
         .optional();
+  }
+
+  /** Every physical-schema Input Resource of a domain, with its table identifier, oldest first. */
+  public List<TableResource> physicalSchemaResources(String domain) {
+    return jdbc.sql(
+            "SELECT input_resource, latest_table_metadata_version"
+                + " FROM semantic_catalog.input_resources"
+                + " WHERE domain = ? AND kind = ? ORDER BY created_commit, input_resource")
+        .params(domain, InputKind.PHYSICAL_SCHEMA.name())
+        .query(
+            (rs, row) -> {
+              var version = rs.getLong("latest_table_metadata_version");
+              return new TableResource(
+                  rs.getString("input_resource"),
+                  rs.wasNull() ? OptionalLong.empty() : OptionalLong.of(version));
+            })
+        .list();
+  }
+
+  /**
+   * The Facts whose dependency references in effect include an observation of an Input Resource,
+   * oldest first.
+   */
+  public List<String> factsDependingOn(String domain, String inputResource) {
+    return jdbc.sql(
+            "SELECT DISTINCT d.dependent_fact, f.created_commit"
+                + " FROM semantic_catalog.dependencies d JOIN semantic_catalog.facts f"
+                + " ON f.domain = d.domain AND f.fact = d.dependent_fact"
+                + " WHERE d.domain = ? AND d.depended_input_resource = ? AND d.in_effect"
+                + " ORDER BY f.created_commit, d.dependent_fact")
+        .params(domain, inputResource)
+        .query((rs, row) -> java.util.Objects.requireNonNull(rs.getString(1)))
+        .list();
+  }
+
+  /** The URNs of the elements whose parent is an element, such as the Fields of a Dataset. */
+  public List<String> childElements(String domain, String parent) {
+    return jdbc.sql(
+            "SELECT element FROM semantic_catalog.elements"
+                + " WHERE domain = ? AND parent = ? ORDER BY created_commit, element")
+        .params(domain, parent)
+        .query((rs, row) -> java.util.Objects.requireNonNull(rs.getString(1)))
+        .list();
   }
 
   /** The log record at a log position. */
@@ -840,7 +883,7 @@ public final class StoreTransaction {
       highs[i] = sorted ? question.to() : question.from();
     }
     jdbc.sql(
-            "SELECT q.i - 1 AS question, e.element, e.kind, e.parent, e.technical_reference,"
+            "SELECT q.i - 1 AS question, e.element, e.kind, e.parent, e.physical_catalog_reference,"
                 + " e.created_commit,"
                 + " e.edge_end_a, e.edge_end_b, e.edge_directed, e.edge_identity_key,"
                 + " e.edge_identifying_part::text AS edge_identifying_part"
@@ -879,7 +922,7 @@ public final class StoreTransaction {
   public List<ElementRow> presentedElements(
       String domain, @Nullable ElementKind kind, @Nullable String parent, long commit) {
     return jdbc.sql(
-            "SELECT e.element, e.kind, e.parent, e.technical_reference, e.created_commit,"
+            "SELECT e.element, e.kind, e.parent, e.physical_catalog_reference, e.created_commit,"
                 + " e.edge_end_a, e.edge_end_b,"
                 + " e.edge_directed, e.edge_identity_key,"
                 + " e.edge_identifying_part::text AS edge_identifying_part"
@@ -1276,7 +1319,7 @@ public final class StoreTransaction {
     }
 
     @Override
-    public Optional<String> technicalElement(ElementKind kind, String identityKey) {
+    public Optional<String> physicalCatalogElement(ElementKind kind, String identityKey) {
       return jdbc.sql(
               "SELECT a.element FROM semantic_catalog.facts f"
                   + " JOIN semantic_catalog.fact_addresses a"
@@ -1291,7 +1334,7 @@ public final class StoreTransaction {
                   + " ORDER BY a.element LIMIT 1")
           .param("domain", domain)
           .param("kind", kind.name())
-          .param("predicate", Vocabulary.TECHNICAL_REFERENCE)
+          .param("predicate", Vocabulary.PHYSICAL_CATALOG_REFERENCE)
           .param("value", identityKey)
           .param("states", List.of(FactState.CANDIDATE.name(), FactState.CONFIRMED.name()))
           .query(String.class)
@@ -1381,7 +1424,7 @@ public final class StoreTransaction {
       "SELECT commit_number, ordinal, content::text AS content FROM semantic_catalog.log_records";
 
   private static final String ELEMENTS =
-      "SELECT element, kind, parent, technical_reference, created_commit, edge_end_a, edge_end_b,"
+      "SELECT element, kind, parent, physical_catalog_reference, created_commit, edge_end_a, edge_end_b,"
           + " edge_directed,"
           + " edge_identity_key, edge_identifying_part::text AS edge_identifying_part"
           + " FROM semantic_catalog.elements";
@@ -1441,7 +1484,7 @@ public final class StoreTransaction {
         rs.getString("element"),
         ElementKind.valueOf(rs.getString("kind")),
         rs.getString("parent"),
-        rs.getString("technical_reference"),
+        rs.getString("physical_catalog_reference"),
         rs.getLong("created_commit"),
         edge);
   }

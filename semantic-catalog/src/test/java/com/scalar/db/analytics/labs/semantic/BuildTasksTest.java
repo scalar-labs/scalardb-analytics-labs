@@ -101,6 +101,26 @@ class BuildTasksTest extends StoreScenarioTest {
         task -> {});
   }
 
+  /**
+   * The tasks among these that evaluate the policy. Confirming a Dataset or Field also runs the
+   * schema-interpretation Generators, which these scenarios built by hand give nothing to read.
+   */
+  private static List<Long> evaluations(Scenario s, List<Long> numbers) {
+    return numbers.stream().filter(number -> !isGeneratorRun(task(s, number))).toList();
+  }
+
+  private static List<BuildTask> evaluations(BuildRun.Summary summary) {
+    return evaluations(summary.finished());
+  }
+
+  private static List<BuildTask> evaluations(List<BuildTask> tasks) {
+    return tasks.stream().filter(task -> !isGeneratorRun(task)).toList();
+  }
+
+  private static boolean isGeneratorRun(BuildTask task) {
+    return task.work() instanceof BuildTask.Work.GeneratorRun;
+  }
+
   private static BuildTask task(Scenario s, long number) {
     return store.buildTask(s.domain, number).orElseThrow();
   }
@@ -135,8 +155,8 @@ class BuildTasksTest extends StoreScenarioTest {
     var s = scenario();
     var inferred = inferredRowKind(s, "shop.public.orders");
 
-    assertThat(inferred.written().buildTasks()).hasSize(1);
-    var created = task(s, inferred.written().buildTasks().getFirst());
+    assertThat(evaluations(s, inferred.written().buildTasks())).hasSize(1);
+    var created = task(s, evaluations(s, inferred.written().buildTasks()).getFirst());
     assertThat(created.work()).isEqualTo(new BuildTask.Work.PolicyEvaluation(inferred.rowKind()));
     assertThat(created.status()).isEqualTo(new BuildTask.Status.Created());
     assertThat(created.triggers()).hasSize(1);
@@ -150,14 +170,14 @@ class BuildTasksTest extends StoreScenarioTest {
             Ref.urn(inferred.rowKind()),
             List.of(
                 s.on(inferred.existence()),
-                s.on(selectedFact(s, inferred.dataset(), Vocabulary.TECHNICAL_REFERENCE))),
+                s.on(selectedFact(s, inferred.dataset(), Vocabulary.PHYSICAL_CATALOG_REFERENCE))),
             List.of(supported(ValidationMethod.INFERENCE, "event")),
             Scenario.NOTHING,
             Scenario.NOTHING));
     var again = s.judge(c);
-    assertThat(again.buildTasks()).containsExactly(created.number());
+    assertThat(evaluations(s, again.buildTasks())).containsExactly(created.number());
     assertThat(task(s, created.number()).triggers()).hasSize(2);
-    assertThat(store.buildTasks(s.domain)).hasSize(1);
+    assertThat(evaluations(store.buildTasks(s.domain))).hasSize(1);
   }
 
   private static String selectedFact(Scenario s, String element, String predicate) {
@@ -193,10 +213,11 @@ class BuildTasksTest extends StoreScenarioTest {
     var model = adopting();
     var summary = drain(s, model);
 
-    var evaluated = (BuildTask.Result.Evaluated) result(s, written.buildTasks().getFirst());
+    var evaluated =
+        (BuildTask.Result.Evaluated) result(s, evaluations(s, written.buildTasks()).getFirst());
     assertThat(evaluated.modelVersion()).isEqualTo(MODEL_VERSION);
     assertThat(evaluated.commit()).isEqualTo(s.lastCommit());
-    assertThat(summary.finished()).extracting(BuildTask::number).containsExactly(1L);
+    assertThat(evaluations(summary)).extracting(BuildTask::number).containsExactly(1L);
     assertThat(s.state(rowKindUrn)).contains(FactState.CONFIRMED);
     assertThat(s.revision(rowKindUrn).confirmationPath())
         .isEqualTo(ConfirmationPath.MACHINE_JUDGEMENT);
@@ -241,7 +262,7 @@ class BuildTasksTest extends StoreScenarioTest {
 
     // The row kind's consent request made the grain evaluable; inline evaluation left it to the
     // model too, and the same run evaluated it.
-    assertThat(summary.finished()).hasSize(2);
+    assertThat(evaluations(summary)).hasSize(2);
     assertThat(model.subjects)
         .extracting(subject -> subject.fact().revision().fact())
         .containsExactly(rowKindUrn, grainUrn);
@@ -269,7 +290,7 @@ class BuildTasksTest extends StoreScenarioTest {
   void aCandidateJudgedBeforeItsTaskRunsRecordsNothing() {
     var s = scenario();
     var inferred = inferredRowKind(s, "shop.public.orders");
-    var task = inferred.written().buildTasks().getFirst();
+    var task = evaluations(s, inferred.written().buildTasks()).getFirst();
     submit(s, answer(inferred.rowKind(), AnswerType.CONSENT));
     assertThat(s.state(inferred.rowKind())).contains(FactState.CONFIRMED);
     var before = s.lastCommit();
@@ -286,7 +307,7 @@ class BuildTasksTest extends StoreScenarioTest {
   void anEvaluationMadeOnStaleMaterialIsReplacedByANewTask() {
     var s = scenario();
     var inferred = inferredRowKind(s, "shop.public.orders");
-    var task = inferred.written().buildTasks().getFirst();
+    var task = evaluations(s, inferred.written().buildTasks()).getFirst();
     var first = new AtomicBoolean(true);
     var model =
         new StandIn(
@@ -302,7 +323,7 @@ class BuildTasksTest extends StoreScenarioTest {
 
     var superseded = (BuildTask.Result.Superseded) result(s, task);
     assertThat(result(s, superseded.followUp())).isInstanceOf(BuildTask.Result.Evaluated.class);
-    assertThat(summary.finished())
+    assertThat(evaluations(summary))
         .extracting(finished -> finished.work().kind())
         .containsExactly(
             BuildTask.Kind.POLICY_EVALUATION,
@@ -316,7 +337,7 @@ class BuildTasksTest extends StoreScenarioTest {
   void aFailedTaskIsResumedAndRunsOnTheLatestState() {
     var s = scenario();
     var inferred = inferredRowKind(s, "shop.public.orders");
-    var task = inferred.written().buildTasks().getFirst();
+    var task = evaluations(s, inferred.written().buildTasks()).getFirst();
 
     var unavailable =
         new StandIn(
@@ -324,12 +345,12 @@ class BuildTasksTest extends StoreScenarioTest {
               throw new IllegalStateException("The policy evaluation model is unavailable");
             });
     var summary = drain(s, unavailable);
-    assertThat(summary.finished()).hasSize(1);
+    assertThat(evaluations(summary)).hasSize(1);
     assertThat(task(s, task).status())
         .isEqualTo(new BuildTask.Status.Failed("The policy evaluation model is unavailable"));
     assertThat(s.state(inferred.rowKind())).contains(FactState.CANDIDATE);
     // A failed task is not run again until resumed.
-    assertThat(drain(s, adopting()).finished()).isEmpty();
+    assertThat(evaluations(drain(s, adopting()))).isEmpty();
 
     assertThat(store.resumeBuildTask(s.domain, task).status())
         .isEqualTo(new BuildTask.Status.Created());
@@ -378,7 +399,7 @@ class BuildTasksTest extends StoreScenarioTest {
   void aRunStartsByReturningAbandonedTasksToCreated() throws Exception {
     var s = scenario();
     var inferred = inferredRowKind(s, "shop.public.orders");
-    var task = inferred.written().buildTasks().getFirst();
+    var task = evaluations(s, inferred.written().buildTasks()).getFirst();
     // A run that stopped during its model call left the task running and wrote nothing.
     try (var connection = TestStore.connect();
         var statement =
@@ -417,9 +438,9 @@ class BuildTasksTest extends StoreScenarioTest {
     stop.set(true);
     var summary = run.get(30, TimeUnit.SECONDS);
 
-    assertThat(summary.finished())
+    assertThat(evaluations(summary))
         .extracting(BuildTask::number)
-        .containsExactly(inferred.written().buildTasks().getFirst());
+        .containsExactly(evaluations(s, inferred.written().buildTasks()).getFirst());
     assertThat(s.state(inferred.rowKind())).contains(FactState.CONFIRMED);
   }
 
@@ -443,7 +464,7 @@ class BuildTasksTest extends StoreScenarioTest {
             written.urn(orders.reference().fact()),
             written.urn(rowKind.fact()));
     assertThat(reviewedFacts(s)).containsExactlyInAnyOrderElementsOf(facts);
-    assertThat(written.buildTasks()).isEmpty();
+    assertThat(evaluations(s, written.buildTasks())).isEmpty();
 
     var set =
         store.setPolicyVersion(
@@ -537,7 +558,7 @@ class BuildTasksTest extends StoreScenarioTest {
     var model = adopting();
     drain(s, model);
 
-    assertThat(result(s, proposed.buildTasks().getFirst()))
+    assertThat(result(s, evaluations(s, proposed.buildTasks()).getFirst()))
         .isInstanceOf(BuildTask.Result.Evaluated.class);
     assertThat(s.state(keyUrn)).contains(FactState.RETIRED);
     var subject = (Subject.Retirement) model.subjects.getFirst();
@@ -609,7 +630,7 @@ class BuildTasksTest extends StoreScenarioTest {
     c = s.begin();
     Judgement.proposeRetire(
         c, written.ref(orders.existence().fact()), supported(ValidationMethod.INFERENCE, "gone"));
-    var first = s.judge(c).buildTasks().getFirst();
+    var first = evaluations(s, s.judge(c).buildTasks()).getFirst();
     var proposed = new AtomicBoolean();
     var model =
         new StandIn(

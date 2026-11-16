@@ -22,7 +22,9 @@ import org.jspecify.annotations.Nullable;
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "identity")
 @JsonSubTypes({
   @JsonSubTypes.Type(value = ElementIdentity.Unique.class, name = "unique"),
-  @JsonSubTypes.Type(value = ElementIdentity.PhysicalObject.class, name = "physical-object"),
+  @JsonSubTypes.Type(
+      value = ElementIdentity.PhysicalCatalogObject.class,
+      name = "physical-catalog-object"),
   @JsonSubTypes.Type(
       value = ElementIdentity.IdentifierCorrespondence.class,
       name = "identifier-correspondence"),
@@ -43,7 +45,7 @@ public sealed interface ElementIdentity {
    */
   record Unique(ElementKind kind, String slug) implements ElementIdentity {
     public Unique {
-      if (kind.edge() || kind.technical()) {
+      if (kind.edge() || kind.physicalCatalog()) {
         throw new IllegalArgumentException(kind + " is not identified by pointing");
       }
       Urns.requireSlug(slug);
@@ -52,33 +54,36 @@ public sealed interface ElementIdentity {
 
   /**
    * A Dataset or a Field. It is the same as an existing element of its kind when their
-   * technical-reference Facts that are neither rejected nor retired point to the same physical
-   * object. A technical reference never moves, so a renamed table or column is a new element.
+   * physical-catalog-reference Facts that are neither rejected nor retired point to the same
+   * physical object. A Physical Catalog reference never moves, so a renamed table or column is a
+   * new element.
    *
    * @param parent the Dataset of a Field, which refers to the Field's table; absent for a Dataset
-   * @param technicalReference the physical object the element refers to, whose canonical form is
-   *     also the matching value of the element's technical-reference Fact
+   * @param physicalCatalogReference the physical object the element refers to, whose canonical form
+   *     is also the matching value of the element's physical-catalog-reference Fact
    */
-  record PhysicalObject(@Nullable Ref parent, TechnicalReference technicalReference)
+  record PhysicalCatalogObject(
+      @Nullable Ref parent, PhysicalCatalogReference physicalCatalogReference)
       implements ElementIdentity {
-    public PhysicalObject {
-      if ((technicalReference instanceof TechnicalReference.Column) != (parent != null)) {
+    public PhysicalCatalogObject {
+      if ((physicalCatalogReference instanceof PhysicalCatalogReference.Column)
+          != (parent != null)) {
         throw new IllegalArgumentException("A Field, and only a Field, has a parent Dataset");
       }
     }
 
-    public static PhysicalObject dataset(TechnicalReference.Table table) {
-      return new PhysicalObject(null, table);
+    public static PhysicalCatalogObject dataset(PhysicalCatalogReference.Table table) {
+      return new PhysicalCatalogObject(null, table);
     }
 
-    public static PhysicalObject field(Ref dataset, TechnicalReference.Column column) {
-      return new PhysicalObject(dataset, column);
+    public static PhysicalCatalogObject field(Ref dataset, PhysicalCatalogReference.Column column) {
+      return new PhysicalCatalogObject(dataset, column);
     }
 
     @JsonIgnore
     @Override
     public ElementKind kind() {
-      return technicalReference.elementKind();
+      return physicalCatalogReference.elementKind();
     }
   }
 

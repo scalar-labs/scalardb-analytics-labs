@@ -50,14 +50,14 @@ CREATE INDEX log_records_target_fact_address
     WHERE target_fact_address IS NOT NULL;
 
 -- Edge ends hold each end in its canonical form, a JSON array of the URNs of its elements.
--- technical_reference is the canonical form of the table or column that identifies a Dataset or a
--- Field.
+-- physical_catalog_reference is the canonical form of the table or column that identifies a
+-- Dataset or a Field.
 CREATE TABLE semantic_catalog.elements (
     domain text NOT NULL,
     element text NOT NULL,
     kind text NOT NULL,
     parent text,
-    technical_reference text,
+    physical_catalog_reference text,
     created_commit bigint NOT NULL,
     edge_end_a text,
     edge_end_b text,
@@ -115,7 +115,7 @@ CREATE UNIQUE INDEX facts_matching_value
 CREATE INDEX facts_address
     ON semantic_catalog.facts (domain, fact_address);
 
--- Datasets and Fields are found by the identity key of their technical-reference Facts.
+-- Datasets and Fields are found by the identity key of their physical-catalog-reference Facts.
 CREATE INDEX facts_by_matching_value
     ON semantic_catalog.facts (domain, identity_key)
     WHERE identity_key IS NOT NULL;
@@ -187,6 +187,11 @@ CREATE INDEX dependencies_depended_fact
     ON semantic_catalog.dependencies (domain, depended_fact)
     WHERE depended_fact IS NOT NULL;
 
+-- Schema interpretation finds the Facts that depend on a table's physical schema.
+CREATE INDEX dependencies_depended_input_resource
+    ON semantic_catalog.dependencies (domain, depended_input_resource)
+    WHERE depended_input_resource IS NOT NULL;
+
 -- The selected and eligible Facts of a Fact Address over a commit range: from from_commit until
 -- to_commit, exclusive, or open while to_commit is null. A row is added only when the selection
 -- changes.
@@ -240,8 +245,8 @@ CREATE TABLE semantic_catalog.derived_records (
 -- Build tasks: one run of a Generator, an impact judgement, an evaluation by the policy evaluation
 -- model, or a policy re-evaluation. Running one changes no Fact's state by itself, so it is not in
 -- the log. task is a number increasing within the domain; kind and state are kept as columns for
--- build task reads; target is the Fact an evaluation task evaluates, to find the created task a new
--- trigger joins; content holds the work, the triggers, and the result or failure reason.
+-- build task reads; target is the Fact an evaluation task evaluates or the Generator a run runs, to
+-- find the created task a new trigger joins; content holds the work, the triggers, and the result or failure reason.
 CREATE TABLE semantic_catalog.build_tasks (
     domain text NOT NULL REFERENCES semantic_catalog.domains (domain),
     task bigint NOT NULL,

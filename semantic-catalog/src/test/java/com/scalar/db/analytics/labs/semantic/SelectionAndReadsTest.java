@@ -404,7 +404,7 @@ class SelectionAndReadsTest extends StoreScenarioTest {
     var s = scenario();
     var c = s.begin();
     var orders = c.dataset("shop.public.orders");
-    var resource = c.add(LogRecord.InputResource.physicalSchema("shop.orders"));
+    var resource = c.add(LogRecord.InputResource.physicalSchema("shop.orders", null));
     var observation =
         c.add(
             new LogRecord.InputObservation(
@@ -437,10 +437,11 @@ class SelectionAndReadsTest extends StoreScenarioTest {
     var field =
         c.add(
             new LogRecord.Element(
-                ElementIdentity.PhysicalObject.field(dataset, Scenario.column(column))));
+                ElementIdentity.PhysicalCatalogObject.field(dataset, Scenario.column(column))));
     var existence = c.closedRangeCandidate(c.address(field, Vocabulary.EXISTENCE), "exists");
     c.closedRangeCandidate(
-        c.address(field, Vocabulary.TECHNICAL_REFERENCE), Scenario.column(column).canonical());
+        c.address(field, Vocabulary.PHYSICAL_CATALOG_REFERENCE),
+        Scenario.column(column).canonical());
     if (confirmed) {
       c.confirmByMachine(existence);
     }

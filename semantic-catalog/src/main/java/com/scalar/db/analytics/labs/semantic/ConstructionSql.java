@@ -5,8 +5,8 @@
 package com.scalar.db.analytics.labs.semantic;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.scalar.db.analytics.labs.semantic.model.PhysicalCatalogReference;
 import com.scalar.db.analytics.labs.semantic.model.SemanticCatalogException;
-import com.scalar.db.analytics.labs.semantic.model.TechnicalReference;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
@@ -48,7 +48,7 @@ public interface ConstructionSql {
       if (inputs.isEmpty()) {
         throw new IllegalArgumentException("A construction query declares the tables it reads");
       }
-      var tables = new HashSet<TechnicalReference.Table>();
+      var tables = new HashSet<PhysicalCatalogReference.Table>();
       for (var input : inputs) {
         if (!tables.add(input.table())) {
           throw new IllegalArgumentException(
@@ -59,7 +59,7 @@ public interface ConstructionSql {
   }
 
   /** A declared table and how it is read. */
-  record Input(TechnicalReference.Table table, Reading reading) {
+  record Input(PhysicalCatalogReference.Table table, Reading reading) {
     public Input {
       Objects.requireNonNull(table, "table");
       Objects.requireNonNull(reading, "reading");
@@ -116,7 +116,7 @@ public interface ConstructionSql {
    * @param rowsRead how many of its rows were read
    * @param readAt when the statement started reading
    */
-  record Range(TechnicalReference.Table table, Extent extent, long rowsRead, Instant readAt) {
+  record Range(PhysicalCatalogReference.Table table, Extent extent, long rowsRead, Instant readAt) {
     public Range {
       Objects.requireNonNull(table, "table");
       Objects.requireNonNull(extent, "extent");

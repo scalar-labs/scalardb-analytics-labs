@@ -16,9 +16,9 @@ import com.scalar.db.analytics.labs.semantic.model.LogPosition;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord.Basis;
 import com.scalar.db.analytics.labs.semantic.model.MatchingCondition;
+import com.scalar.db.analytics.labs.semantic.model.PhysicalCatalogReference;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
 import com.scalar.db.analytics.labs.semantic.model.Scope;
-import com.scalar.db.analytics.labs.semantic.model.TechnicalReference;
 import com.scalar.db.analytics.labs.semantic.model.Urns;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.AnswerType;
@@ -114,18 +114,18 @@ final class Scenario {
   }
 
   /** A table named by its dotted registration, namespace, and table, such as {@code a.b.c}. */
-  static TechnicalReference.Table table(String dotted) {
+  static PhysicalCatalogReference.Table table(String dotted) {
     var parts = dotted.split("\\.");
     if (parts.length != 3) {
       throw new IllegalArgumentException("Not registration.namespace.table: " + dotted);
     }
-    return new TechnicalReference.Table(parts[0], parts[1], parts[2]);
+    return new PhysicalCatalogReference.Table(parts[0], parts[1], parts[2]);
   }
 
   /** A column named by its dotted table and column, such as {@code a.b.c.d}. */
-  static TechnicalReference.Column column(String dotted) {
+  static PhysicalCatalogReference.Column column(String dotted) {
     var split = dotted.lastIndexOf('.');
-    return new TechnicalReference.Column(
+    return new PhysicalCatalogReference.Column(
         table(dotted.substring(0, split)), dotted.substring(split + 1));
   }
 
@@ -147,7 +147,7 @@ final class Scenario {
     }
 
     /**
-     * A Dataset with accepted existence and technical-reference Facts.
+     * A Dataset with accepted existence and physical-catalog-reference Facts.
      *
      * @param table the registration, namespace, and table, such as {@code shop.public.orders}
      */
@@ -159,29 +159,34 @@ final class Scenario {
     }
 
     /**
-     * The records proposing a Dataset, its existence, and its technical reference, without
+     * The records proposing a Dataset, its existence, and its Physical Catalog reference, without
      * accepting the Facts: a proposal that only finds existing records.
      */
     Ref.Temp datasetProposal(String table) {
       var reference = table(table);
       var dataset =
-          (Ref.Temp) add(new LogRecord.Element(ElementIdentity.PhysicalObject.dataset(reference)));
+          (Ref.Temp)
+              add(new LogRecord.Element(ElementIdentity.PhysicalCatalogObject.dataset(reference)));
       closedRangeFact(address(dataset, Vocabulary.EXISTENCE), "exists");
-      closedRangeFact(address(dataset, Vocabulary.TECHNICAL_REFERENCE), reference.canonical());
+      closedRangeFact(
+          address(dataset, Vocabulary.PHYSICAL_CATALOG_REFERENCE), reference.canonical());
       return dataset;
     }
 
     /**
-     * A Field of a Dataset with accepted existence and technical-reference Facts.
+     * A Field of a Dataset with accepted existence and physical-catalog-reference Facts.
      *
      * @param column the Dataset's table and the column, such as {@code shop.public.orders.amount}
      */
     Ref field(Ref dataset, String column) {
       var reference = column(column);
       var field =
-          add(new LogRecord.Element(ElementIdentity.PhysicalObject.field(dataset, reference)));
+          add(
+              new LogRecord.Element(
+                  ElementIdentity.PhysicalCatalogObject.field(dataset, reference)));
       closedRangeCandidate(address(field, Vocabulary.EXISTENCE), "exists");
-      closedRangeCandidate(address(field, Vocabulary.TECHNICAL_REFERENCE), reference.canonical());
+      closedRangeCandidate(
+          address(field, Vocabulary.PHYSICAL_CATALOG_REFERENCE), reference.canonical());
       return field;
     }
 

@@ -32,7 +32,8 @@ public record BuildTask(long number, Work work, List<String> triggers, Status st
   /** The kinds of build task, as stored. */
   public enum Kind {
     POLICY_EVALUATION("policy-evaluation"),
-    POLICY_RE_EVALUATION("policy-re-evaluation");
+    POLICY_RE_EVALUATION("policy-re-evaluation"),
+    GENERATOR_RUN("generator-run");
 
     private final String value;
 
@@ -59,7 +60,8 @@ public record BuildTask(long number, Work work, List<String> triggers, Status st
   @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "kind")
   @JsonSubTypes({
     @JsonSubTypes.Type(value = Work.PolicyEvaluation.class, name = "policy-evaluation"),
-    @JsonSubTypes.Type(value = Work.PolicyReEvaluation.class, name = "policy-re-evaluation")
+    @JsonSubTypes.Type(value = Work.PolicyReEvaluation.class, name = "policy-re-evaluation"),
+    @JsonSubTypes.Type(value = Work.GeneratorRun.class, name = "generator-run")
   })
   public sealed interface Work {
     Kind kind();
@@ -93,6 +95,25 @@ public record BuildTask(long number, Work work, List<String> triggers, Status st
       @Override
       public @Nullable String target() {
         return null;
+      }
+    }
+
+    /**
+     * One run of a Generator over the targets its triggers point to: observations of an input kind
+     * it reads and confirmations of a predicate it reads. A created run of the same Generator takes
+     * every new trigger, so several reports of one change do not repeat a run.
+     *
+     * @param generator the name of the Generator
+     */
+    record GeneratorRun(String generator) implements Work {
+      @Override
+      public Kind kind() {
+        return Kind.GENERATOR_RUN;
+      }
+
+      @Override
+      public String target() {
+        return generator;
       }
     }
   }
@@ -167,7 +188,8 @@ public record BuildTask(long number, Work work, List<String> triggers, Status st
     @JsonSubTypes.Type(value = Result.EvaluatedInline.class, name = "evaluated-inline"),
     @JsonSubTypes.Type(value = Result.NoLongerAwaiting.class, name = "no-longer-awaiting"),
     @JsonSubTypes.Type(value = Result.Superseded.class, name = "superseded"),
-    @JsonSubTypes.Type(value = Result.ReEvaluated.class, name = "re-evaluated")
+    @JsonSubTypes.Type(value = Result.ReEvaluated.class, name = "re-evaluated"),
+    @JsonSubTypes.Type(value = Result.Generated.class, name = "generated")
   })
   public sealed interface Result {
     /**
@@ -214,6 +236,22 @@ public record BuildTask(long number, Work work, List<String> triggers, Status st
         implements Result {
       public ReEvaluated {
         evaluationTasks = List.copyOf(evaluationTasks);
+      }
+    }
+
+    /**
+     * A Generator ran and its output was recorded.
+     *
+     * @param generatorVersion the version of the Generator that ran
+     * @param commit the commit of its acceptances, retirement proposals, and the transitions they
+     *     caused; absent when the output was the same as what is already recorded, or empty
+     * @param missingInputs the inputs a target lacked, for which the Generator produced nothing,
+     *     such as a table that has no Physical Catalog reference
+     */
+    record Generated(String generatorVersion, @Nullable Long commit, List<String> missingInputs)
+        implements Result {
+      public Generated {
+        missingInputs = List.copyOf(missingInputs);
       }
     }
   }

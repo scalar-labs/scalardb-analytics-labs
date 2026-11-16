@@ -17,7 +17,7 @@ import com.scalar.db.analytics.labs.physical.PhysicalTable;
 import com.scalar.db.analytics.labs.query.QueryEngineException;
 import com.scalar.db.analytics.labs.query.QueryError;
 import com.scalar.db.analytics.labs.semantic.ConstructionSql;
-import com.scalar.db.analytics.labs.semantic.model.TechnicalReference;
+import com.scalar.db.analytics.labs.semantic.model.PhysicalCatalogReference;
 import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;
@@ -146,9 +146,9 @@ public final class EngineConstructionSql implements ConstructionSql {
   /** Checks what the statement reads against the declared inputs and applies their sampling. */
   private String scopedSql(DuckDbQueryEngine engine, Request request, long deadline) {
     var statement = StatementTables.of(serialize(engine, request.sql(), deadline));
-    var declared = new LinkedHashMap<TechnicalReference.Table, Input>();
+    var declared = new LinkedHashMap<PhysicalCatalogReference.Table, Input>();
     request.inputs().forEach(input -> declared.put(input.table(), input));
-    var read = new HashSet<TechnicalReference.Table>();
+    var read = new HashSet<PhysicalCatalogReference.Table>();
     var sampled = false;
     for (var reference : statement.baseTables()) {
       if (statement.isCommonTableExpression(reference)) {
@@ -185,14 +185,14 @@ public final class EngineConstructionSql implements ConstructionSql {
     return sampled ? deserialize(engine, statement.tree(), deadline) : request.sql();
   }
 
-  private static Optional<TechnicalReference.Table> declaredTable(ObjectNode reference) {
+  private static Optional<PhysicalCatalogReference.Table> declaredTable(ObjectNode reference) {
     var catalog = StatementTables.catalog(reference);
     var schema = StatementTables.schema(reference);
     var table = StatementTables.table(reference);
     if (catalog.isEmpty() || schema.isEmpty() || table.isEmpty()) {
       return Optional.empty();
     }
-    return Optional.of(new TechnicalReference.Table(catalog, schema, table));
+    return Optional.of(new PhysicalCatalogReference.Table(catalog, schema, table));
   }
 
   /** The serialized sample clause every sampled reference gets. */
@@ -347,7 +347,7 @@ public final class EngineConstructionSql implements ConstructionSql {
     }
   }
 
-  private static String quoted(TechnicalReference.Table table) {
+  private static String quoted(PhysicalCatalogReference.Table table) {
     return identifier(table.registration())
         + "."
         + identifier(table.namespace())

@@ -79,7 +79,7 @@ public final class Review {
   public record Target(
       String element,
       Vocabulary.ElementKind elementKind,
-      @Nullable String technicalReference,
+      @Nullable String physicalCatalogReference,
       String factAddress,
       String predicate,
       @Nullable String scopeDescription,

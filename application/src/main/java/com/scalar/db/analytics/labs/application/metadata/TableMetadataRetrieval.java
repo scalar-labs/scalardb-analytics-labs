@@ -24,6 +24,7 @@ import com.scalar.db.analytics.labs.physical.PhysicalCatalog;
 import com.scalar.db.analytics.labs.semantic.SemanticCatalogStore;
 import com.scalar.db.analytics.labs.semantic.TableMetadataObservation;
 import com.scalar.db.analytics.labs.semantic.TableMetadataRegistration;
+import com.scalar.db.analytics.labs.semantic.model.PhysicalCatalogReference;
 import com.scalar.db.analytics.labs.semantic.model.SemanticCatalogException;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -181,6 +182,7 @@ public final class TableMetadataRetrieval {
     var outcomes = new ArrayList<TableOutcome>();
     for (var record : result.records()) {
       var identifier = tableIdentifier(sourceName, record.table());
+      var reference = PhysicalCatalogReference.Table.of(sourceName, record.table());
       final TableMetadataObservation observation;
       switch (record) {
         // Neither says whether the table exists, so neither may look like a change.
@@ -202,6 +204,7 @@ public final class TableMetadataRetrieval {
           observation =
               new TableMetadataObservation(
                   identifier,
+                  reference,
                   ChronoUnit.MICROS.between(Instant.EPOCH, read.readAt()),
                   new TableMetadataObservation.Read(
                       read.complete(),
@@ -216,6 +219,7 @@ public final class TableMetadataRetrieval {
             observation =
                 new TableMetadataObservation(
                     identifier,
+                    reference,
                     ChronoUnit.MICROS.between(Instant.EPOCH, Instant.now()),
                     new TableMetadataObservation.DoesNotExist(),
                     retrieval,

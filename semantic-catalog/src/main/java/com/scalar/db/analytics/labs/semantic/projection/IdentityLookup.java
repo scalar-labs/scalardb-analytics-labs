@@ -15,20 +15,20 @@ import java.util.Optional;
  *
  * <p>Edges, empty-scope Fact Addresses, closed-range Facts, and Input Resources are also kept
  * unique by constraints in the store. Datasets and Fields cannot be: their identity depends on the
- * state of technical-reference Facts, so only this search keeps it. Either way, a concurrent writer
- * that created the same record first committed a commit this writer collides with, and the retry
- * finds that record.
+ * state of physical-catalog-reference Facts, so only this search keeps it. Either way, a concurrent
+ * writer that created the same record first committed a commit this writer collides with, and the
+ * retry finds that record.
  *
  * <p>Each method returns the URN of the existing record, or empty when there is none.
  */
 public interface IdentityLookup {
   /**
-   * The Dataset or Field of a kind whose technical-reference Fact, at the empty-scope Fact Address,
-   * has an identity key.
+   * The Dataset or Field of a kind whose physical-catalog-reference Fact, at the empty-scope Fact
+   * Address, has an identity key.
    *
-   * @param identityKey the canonical identity key of the technical reference
+   * @param identityKey the canonical identity key of the Physical Catalog reference
    */
-  Optional<String> technicalElement(ElementKind kind, String identityKey);
+  Optional<String> physicalCatalogElement(ElementKind kind, String identityKey);
 
   /** The edge of a kind with the same ends, direction, and identifying part. */
   Optional<String> edge(ElementKind kind, EdgeIdentity identity);

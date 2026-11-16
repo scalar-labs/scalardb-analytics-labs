@@ -1,6 +1,8 @@
 # What is the unit of a Semantic Catalog Generator?
 
-**[Planned]** This decision is accepted but not implemented yet.
+The schema-interpretation Generators implement this decision. **[Planned]** The data-check and
+meaning-inference Generators, and running a Generator again after a rejection, correction, or
+retirement, are not implemented yet.
 
 ## Current answer
 

@@ -142,6 +142,19 @@ public final class SemanticCatalogStore implements AutoCloseable {
     return store.write(transaction -> commit(transaction, domain, request, false));
   }
 
+  /**
+   * Creates a run of a Generator, or adds a trigger to its created run, as a commit calling for it
+   * would, for tests that run a Generator again on unchanged input.
+   *
+   * @return the number of the task
+   */
+  long requestGeneratorRun(String domain, String generator, String trigger) {
+    return store.write(
+        transaction ->
+            BuildTasks.trigger(
+                transaction, domain, new BuildTask.Work.GeneratorRun(generator), trigger));
+  }
+
   static CommitResult commit(
       StoreTransaction transaction, String domain, CommitRequest request, boolean transitions) {
     requireDomain(transaction, domain);
@@ -194,11 +207,15 @@ public final class SemanticCatalogStore implements AutoCloseable {
     }
     persist(transaction, domain, projection, records);
     var tasks =
-        BuildTasks.evaluationsFor(
-            transaction,
-            domain,
-            outcome.awaitingModel(),
-            Urns.logRecord(domain, records.getLast().position()));
+        new ArrayList<>(
+            BuildTasks.evaluationsFor(
+                transaction,
+                domain,
+                outcome.awaitingModel(),
+                Urns.logRecord(domain, records.getLast().position())));
+    BuildTasks.generatorRunsFor(transaction, domain, projection, records).stream()
+        .filter(task -> !tasks.contains(task))
+        .forEach(tasks::add);
     return new CommitResult(OptionalLong.of(commit), urns, moved, tasks);
   }
 
@@ -322,7 +339,10 @@ public final class SemanticCatalogStore implements AutoCloseable {
                 resource, Urns.of(domain, Urns.INPUT_OBSERVATION, previous.get().position()));
           }
           var request = CommitRequest.builder("register-observation", author);
-          var resourceRef = request.add(LogRecord.InputResource.physicalSchema(table));
+          var resourceRef =
+              request.add(
+                  LogRecord.InputResource.physicalSchema(
+                      table, observation.reference().orElse(null)));
           var observed = request.add(new LogRecord.InputObservation(resourceRef, null, declared));
           request.add(
               new LogRecord.ObservationEvent(

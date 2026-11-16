@@ -39,12 +39,12 @@ public final class Hierarchy {
   /**
    * An element with the result of requesting all its predicates.
    *
-   * @param technicalReference the canonical form of a Dataset's or a Field's technical reference;
-   *     absent for other kinds
+   * @param physicalCatalogReference the canonical form of a Dataset's or a Field's Physical Catalog
+   *     reference; absent for other kinds
    */
   public record ElementKnowledge(
       Knowledge.Element element,
-      @Nullable String technicalReference,
+      @Nullable String physicalCatalogReference,
       Knowledge.Answer predicates) {}
 
   /**

@@ -11,7 +11,8 @@ counts that are expected to be tuned from use of the product.
 
 ## One rule per Generator
 
-**[Planned]** This section describes design that is not implemented yet.
+The schema-interpretation Generators are implemented. **[Planned]** The data-check and
+meaning-inference Generators are not.
 
 Each interpretation or check rule is its own Generator. The rule that derives a key from a primary
 key and the rule that derives an identifier correspondence from a foreign key are separate
@@ -31,10 +32,10 @@ candidate inline depends on the validation methods of its checks, never on its r
 
 | Route | Generator | Produces |
 | --- | --- | --- |
-| Schema interpretation | Table and column ingestion | Existence and technical references of Datasets and Fields; retirement proposals for elements that disappeared |
+| Schema interpretation | Table and column ingestion | Existence and Physical Catalog references of Datasets and Fields; retirement proposals for elements that disappeared |
 | Schema interpretation | Key from primary key | A Dataset's key |
 | Schema interpretation | Uniqueness declaration ingestion | Uniqueness of a Field set |
-| Schema interpretation | Correspondence from foreign key | Existence of an identifier correspondence and its business definition; support for the containment of the referencing side in its set relationship |
+| Schema interpretation | Correspondence from foreign key | Existence of an identifier correspondence and its business definition; **[Planned]** support for the containment of the referencing side in its set relationship |
 | Schema interpretation | Value kind from source type | Time-or-date and boolean value kinds |
 | Data checks | Uniqueness check | Uniqueness of a Field set |
 | Data checks | Candidate key discovery | Uniqueness, and a key for a Dataset without a primary key |
@@ -55,10 +56,11 @@ never by itself a basis for derivation.
 
 ## The Generator contract
 
-**[Planned]** This section describes design that is not implemented yet.
-
 **Input kinds.** Each Generator declares what it may read, and build tasks are created from these
-declarations:
+declarations. A commit that records a new observation or a confirmation creates, in the same
+transaction, a run of each Generator that reads it, or adds the commit's log record as a trigger to
+the run of that Generator not started yet. **[Planned]** Document and usage-feedback inputs have no
+Generator yet.
 
 | Input kind | Creates build tasks when |
 | --- | --- |
@@ -69,7 +71,10 @@ declarations:
 | Data observation | Never; data observations are written with the results that read them |
 
 Derived records are not an input kind. A dependency can point only to an Input Observation or a Fact
-Revision, so a candidate built from a derived record could not track changes.
+Revision, so a candidate built from a derived record could not track changes. Schema interpretation
+reads the table metadata of the latest version received, which the derived record still holds,
+as the source-independent form of what the observed source metadata declares, and depends on the
+latest Input Observation; see [Schema interpretation](#schema-interpretation).
 
 **Validation capability.** Each Generator declares which validation items of which predicates it can
 examine with which validation methods; the tables in this document are those declarations. A
@@ -84,12 +89,17 @@ provenance.
 **Output and dependencies.** For each candidate, a Generator returns what it read in two groups:
 
 - Input Observations and the Fact Revisions of selected confirmed Facts are inputs read and also
-  dependency references.
+  dependency references. A dependency on a Fact names the Fact Revision of its latest acceptance,
+  which later evaluations and confirmations leave unchanged, so producing again from the same input
+  states the same dependencies.
 - Rejected or retired Facts, and related Facts of feedback that are not selected, are inputs read
   only. As a premise they would make the candidate unconfirmable and reject it by cascade, and as a
-  replacement dependency they would give it nothing presentable to replace.
+  replacement dependency they would give it nothing presentable to replace. A replacement
+  dependency stated while the replaced Fact was confirmed is the exception: it is kept after that
+  Fact is retired, so producing again does not change a candidate already judged.
 
-An answer is an input read, referenced by its log record. It is neither a dependency, because it
+**[Planned]** No implemented Generator reads answers or proposes new nodes yet. An answer is an
+input read, referenced by its log record. It is neither a dependency, because it
 never changes, nor a check reference, so a deciding party's wording never counts as support for a
 new candidate. A candidate made from a correction is therefore never adopted inline, and the
 original correction can be traced and shown from its inputs read.
@@ -100,9 +110,10 @@ short business name from which its URN is built, and is given the slugs in use s
 model, so the slug is the model's choice.
 
 When a candidate targets a Fact Address that has a selected Fact, the Generator reads that Fact and
-depends on it, so its candidate replaces the selection once confirmed.
+depends on it, so its candidate replaces the selection once confirmed. A later run keeps that dependency
+after the replaced Fact is retired, so producing again does not change the candidate.
 
-**Data observations.** A Generator that reads data values, through data checks or as statistics
+**Data observations.** **[Planned]** A Generator that reads data values, through data checks or as statistics
 passed to a model, does so through the application's SQL execution. It records what it read as a
 **data observation** in the same commit as its results, because a `data-check` needs an observation
 to reference. Data observations have one Input Resource per kind and target of check (a Field set or
@@ -116,9 +127,14 @@ result equal to the previous observation of the same Input Resource is not recor
 
 ## Schema interpretation
 
-**[Planned]** This section describes design that is not implemented yet.
-
-Schema interpretation maps what the source declares to candidates. Table and column ingestion runs
+Schema interpretation maps what the source declares to candidates. It reads the source-independent
+table metadata the connector derived, never a connector's own source metadata, so it interprets
+every connector's tables the same way; source metadata, whose shape each connector defines, is read
+by meaning inference. It names each Dataset and Field by the table's Physical Catalog reference,
+which the application passes with the table's first registration; a table without one is observed
+but not interpreted, and the run records the reference as missing input. Each candidate depends on
+the table's latest physical schema observation and on the existence Facts it rests on, and its
+checks reference that observation. Table and column ingestion runs
 on each new physical schema observation. The others also declare the confirmed existence of their
 target element as input, so any element they point to exists. When the declaration a Fact came from
 disappears, they propose retiring the Fact with a `declared-enforced` check, unless a `data-check`
@@ -147,17 +163,18 @@ the key, the correspondence holds within one database by construction, and the G
 proposes its business definition with `declared-enforced`. An unenforced key gives both
 `declared-unenforced`. A foreign key on string columns leaves the matching condition's validation
 item undecidable unless equality under the column's collation is known to match byte comparison,
-because a key can reference a row that an equality comparison does not match. Such correspondences
-are never adopted inline.
+because a key can reference a row that an equality comparison does not match. Collation is not an
+item of table metadata yet, so every pair of text columns is undecidable. Such correspondences are
+never adopted inline.
 
-A foreign key on non-null columns also declares that every referencing value appears on the
+**[Planned]** A foreign key on non-null columns also declares that every referencing value appears on the
 referenced side, which is one validation item of the set relationship, so the Generator supports
-that item with the key's validation method. The set relationship check decides the other direction,
+that item, once the set relationship check proposes a set relationship to support, with the key's validation method. The set relationship check decides the other direction,
 whether every referenced row is referenced, and schema interpretation never decides whether the
 referencing side repeats; the uniqueness check observes that. With both, an enforced key whose
 referenced side has unreferenced rows yields `subset` by machine judgement under `auto`.
 
-Under the default policy, existence, technical references, value kinds, enforced constraints, and
+Under the default policy, existence, Physical Catalog references, value kinds, enforced constraints, and
 correspondences from enforced foreign keys are adopted inline. Uniqueness from an unenforced
 declaration is adopted inline once the uniqueness check supports the same Fact. Keys and
 correspondences from unenforced declarations go to the policy evaluation model, because the absence
@@ -274,13 +291,15 @@ correction.
 
 ## Generation strategy
 
-**[Planned]** This section describes design that is not implemented yet.
+What concerns deterministic Generators is implemented: order through declared inputs, targets from
+observations and confirmations, and producing for every target. **[Planned]** The rest, including
+the conditions and bounds for non-deterministic Generators, is not.
 
 **Order.** The strategy defines no global order. Order emerges because a later Generator declares as
 input the confirmation of what an earlier one produces. When the e-commerce database is registered:
 
 1. The physical schema observation triggers table and column ingestion, whose existence and
-   technical-reference candidates are adopted inline.
+   physical-catalog-reference candidates are adopted inline.
 2. Confirmed existence triggers key from primary key, uniqueness declaration ingestion,
    correspondence from foreign key, the uniqueness check, inclusion discovery, and row and Field
    meaning inference.
@@ -342,21 +361,19 @@ deciding party varies with data and person.
 
 ## Column changes
 
-**[Planned]** This section describes design that is not implemented yet.
-
 A column that disappears from a physical schema observation is retired, and a column that appears
 is a new Field, whether or not the two are a rename:
 
 | Observation | Candidates | Path under the default policy |
 | --- | --- | --- |
 | A column disappeared | Retirement of that Field's existence (`declared-enforced`) | Adopted inline |
-| A column appeared | Existence and technical reference of a new Field (`declared-enforced`) | Adopted inline |
+| A column appeared | Existence and Physical Catalog reference of a new Field (`declared-enforced`) | Adopted inline |
 
 Names cannot tell a rename from a drop and an add, and an element's URN is built from its name, so
 no Generator judges renames. The retirement cascades to the Facts that rest on the old Field, and
-their Generators propose them again on the new premise (see
+**[Planned]** their Generators propose them again on the new premise (see
 [`construction.md`](construction.md#following-input-changes)). No predicate represents a rename,
-and a technical reference never moves; a renamed table likewise becomes a new Dataset.
+and a Physical Catalog reference never moves; a renamed table likewise becomes a new Dataset.
 
 ## Reaching a language model
 

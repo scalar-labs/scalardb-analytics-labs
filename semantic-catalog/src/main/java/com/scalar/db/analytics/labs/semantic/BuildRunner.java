@@ -5,6 +5,10 @@
 package com.scalar.db.analytics.labs.semantic;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.scalar.db.analytics.labs.semantic.generator.GeneratorContext;
+import com.scalar.db.analytics.labs.semantic.generator.Generators;
+import com.scalar.db.analytics.labs.semantic.generator.Output;
 import com.scalar.db.analytics.labs.semantic.model.BuildRunInProgressException;
 import com.scalar.db.analytics.labs.semantic.model.BuildTask;
 import com.scalar.db.analytics.labs.semantic.model.LogPosition;
@@ -31,8 +35,10 @@ import org.jspecify.annotations.Nullable;
  * Runs one domain's build tasks under its builder semaphore (see {@code
  * docs/semantic-catalog/storage.md}, "Running build tasks").
  *
- * <p>Each task is claimed in one transaction, run outside any transaction, and recorded in one
- * more, so a model call never holds a transaction open. The semaphore makes the reset at the start
+ * <p>Each task is claimed in one transaction, then run and recorded. Work that calls a model runs
+ * outside any transaction and is recorded in one more, so a model call never holds a transaction
+ * open; a deterministic Generator that reads only the store runs inside its recording transaction
+ * instead, so it reads the state it is recorded on. The semaphore makes the reset at the start
  * safe: a task left {@code running} belongs to a process that has stopped, because a running one
  * would still hold the semaphore.
  */
@@ -138,6 +144,7 @@ final class BuildRunner {
       return switch (task.work()) {
         case BuildTask.Work.PolicyEvaluation evaluation -> evaluate(task, evaluation.fact());
         case BuildTask.Work.PolicyReEvaluation ignored -> reEvaluate(task);
+        case BuildTask.Work.GeneratorRun run -> generate(task, run.generator());
       };
     } catch (RuntimeException e) {
       var reason = Objects.requireNonNullElse(e.getMessage(), e.getClass().getName());
@@ -331,7 +338,58 @@ final class BuildRunner {
                   new BuildTask.Result.ReEvaluated(
                       Objects.requireNonNull(policyVersion.get()),
                       commit.isPresent() ? commit.getAsLong() : null,
-                      result.buildTasks())));
+                      result.buildTasks().stream()
+                          .filter(
+                              number ->
+                                  transaction
+                                      .buildTask(domain, number)
+                                      .filter(
+                                          found ->
+                                              found.work()
+                                                  instanceof BuildTask.Work.PolicyEvaluation)
+                                      .isPresent())
+                          .toList())));
+        });
+  }
+
+  // A Generator run
+
+  /**
+   * Runs a Generator and records its output in one commit. A deterministic Generator reads only the
+   * store, so it runs inside the recording transaction: a transaction retried after another
+   * writer's commit runs it again on top of that commit, and a run on unchanged input records
+   * nothing.
+   */
+  private BuildTask generate(BuildTask task, String name) {
+    var generator =
+        Generators.named(name)
+            .orElseThrow(() -> new SemanticCatalogException("Unknown Generator " + name));
+    return store.write(
+        transaction -> {
+          var projection = new Projection(domain, transaction.projectionSource(domain));
+          var provenance =
+              JsonNodeFactory.instance
+                  .objectNode()
+                  .put("generator", generator.name())
+                  .put("version", generator.version())
+                  .put("buildTask", task.number());
+          var context =
+              new GeneratorContext(transaction, domain, projection, task.triggers(), provenance);
+          var output = new Output();
+          generator.run(context, output);
+          Long commit = null;
+          if (output.hasRecords()) {
+            var result =
+                SemanticCatalogStore.commit(
+                    transaction, domain, output.request("generator-run", generator.name()), true);
+            commit = result.commit().isPresent() ? result.commit().getAsLong() : null;
+          }
+          return finish(
+              transaction,
+              task,
+              new BuildTask.Status.Succeeded(
+                  new BuildTask.Result.Generated(
+                      generator.version(), commit, output.missingInputs())));
         });
   }
 

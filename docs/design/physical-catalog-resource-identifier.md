@@ -22,6 +22,6 @@ same table in business terms, so the Physical Catalog would take on part of a ju
   identifier for the new name.
 - Whether a table was renamed or replaced is a Semantic Catalog Fact, proposed by a Generator from
   source-side identifiers and column structure. A Dataset follows a rename by a new
-  technical-reference Fact, which replaces the old one once confirmed.
+  physical-catalog-reference Fact, which replaces the old one once confirmed.
 - A table dropped and re-created under the same name keeps its identifier. Sources that return
   source-side identifiers produce a new version for it.

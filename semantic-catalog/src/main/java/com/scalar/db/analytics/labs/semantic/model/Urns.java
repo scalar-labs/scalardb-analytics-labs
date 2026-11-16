@@ -26,7 +26,7 @@ import java.util.stream.Collectors;
  *
  * <ul>
  *   <li>an element's record kind is its element kind, and its identifier is the canonical form of
- *       its {@linkplain TechnicalReference technical reference} ({@code
+ *       its {@linkplain PhysicalCatalogReference Physical Catalog reference} ({@code
  *       dataset:shop.public.orders}, {@code field:shop.public.orders.amount}), the slug its
  *       proposer gave ({@code measure:ec-sales}), or for an edge the identifiers of its ends
  *       ({@code

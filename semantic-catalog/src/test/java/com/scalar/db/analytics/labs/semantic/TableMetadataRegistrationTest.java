@@ -16,6 +16,7 @@ import com.scalar.db.analytics.labs.semantic.TableMetadataRegistration.NotNewer;
 import com.scalar.db.analytics.labs.semantic.TableMetadataRegistration.Observed;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import org.junit.jupiter.api.Test;
@@ -57,6 +58,7 @@ class TableMetadataRegistrationTest extends StoreScenarioTest {
       long version, JsonNode tableMetadata, SourceMetadata sourceMetadata) {
     return new TableMetadataObservation(
         TABLE,
+        Optional.of(Scenario.table(TABLE)),
         version,
         new Read(true, tableMetadata, sourceMetadata, Instant.parse("2026-11-15T00:00:00Z")),
         json("{\"connector\": {\"name\": \"postgresql\", \"version\": \"0.1.0\"}}"),
@@ -159,7 +161,12 @@ class TableMetadataRegistrationTest extends StoreScenarioTest {
                 s.domain,
                 "app",
                 new TableMetadataObservation(
-                    TABLE, 3, new DoesNotExist(), json("{\"connector\": {}}"), "digest-3"));
+                    TABLE,
+                    Optional.of(Scenario.table(TABLE)),
+                    3,
+                    new DoesNotExist(),
+                    json("{\"connector\": {}}"),
+                    "digest-3"));
 
     assertThat(commented.newInputResource()).isFalse();
     assertThat(commented.inputResource()).isEqualTo(first.inputResource());
@@ -190,6 +197,7 @@ class TableMetadataRegistrationTest extends StoreScenarioTest {
             "app",
             new TableMetadataObservation(
                 "shop.public.customers",
+                Optional.of(Scenario.table("shop.public.customers")),
                 1,
                 new Read(
                     false,

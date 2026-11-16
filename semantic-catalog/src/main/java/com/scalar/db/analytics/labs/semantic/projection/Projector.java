@@ -14,9 +14,9 @@ import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord.Basis;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord.FactEvent;
 import com.scalar.db.analytics.labs.semantic.model.LogRecordJson;
+import com.scalar.db.analytics.labs.semantic.model.PhysicalCatalogReference;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
 import com.scalar.db.analytics.labs.semantic.model.SemanticCatalogException;
-import com.scalar.db.analytics.labs.semantic.model.TechnicalReference;
 import com.scalar.db.analytics.labs.semantic.model.Urns;
 import com.scalar.db.analytics.labs.semantic.model.UsageFeedback;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
@@ -168,28 +168,29 @@ public final class Projector {
         switch (element.identity()) {
           case ElementIdentity.Unique pointed ->
               new ElementRow(urn, pointed.kind(), null, null, commit, null);
-          case ElementIdentity.PhysicalObject technical -> {
-            var parent = technical.parent();
+          case ElementIdentity.PhysicalCatalogObject physical -> {
+            var parent = physical.parent();
             if (validating
                 && parent != null
-                && technical.technicalReference() instanceof TechnicalReference.Column column) {
+                && physical.physicalCatalogReference()
+                    instanceof PhysicalCatalogReference.Column column) {
               var parentRow = requireElement(parent);
               if (parentRow.kind() != ElementKind.DATASET) {
                 throw reject("The parent of a Field is a Dataset, not " + parentRow.kind());
               }
-              if (!column.table().canonical().equals(parentRow.technicalReference())) {
+              if (!column.table().canonical().equals(parentRow.physicalCatalogReference())) {
                 throw reject(
                     "A Field's column "
                         + column.canonical()
                         + " belongs to its Dataset's table "
-                        + parentRow.technicalReference());
+                        + parentRow.physicalCatalogReference());
               }
             }
             yield new ElementRow(
                 urn,
-                technical.kind(),
+                physical.kind(),
                 parent == null ? null : parent.urnValue(),
-                technical.technicalReference().canonical(),
+                physical.physicalCatalogReference().canonical(),
                 commit,
                 null);
           }
@@ -206,25 +207,25 @@ public final class Projector {
   }
 
   /**
-   * Requires a technical-reference Fact of a Dataset or Field to name the physical object the
-   * element was created for. A technical reference never moves: a renamed table or column is a new
-   * element, so the element's name-based URN stays true.
+   * Requires a physical-catalog-reference Fact of a Dataset or Field to name the physical object
+   * the element was created for. A Physical Catalog reference never moves: a renamed table or
+   * column is a new element, so the element's name-based URN stays true.
    */
-  private void requireUnmovedTechnicalReference(FactAddressRow address, LogRecord.Fact fact) {
-    if (!address.predicate().equals(Vocabulary.TECHNICAL_REFERENCE)
+  private void requireUnmovedPhysicalCatalogReference(FactAddressRow address, LogRecord.Fact fact) {
+    if (!address.predicate().equals(Vocabulary.PHYSICAL_CATALOG_REFERENCE)
         || address.scopeDescription() != null
         || address.predicateDefinition() != null) {
       return;
     }
     var element = requireElement(Ref.urn(address.element()));
-    var reference = element.technicalReference();
+    var reference = element.physicalCatalogReference();
     if (reference == null) {
       return;
     }
     var key = fact.identityKey();
     if (key == null || !key.canonical().equals(IdentityKey.choice(reference).canonical())) {
       throw reject(
-          "A technical reference never moves: "
+          "A Physical Catalog reference never moves: "
               + element.element()
               + " refers to "
               + reference
@@ -321,7 +322,7 @@ public final class Projector {
       if (projection.fact(urn).isPresent()) {
         throw reject("Fact URN " + urn + " is already taken");
       }
-      requireUnmovedTechnicalReference(address.row(), fact);
+      requireUnmovedPhysicalCatalogReference(address.row(), fact);
     }
     var key = fact.identityKey();
     var row =
@@ -869,7 +870,7 @@ public final class Projector {
   /**
    * A new Fact is accepted in the commit that creates it. A new element comes with the acceptance
    * of a Fact stating its existence, and a new Dataset or Field also with that of its
-   * technical-reference Fact.
+   * physical-catalog-reference Fact.
    */
   private void checkNewRecordsAccepted() {
     for (var fact : newFacts) {
@@ -899,17 +900,18 @@ public final class Projector {
         throw reject(
             "New element " + element + " comes with the acceptance of a Fact of its existence");
       }
-      if (entry.getValue() instanceof ElementIdentity.PhysicalObject technical
+      if (entry.getValue() instanceof ElementIdentity.PhysicalCatalogObject physical
           && !accepted
-              .getOrDefault(element + " " + Vocabulary.TECHNICAL_REFERENCE, Set.of())
+              .getOrDefault(element + " " + Vocabulary.PHYSICAL_CATALOG_REFERENCE, Set.of())
               .contains(
-                  IdentityKey.choice(technical.technicalReference().canonical()).canonical())) {
+                  IdentityKey.choice(physical.physicalCatalogReference().canonical())
+                      .canonical())) {
         throw reject(
             "New "
-                + lower(technical.kind())
+                + lower(physical.kind())
                 + " "
                 + element
-                + " comes with the acceptance of its technical-reference Fact");
+                + " comes with the acceptance of its physical-catalog-reference Fact");
       }
     }
   }

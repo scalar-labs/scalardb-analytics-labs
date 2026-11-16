@@ -23,10 +23,10 @@ public final class Vocabulary {
   public static final String EXISTENCE = "existence";
 
   /**
-   * The technical-reference predicate, by which a Dataset or a Field refers to the physical object
-   * its data comes from. It decides whether two Datasets or two Fields are the same element.
+   * The physical-catalog-reference predicate, by which a Dataset or a Field refers to the physical
+   * object its data comes from. It decides whether two Datasets or two Fields are the same element.
    */
-  public static final String TECHNICAL_REFERENCE = "technical-reference";
+  public static final String PHYSICAL_CATALOG_REFERENCE = "physical-catalog-reference";
 
   /** A Dataset's concept that a row represents. */
   public static final String ROW_CONCEPT = "row-concept";
@@ -93,11 +93,17 @@ public final class Vocabulary {
     return switch (kind) {
       case DATASET ->
           List.of(
-              EXISTENCE, TECHNICAL_REFERENCE, ROW_CONCEPT, ROW_KIND, ROW_GRAIN, ROW_INCLUSION, KEY);
+              EXISTENCE,
+              PHYSICAL_CATALOG_REFERENCE,
+              ROW_CONCEPT,
+              ROW_KIND,
+              ROW_GRAIN,
+              ROW_INCLUSION,
+              KEY);
       case FIELD ->
           List.of(
               EXISTENCE,
-              TECHNICAL_REFERENCE,
+              PHYSICAL_CATALOG_REFERENCE,
               MEANING,
               VALUE_KIND,
               UNIT,
@@ -193,7 +199,7 @@ public final class Vocabulary {
     }
 
     /** Whether elements of this kind are identified by the physical object they refer to. */
-    public boolean technical() {
+    public boolean physicalCatalog() {
       return this == DATASET || this == FIELD;
     }
   }

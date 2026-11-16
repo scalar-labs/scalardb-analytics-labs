@@ -4,10 +4,18 @@
  */
 package com.scalar.db.analytics.labs.semantic;
 
+import com.scalar.db.analytics.labs.semantic.generator.Generator;
+import com.scalar.db.analytics.labs.semantic.generator.Generators;
 import com.scalar.db.analytics.labs.semantic.model.BuildTask;
+import com.scalar.db.analytics.labs.semantic.model.LogRecord;
+import com.scalar.db.analytics.labs.semantic.model.Urns;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.InputKind;
+import com.scalar.db.analytics.labs.semantic.projection.PositionedRecord;
+import com.scalar.db.analytics.labs.semantic.projection.Projection;
 import com.scalar.db.analytics.labs.semantic.storage.StoreTransaction;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
 
 /**
@@ -42,6 +50,57 @@ final class BuildTasks {
       }
     }
     return task.number();
+  }
+
+  /**
+   * Creates or triggers the Generator runs a commit calls for (see {@code
+   * docs/semantic-catalog/generators.md}, "The Generator contract"): each new physical schema
+   * observation triggers the Generators that read physical schemas, and each confirmation triggers
+   * the Generators that read confirmed Facts of its predicate and element kind. The trigger is the
+   * log record of the observation or the confirmation.
+   *
+   * @param records the commit's log records
+   * @return the numbers of the tasks, each once
+   */
+  static List<Long> generatorRunsFor(
+      StoreTransaction transaction,
+      String domain,
+      Projection projection,
+      List<PositionedRecord> records) {
+    var tasks = new LinkedHashSet<Long>();
+    for (var positioned : records) {
+      var trigger = Urns.logRecord(domain, positioned.position());
+      var generators =
+          switch (positioned.record()) {
+            case LogRecord.InputObservation observation ->
+                projection
+                        .inputResource(observation.inputResource().urnValue())
+                        .filter(row -> row.kind() == InputKind.PHYSICAL_SCHEMA)
+                        .isPresent()
+                    ? Generators.readingPhysicalSchema()
+                    : List.<Generator>of();
+            case LogRecord.Confirm confirm -> confirmedReaders(projection, confirm);
+            default -> List.<Generator>of();
+          };
+      for (var generator : generators) {
+        tasks.add(
+            trigger(
+                transaction, domain, new BuildTask.Work.GeneratorRun(generator.name()), trigger));
+      }
+    }
+    return List.copyOf(tasks);
+  }
+
+  private static List<Generator> confirmedReaders(
+      Projection projection, LogRecord.Confirm confirm) {
+    var address = projection.factAddress(confirm.fact().urnValue()).flatMap(projection::address);
+    if (address.isEmpty()) {
+      return List.of();
+    }
+    return projection
+        .element(address.get().row().element())
+        .map(row -> Generators.readingConfirmed(row.kind(), address.get().row().predicate()))
+        .orElse(List.of());
   }
 
   /** Creates or triggers one evaluation task per Fact left to the policy evaluation model. */

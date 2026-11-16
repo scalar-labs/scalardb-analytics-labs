@@ -20,7 +20,7 @@ import com.scalar.db.analytics.labs.semantic.ConstructionSql.Outcome;
 import com.scalar.db.analytics.labs.semantic.ConstructionSql.ReadPath;
 import com.scalar.db.analytics.labs.semantic.ConstructionSql.Reading;
 import com.scalar.db.analytics.labs.semantic.ConstructionSql.Request;
-import com.scalar.db.analytics.labs.semantic.model.TechnicalReference;
+import com.scalar.db.analytics.labs.semantic.model.PhysicalCatalogReference;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.time.Duration;
@@ -52,12 +52,12 @@ class EngineConstructionSqlIntegrationTest {
   private static final int EVENTS = 500;
   private static final int MEMBERS = 10;
 
-  private static final TechnicalReference.Table EVENTS_TABLE =
-      new TechnicalReference.Table("warehouse", "public", "events");
-  private static final TechnicalReference.Table MEMBERS_TABLE =
-      new TechnicalReference.Table("warehouse", "public", "members");
-  private static final TechnicalReference.Table CUSTOMERS_TABLE =
-      new TechnicalReference.Table("crm", MYSQL_DATABASE, "customers");
+  private static final PhysicalCatalogReference.Table EVENTS_TABLE =
+      new PhysicalCatalogReference.Table("warehouse", "public", "events");
+  private static final PhysicalCatalogReference.Table MEMBERS_TABLE =
+      new PhysicalCatalogReference.Table("warehouse", "public", "members");
+  private static final PhysicalCatalogReference.Table CUSTOMERS_TABLE =
+      new PhysicalCatalogReference.Table("crm", MYSQL_DATABASE, "customers");
 
   @Container
   private static final PostgreSQLContainer<?> STORE = new PostgreSQLContainer<>("postgres:16.4");
@@ -299,7 +299,8 @@ class EngineConstructionSqlIntegrationTest {
                             "SELECT count(*) FROM warehouse.public.missing",
                             List.of(
                                 new Input(
-                                    new TechnicalReference.Table("warehouse", "public", "missing"),
+                                    new PhysicalCatalogReference.Table(
+                                        "warehouse", "public", "missing"),
                                     Reading.WHOLE)))))
         .isInstanceOf(ConstructionSqlException.class)
         .hasMessageContaining("is not registered");

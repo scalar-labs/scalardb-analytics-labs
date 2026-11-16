@@ -116,10 +116,10 @@ class FactLifecycleTest extends StoreScenarioTest {
     var written = s.write(c);
     var fact = written.ref(candidate);
 
-    // A confirmation resting on an acceptance instead of a policy evaluation or a consent.
+    // A confirmation resting on a retirement proposal instead of a policy evaluation or a consent.
     var withoutBasis = s.begin();
-    var accept = withoutBasis.accept(fact);
-    withoutBasis.add(new LogRecord.Confirm(fact, ConfirmationPath.MACHINE_JUDGEMENT, accept));
+    var proposal = withoutBasis.proposeRetire(fact);
+    withoutBasis.add(new LogRecord.Confirm(fact, ConfirmationPath.MACHINE_JUDGEMENT, proposal));
     assertRejected(s, withoutBasis, "rests on the latest policy evaluation");
 
     // A consent confirmation needs a consent answer.
@@ -192,9 +192,12 @@ class FactLifecycleTest extends StoreScenarioTest {
     var fact = written.ref(rejected);
     assertThat(s.state(fact.urnValue())).contains(FactState.REJECTED);
 
+    // An acceptance bringing no new dependency reference records nothing, so the rejected Fact
+    // does not return to the deciding party without new input.
     var unchanged = s.begin();
     unchanged.accept(fact);
-    assertRejected(s, unchanged, "brings no new dependency reference");
+    assertThat(s.write(unchanged).commit()).isEmpty();
+    assertThat(s.state(fact.urnValue())).contains(FactState.REJECTED);
 
     // An answer to a rejected Fact is recorded without changing it.
     c = s.begin();
@@ -514,12 +517,12 @@ class FactLifecycleTest extends StoreScenarioTest {
   }
 
   @Test
-  void aDatasetIsFoundOnlyByATechnicalReferenceNeitherRejectedNorRetired() {
+  void aDatasetIsFoundOnlyByAPhysicalCatalogReferenceNeitherRejectedNorRetired() {
     var s = scenario();
     var c = s.begin();
     var orders = c.dataset("shop.public.orders");
     var written = s.write(c);
-    // The Dataset's records are the element, then the existence and technical-reference
+    // The Dataset's records are the element, then the existence and physical-catalog-reference
     // Fact Addresses, each followed by its Fact.
     var reference = written.ref(new Ref.Temp(4));
 

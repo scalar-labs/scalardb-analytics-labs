@@ -26,11 +26,13 @@ The **business domain model**, the concepts such as customer and order and the r
 them, is data semantics and lives in the Semantic Catalog. Each domain holds only as much of it as
 it needs, and no unmanaged business domain model is kept elsewhere.
 
-A Dataset is the logical object meaning is given to. It holds a **technical reference** to the
-Physical Catalog table its data comes from, and a Field holds one to its column. One
-technical-reference Fact points to one table or column and never moves to another: a renamed table
-or column becomes a new element, as a renamed table gets a new resource identifier in the Physical
-Catalog (see [Identity and URNs](#identity-and-urns)).
+A Dataset is the logical object meaning is given to. It holds a **Physical Catalog reference** to the
+Physical Catalog table its data comes from, and a Field holds one to its column. It names the table by the Physical
+Catalog's registration unit, its data-source registration, namespace, and table name, rather than
+by the Physical Catalog's resource identifier. One physical-catalog-reference Fact points to one
+table or column and never moves to another: a renamed table or column becomes a new element, as a
+renamed table gets a new resource identifier in the Physical Catalog (see
+[Identity and URNs](#identity-and-urns)).
 
 ## Elements and predicates
 
@@ -41,8 +43,8 @@ the field is aggregated.
 
 | Node element | Predicates |
 | --- | --- |
-| Dataset | Technical reference, concept a row represents, row kind, row grain, row inclusion, key, uniqueness of a set of Fields |
-| Field | Technical reference, meaning, value kind, unit, meaning of null, represented concept, time meaning and time zone |
+| Dataset | Physical Catalog reference, concept a row represents, row kind, row grain, row inclusion, key, uniqueness of a set of Fields |
+| Field | Physical Catalog reference, meaning, value kind, unit, meaning of null, represented concept, time meaning and time zone |
 | Concept | Meaning |
 | Measure | Meaning, base Dataset, aggregation rule, filter conditions, reference time Field, default time granularity |
 | Dimension | Meaning, Dimension kind, source Field and classification expression, source time Field, hierarchy, calendar rule |
@@ -62,8 +64,8 @@ Each predicate is named in records by an identifier:
 | Element | Predicate identifiers |
 | --- | --- |
 | Every element | `existence` |
-| Dataset | `technical-reference`, `row-concept`, `row-kind`, `row-grain`, `row-inclusion`, `key`, and `uniqueness:<Field URNs, sorted and joined by commas>` |
-| Field | `technical-reference`, `meaning`, `value-kind`, `unit`, `null-meaning`, `represented-concept`, `time-meaning` (with the time zone) |
+| Dataset | `physical-catalog-reference`, `row-concept`, `row-kind`, `row-grain`, `row-inclusion`, `key`, and `uniqueness:<Field URNs, sorted and joined by commas>` |
+| Field | `physical-catalog-reference`, `meaning`, `value-kind`, `unit`, `null-meaning`, `represented-concept`, `time-meaning` (with the time zone) |
 | Concept | `meaning` |
 | Measure | `meaning`, `base-dataset`, `aggregation-rule`, `filter`, `reference-time-field`, `default-time-granularity` |
 | Dimension | `meaning`, `dimension-kind`, `classification` (the source Field and classification expression), `source-time-field`, `hierarchy`, `calendar-rule` |
@@ -111,8 +113,13 @@ Some values deserve note:
   and takes "does not repeat" or "repeats". Whether uniqueness rests on a declaration or a data
   check is expressed by the validation method, not by separate predicates, because the declaration
   is already part of the physical schema observation.
+  As written by schema interpretation, a key's value is `{"fields": [...]}`, the URNs of its Fields
+  sorted, and two keys are the same when their Field sets are. A uniqueness Fact's values are
+  `does-not-repeat` and `repeats`.
 - A Field's **value kind** is identifier, classification, amount, quantity, time or date, string, or
-  boolean. It is separate from the physical type and tells Generators which further predicates to
+  boolean. The value is one of `identifier`, `classification`, `amount`, `quantity`,
+  `time-or-date`, `string`, and `boolean`; schema interpretation proposes `time-or-date` and
+  `boolean` from the Analytics type. It is separate from the physical type and tells Generators which further predicates to
   pursue.
 - A Measure's **aggregation rule** is an aggregate function, chosen from a closed list, over a value
   expression on its base Dataset's Fields. A period that changes per question belongs to the
@@ -156,8 +163,8 @@ summed across days". Free-description predicates have no identity of their own; 
 statement points to the existing Fact Address or is caught by the duplicate check.
 
 Predicates whose values are closed choices or references to records have a **closed value range**:
-existence; a Dataset's technical reference, represented concept, row kind, key, and uniqueness; a
-Field's technical reference, value kind, and represented concept; a Measure's base Dataset and
+existence; a Dataset's Physical Catalog reference, represented concept, row kind, key, and uniqueness; a
+Field's Physical Catalog reference, value kind, and represented concept; a Measure's base Dataset and
 reference time Field; Dimension kind; a business term's referenced element; set relationship; and
 concept-relationship multiplicity. A Generator-declared
 predicate with a closed range counts too. Two such values are the same exactly when they are equal.
@@ -172,9 +179,9 @@ records but never used as a point, because it is neither unique nor monotonic.
 The log holds:
 
 - Elements, each written as its own record that states how the element is identified: by pointing,
-  by technical reference, or for an edge by kind, ends, direction, and identifying part. A new
+  by Physical Catalog reference, or for an edge by kind, ends, direction, and identifying part. A new
   element is written in the same commit as the acceptance of a Fact stating its existence. A new
-  Dataset or Field also comes with the acceptance of its technical-reference Fact, because that Fact
+  Dataset or Field also comes with the acceptance of its physical-catalog-reference Fact, because that Fact
   is what later finds it.
 - Fact Addresses, Facts, and Fact Events.
 - Conflict resolutions, each a deciding party's choice among the eligible Facts at one Fact
@@ -203,7 +210,7 @@ the namespace so that cross-domain references can use the same form.
 The identifier is built so that a person reading a URN can tell roughly what it names. Most of what
 a catalog holds is about tables and columns, and opaque numbers would make every review item,
 citation, and log entry unreadable without a lookup. The form is a construction choice, not a
-contract. Callers never parse a URN, programs read exact names from Facts such as technical
+contract. Callers never parse a URN, programs read exact names from Facts such as Physical Catalog
 references and written forms, and the form of newly issued URNs may change. The text of a URN is
 never knowledge either: meaning is read only from Facts.
 [`../design/semantic-catalog-urn-form.md`](../design/semantic-catalog-urn-form.md) records why.
@@ -249,7 +256,7 @@ at acceptance, inside the serialized write, by appending a sequence number.
 Sameness is decided by rules per kind, never from URNs. Meaning is fuzzy, so mechanical decisions
 are limited to cases that are easy to identify:
 
-- **Datasets and Fields** are the same element when their technical-reference Facts that are neither
+- **Datasets and Fields** are the same element when their physical-catalog-reference Facts that are neither
   rejected nor retired point to the same physical object. A renamed table or column is another
   physical object and so a new element; a URN built from the old name would otherwise misname it,
   and names cannot tell a rename from a drop and an add anyway. A column dropped and re-added under
@@ -385,6 +392,8 @@ confirmed. Where the parts of a value are known, its **validation items** name t
 predicates the item is the value itself. An identifier correspondence's existence has one item per
 pair of corresponding Fields, per normalization step, and per intermediate step of its matching
 condition, and a Measure's aggregation rule has the aggregate function and the value expression.
+Schema interpretation writes a pair's item as `{"pair": [<from Field URN>, <to Field URN>]}`, and
+the business definition it proposes is text naming the tables and columns of the correspondence.
 Items that no supporting check examined are shown as information, never as the measure of whether a
 Fact holds.
 

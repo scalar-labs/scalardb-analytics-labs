@@ -82,30 +82,31 @@ final class Judgement {
   }
 
   /**
-   * A Dataset with its existence and technical-reference Facts.
+   * A Dataset with its existence and physical-catalog-reference Facts.
    *
    * @param dataset the temporary number of the Dataset
-   * @param reference its technical-reference Fact
+   * @param reference its physical-catalog-reference Fact
    */
   record Dataset(Ref dataset, Accepted existence, Accepted reference) {}
 
-  /** A Dataset whose existence and technical reference the source declares and enforces. */
+  /** A Dataset whose existence and Physical Catalog reference the source declares and enforces. */
   static Dataset declaredDataset(Scenario.Commit c, String table) {
     var reference = Scenario.table(table);
-    var dataset = c.add(new LogRecord.Element(ElementIdentity.PhysicalObject.dataset(reference)));
+    var dataset =
+        c.add(new LogRecord.Element(ElementIdentity.PhysicalCatalogObject.dataset(reference)));
     var existence =
         fact(
             c,
             c.address(dataset, Vocabulary.EXISTENCE),
             "exists",
             List.of(supported(ValidationMethod.DECLARED_ENFORCED, "exists")));
-    var technical =
+    var referenceFact =
         fact(
             c,
-            c.address(dataset, Vocabulary.TECHNICAL_REFERENCE),
+            c.address(dataset, Vocabulary.PHYSICAL_CATALOG_REFERENCE),
             reference.canonical(),
             List.of(supported(ValidationMethod.DECLARED_ENFORCED, reference.canonical())));
-    return new Dataset(dataset, existence, technical);
+    return new Dataset(dataset, existence, referenceFact);
   }
 
   static Answers.Answer answer(String fact, AnswerType type) {

@@ -8,7 +8,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.scalar.db.analytics.labs.semantic.model.LogRecordJson;
+import com.scalar.db.analytics.labs.semantic.model.PhysicalCatalogReference;
 import java.time.Instant;
+import java.util.Optional;
 
 /**
  * One retrieved table's metadata, as the application passes it to {@link
@@ -24,6 +26,11 @@ import java.time.Instant;
  *
  * @param tableIdentifier the Physical Catalog's identifier of the table; opaque to the Semantic
  *     Catalog, which never parses it
+ * @param reference the table's Physical Catalog reference: its data-source registration, namespace,
+ *     and table name, by which schema interpretation names its Dataset and Fields. The first
+ *     registration of a table records it on the table's Input Resource. Absent when the table's
+ *     name path is not one namespace and a table name; its observations are still recorded, and
+ *     schema interpretation records the reference as missing input
  * @param version the table metadata version, increasing per table; a version no newer than one
  *     already received records nothing
  * @param table what the retrieval found for the table
@@ -33,6 +40,7 @@ import java.time.Instant;
  */
 public record TableMetadataObservation(
     String tableIdentifier,
+    Optional<PhysicalCatalogReference.Table> reference,
     long version,
     TableRecord table,
     JsonNode retrieval,
