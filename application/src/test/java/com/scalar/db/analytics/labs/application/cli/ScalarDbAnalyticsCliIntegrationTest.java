@@ -202,9 +202,14 @@ class ScalarDbAnalyticsCliIntegrationTest {
               store.derivedRecord(
                   domain, "warehouse.public.order_lines", lines.get("version").asLong()))
           .hasValueSatisfying(
-              derived ->
-                  assertThat(derived.get("tableMetadata").toString())
-                      .contains("primary-key", "foreign-key", "analyticsType"));
+              derived -> {
+                assertThat(derived.get("tableMetadata").toString())
+                    .contains("primary-key", "foreign-key", "analyticsType");
+                // The schema the connector published for the document is named by its digest,
+                // outside the observation.
+                assertThat(derived.path("sourceMetadataSchema").asText()).matches("[0-9a-f]{64}");
+              });
+      assertThat(observation.toString()).doesNotContain("sourceMetadataSchema");
     }
     assertThat(postgresRegistration.allOutput()).doesNotContain(POSTGRES_PASSWORD);
   }

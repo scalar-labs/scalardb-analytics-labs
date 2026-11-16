@@ -35,6 +35,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -173,6 +174,7 @@ public final class TableMetadataRetrieval {
               + ").");
     }
     var retrieval = (JsonNode) TableMetadataJson.of(result.retrieval());
+    var schemas = new HashMap<String, TableMetadataObservation.SourceMetadataSchema>();
     SemanticCatalogDomains.ensure(semanticCatalog, domain);
     var outcomes = new ArrayList<TableOutcome>();
     for (var record : result.records()) {
@@ -206,6 +208,9 @@ public final class TableMetadataRetrieval {
                       tableMetadata,
                       new TableMetadataObservation.SourceMetadata(
                           read.sourceMetadata().connector(), document),
+                      schemas.computeIfAbsent(
+                          read.sourceMetadata().connector(),
+                          name -> sourceMetadataSchema(library, name)),
                       read.readAt()),
                   retrieval,
                   digest(content));
@@ -295,6 +300,17 @@ public final class TableMetadataRetrieval {
           "TABLE_METADATA_RETRIEVAL_FAILED",
           "The connector returned source metadata that is not a JSON document.");
     }
+  }
+
+  /** The source metadata schema the library publishes for a connector, with its digest. */
+  private static TableMetadataObservation.SourceMetadataSchema sourceMetadataSchema(
+      ConnectorLibrary library, String connector) {
+    var schema = library.sourceMetadataSchemas().get(connector);
+    if (schema == null) {
+      throw new IllegalStateException(
+          "The connector library publishes no source metadata schema for " + connector);
+    }
+    return new TableMetadataObservation.SourceMetadataSchema(digest(schema), schema);
   }
 
   private static String digest(JsonNode content) {

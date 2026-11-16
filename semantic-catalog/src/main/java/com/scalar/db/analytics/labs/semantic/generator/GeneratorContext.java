@@ -96,8 +96,11 @@ public final class GeneratorContext {
      * @param tableMetadata the table metadata the connector derived for the version observed last,
      *     the source-independent form of what the source declares
      * @param complete whether every item of the table could be read
+     * @param sourceMetadataSchema the URN of the JSON Schema the connector publishes for the source
+     *     metadata of the version observed last
      */
-    record Read(JsonNode tableMetadata, boolean complete) implements Observed {}
+    record Read(JsonNode tableMetadata, boolean complete, String sourceMetadataSchema)
+        implements Observed {}
 
     /** The source reports that the table does not exist. */
     record DoesNotExist() implements Observed {}
@@ -215,7 +218,10 @@ public final class GeneratorContext {
       }
       observed =
           new Observed.Read(
-              derived.get().get("tableMetadata"), derived.get().path("complete").asBoolean());
+              derived.get().get("tableMetadata"),
+              derived.get().path("complete").asBoolean(),
+              Urns.sourceMetadataSchema(
+                  domain, derived.get().path("sourceMetadataSchema").asText()));
     }
     return Optional.of(
         new Table(
@@ -282,6 +288,16 @@ public final class GeneratorContext {
         .map(positioned -> positioned.record())
         .filter(LogRecord.InputObservation.class::isInstance)
         .map(record -> ((LogRecord.InputObservation) record).content());
+  }
+
+  /**
+   * The source metadata schema a derived record names, by its URN: the JSON Schema a connector
+   * publishes for its source metadata documents.
+   */
+  public JsonNode sourceMetadataSchema(String urn) {
+    return transaction
+        .sourceMetadataSchema(domain, Urns.identifier(urn))
+        .orElseThrow(() -> new IllegalStateException("No source metadata schema " + urn));
   }
 
   /** The usage feedback an observed Input Resource holds, if it is usage feedback. */

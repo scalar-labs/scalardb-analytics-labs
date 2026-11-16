@@ -262,6 +262,10 @@ source schemas through the upstream `schema-resolver` at registration), the appl
   and a table that does not exist gets the time of the retrieval. Every retrieval therefore makes a
   new version, and an unchanged table adds only a derived record. The content digest is the SHA-256
   of the canonical JSON of the table metadata and the source metadata.
+- The source metadata schema passed with a table is the one the connector library's static
+  information publishes for the connector that read it, and its digest is the SHA-256 of its
+  canonical JSON. The connector API requires every connector to publish one, so a library that
+  publishes none for the reading connector fails the retrieval.
 - The Semantic Catalog domain is the workspace's catalog name, lowercased, with every run of other
   characters than letters and digits replaced by one hyphen. The first retrieval creates the domain
   when `workspace init` has not.

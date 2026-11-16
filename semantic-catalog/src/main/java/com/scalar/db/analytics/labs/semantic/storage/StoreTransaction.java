@@ -554,6 +554,34 @@ public final class StoreTransaction {
   }
 
   /**
+   * Keeps a connector's source metadata schema under its digest; a schema the domain already holds
+   * is kept once.
+   */
+  public void insertSourceMetadataSchema(
+      String domain, String digest, String connector, JsonNode schema) {
+    jdbc.sql(
+            "INSERT INTO semantic_catalog.source_metadata_schemas"
+                + " (domain, digest, connector, content)"
+                + " VALUES (:domain, :digest, :connector, CAST(:content AS jsonb))"
+                + " ON CONFLICT (domain, digest) DO NOTHING")
+        .param("domain", domain)
+        .param("digest", digest)
+        .param("connector", connector)
+        .param("content", LogRecordJson.writeNode(schema))
+        .update();
+  }
+
+  /** A source metadata schema the domain holds, by its digest. */
+  public Optional<JsonNode> sourceMetadataSchema(String domain, String digest) {
+    return jdbc.sql(
+            "SELECT content::text FROM semantic_catalog.source_metadata_schemas"
+                + " WHERE domain = ? AND digest = ?")
+        .params(domain, digest)
+        .query((rs, n) -> LogRecordJson.readNode(rs.getString(1)))
+        .optional();
+  }
+
+  /**
    * The tables whose latest version received differs from the highest version among their derived
    * records, each described for the replay check.
    */

@@ -182,6 +182,7 @@ class DataChecksTest extends StoreScenarioTest {
                 new SourceMetadata(
                     "postgresql",
                     JSON.objectNode().put("version", version).set("table", tableMetadata)),
+                Scenario.SCHEMA,
                 Instant.parse("2026-11-16T00:00:00Z")),
             JSON.objectNode(),
             "digest-" + version));

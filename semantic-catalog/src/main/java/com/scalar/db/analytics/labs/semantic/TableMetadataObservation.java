@@ -77,10 +77,17 @@ public record TableMetadataObservation(
    * @param tableMetadata the source-independent table metadata as the connector returned it, a JSON
    *     object; the Semantic Catalog keeps it without reading it
    * @param sourceMetadata the connector's source metadata of the table, the observation
+   * @param sourceMetadataSchema the JSON Schema the connector publishes for its source metadata
+   *     documents. It is kept outside the observation, so a schema change alone never looks like a
+   *     change of the table
    * @param readAt when the connector read the table's catalog
    */
   public record Read(
-      boolean complete, JsonNode tableMetadata, SourceMetadata sourceMetadata, Instant readAt)
+      boolean complete,
+      JsonNode tableMetadata,
+      SourceMetadata sourceMetadata,
+      SourceMetadataSchema sourceMetadataSchema,
+      Instant readAt)
       implements TableRecord {
     public Read {
       if (!tableMetadata.isObject()) {
@@ -101,6 +108,7 @@ public record TableMetadataObservation(
       var derived = JsonNodeFactory.instance.objectNode();
       derived.put("complete", complete);
       derived.set("tableMetadata", LogRecordJson.toStored(tableMetadata));
+      derived.put("sourceMetadataSchema", sourceMetadataSchema.digest());
       derived.put("readAt", readAt.toString());
       return derived;
     }
@@ -130,6 +138,25 @@ public record TableMetadataObservation(
     public SourceMetadata {
       if (connector.isBlank()) {
         throw new IllegalArgumentException("A connector name is not blank");
+      }
+    }
+  }
+
+  /**
+   * The JSON Schema a connector published for its source metadata documents, whose descriptions
+   * state what each item of a document means.
+   *
+   * @param digest the SHA-256 digest of the schema's content, by which the Semantic Catalog keeps
+   *     it once
+   * @param schema the JSON Schema
+   */
+  public record SourceMetadataSchema(String digest, JsonNode schema) {
+    public SourceMetadataSchema {
+      if (digest.isBlank()) {
+        throw new IllegalArgumentException("A schema digest is not blank");
+      }
+      if (!schema.isObject()) {
+        throw new IllegalArgumentException("A source metadata schema is a JSON object");
       }
     }
   }

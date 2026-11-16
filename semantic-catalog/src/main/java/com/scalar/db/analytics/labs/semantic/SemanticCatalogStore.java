@@ -426,6 +426,11 @@ public final class SemanticCatalogStore implements AutoCloseable {
       String domain,
       String inputResource,
       TableMetadataObservation observation) {
+    if (observation.table() instanceof TableMetadataObservation.Read read) {
+      var schema = read.sourceMetadataSchema();
+      transaction.insertSourceMetadataSchema(
+          domain, schema.digest(), read.sourceMetadata().connector(), schema.schema());
+    }
     transaction.insertDerivedRecord(
         domain, observation.tableIdentifier(), observation.version(), observation.derivedRecord());
     transaction.setLatestTableMetadataVersion(domain, inputResource, observation.version());

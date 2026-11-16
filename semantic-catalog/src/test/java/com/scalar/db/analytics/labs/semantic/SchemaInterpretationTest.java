@@ -199,6 +199,7 @@ class SchemaInterpretationTest extends StoreScenarioTest {
                     true,
                     tableMetadata,
                     new SourceMetadata(connector, JSON.objectNode().set("table", tableMetadata)),
+                    Scenario.SCHEMA,
                     Instant.parse("2026-11-16T00:00:00Z")),
                 JSON.objectNode(),
                 "digest-" + version));
@@ -552,6 +553,7 @@ class SchemaInterpretationTest extends StoreScenarioTest {
                         true,
                         table("events", List.of(column("id", false, "int")), List.of()),
                         new SourceMetadata("lake", JSON.objectNode()),
+                        Scenario.SCHEMA,
                         Instant.parse("2026-11-16T00:00:00Z")),
                     JSON.objectNode(),
                     "digest-" + version));

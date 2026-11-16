@@ -296,6 +296,8 @@ abstract class MeaningInference implements ModelGenerator {
               .observationContent(table.table().observation())
               .map(content -> content.path("sourceMetadata"))
               .orElse(JSON.nullNode()));
+      var schema = observed.sourceMetadataSchema();
+      tableNode.set("sourceMetadataSchema", context.sourceMetadataSchema(schema));
       var names = new ArrayList<String>();
       names.add(table.tableReference().table());
       names.addAll(columns);
@@ -303,7 +305,7 @@ abstract class MeaningInference implements ModelGenerator {
       missing.addAll(chosen.missing());
       for (var from = 0; from < located.size(); from += TARGETS_PER_CALL) {
         var share = located.subList(from, Math.min(from + TARGETS_PER_CALL, located.size()));
-        asks.add(ask(context, tableNode, chosen.sections(), share, predicatesByElement));
+        asks.add(ask(context, tableNode, schema, chosen.sections(), share, predicatesByElement));
       }
     }
     return new Plan(asks, queries, List.copyOf(missing));
@@ -313,10 +315,13 @@ abstract class MeaningInference implements ModelGenerator {
    * One model call over targets of one table: the table once, the document sections chosen for it,
    * then each target with the predicates asked for, its confirmed Facts, and the values already
    * rejected at those predicates. Every target's candidates rest on the documents the call reads.
+   * The table's source metadata schema is read but is no premise: a schema describes the shape of
+   * source metadata, so a new one leaves what was inferred from a document standing.
    */
   private static Ask ask(
       GeneratorContext context,
       ObjectNode tableNode,
+      String schema,
       List<DocumentSections.Section> sections,
       List<Located> share,
       Map<String, List<String>> predicatesByElement) {
@@ -324,6 +329,7 @@ abstract class MeaningInference implements ModelGenerator {
     var input = JSON.objectNode();
     var targetNodes = input.putArray("targets");
     input.putArray("tables").add(tableNode.deepCopy());
+    read.add(schema);
     var documentNodes = input.putArray("documents");
     var documentPremises = new LinkedHashSet<Dependency>();
     for (var section : sections) {

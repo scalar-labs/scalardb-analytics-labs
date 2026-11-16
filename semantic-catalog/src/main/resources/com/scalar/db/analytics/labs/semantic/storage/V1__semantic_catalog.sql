@@ -238,14 +238,25 @@ CREATE INDEX review_presentation_targets_fact
     ON semantic_catalog.review_presentation_targets (domain, fact);
 
 -- The connector-derived part of each table metadata version received: the Analytics types, the
--- retrieval information, the read time, and the content digest. It is neither an Input Observation
--- nor a Fact, so it is not in the log.
+-- retrieval information, the read time, the content digest, and the digest of the source metadata
+-- schema. It is neither an Input Observation nor a Fact, so it is not in the log.
 CREATE TABLE semantic_catalog.derived_records (
     domain text NOT NULL REFERENCES semantic_catalog.domains (domain),
     table_identifier text NOT NULL,
     table_metadata_version bigint NOT NULL,
     content jsonb NOT NULL,
     PRIMARY KEY (domain, table_identifier, table_metadata_version)
+);
+
+-- The JSON Schemas connectors published for their source metadata documents, each kept once under
+-- the SHA-256 digest of its content. A derived record names the schema of its version's source
+-- metadata by that digest. Like a derived record, a schema is not in the log.
+CREATE TABLE semantic_catalog.source_metadata_schemas (
+    domain text NOT NULL REFERENCES semantic_catalog.domains (domain),
+    digest text NOT NULL,
+    connector text NOT NULL,
+    content jsonb NOT NULL,
+    PRIMARY KEY (domain, digest)
 );
 
 -- Build tasks: one run of a Generator, an impact judgement, an evaluation by the policy evaluation

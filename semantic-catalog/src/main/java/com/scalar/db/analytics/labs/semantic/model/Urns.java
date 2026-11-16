@@ -45,8 +45,9 @@ import java.util.stream.Collectors;
  *
  * <p>Input Resources, Input Observations, and log records are identified by the {@linkplain
  * LogPosition position} of a log record ({@code input-observation:c3.1}), and a Catalog Snapshot by
- * its commit number. A Fact Revision is identified by its Fact and the position of the Fact Event
- * that produced it ({@code fact-revision:field:shop.public.orders.amount/meaning/1@c5.2}).
+ * its commit number, and a source metadata schema by the SHA-256 digest of its content. A Fact
+ * Revision is identified by its Fact and the position of the Fact Event that produced it ({@code
+ * fact-revision:field:shop.public.orders.amount/meaning/1@c5.2}).
  */
 public final class Urns {
   /** The namespace of every URN; the product defines no abbreviation of its name. */
@@ -72,6 +73,7 @@ public final class Urns {
   public static final String INPUT_OBSERVATION = "input-observation";
   public static final String LOG_RECORD = "log-record";
   public static final String CATALOG_SNAPSHOT = "catalog-snapshot";
+  public static final String SOURCE_METADATA_SCHEMA = "source-metadata-schema";
 
   private static final Set<String> POSITIONAL =
       Set.of(INPUT_RESOURCE, INPUT_OBSERVATION, LOG_RECORD);
@@ -212,6 +214,14 @@ public final class Urns {
 
   public static String catalogSnapshot(String domain, long commit) {
     return PREFIX + domain + ":" + CATALOG_SNAPSHOT + ":" + commit;
+  }
+
+  /**
+   * The URN of a source metadata schema, the JSON Schema a connector published for its source
+   * metadata documents, identified by the SHA-256 digest of its content.
+   */
+  public static String sourceMetadataSchema(String domain, String digest) {
+    return PREFIX + domain + ":" + SOURCE_METADATA_SCHEMA + ":" + digest;
   }
 
   /** The URN of the Fact Revision that the Fact Event at a position produced. */

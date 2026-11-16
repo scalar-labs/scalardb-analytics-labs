@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.scalar.db.analytics.labs.semantic.TableMetadataObservation.Read;
 import com.scalar.db.analytics.labs.semantic.TableMetadataObservation.SourceMetadata;
+import com.scalar.db.analytics.labs.semantic.TableMetadataObservation.SourceMetadataSchema;
 import com.scalar.db.analytics.labs.semantic.model.BuildTask;
 import com.scalar.db.analytics.labs.semantic.model.Dependency;
 import com.scalar.db.analytics.labs.semantic.model.Document;
@@ -144,6 +145,21 @@ class MeaningInferenceTest extends StoreScenarioTest {
     return node;
   }
 
+  /** The schema the postgresql connector publishes for its source metadata, in brief. */
+  private static final SourceMetadataSchema POSTGRESQL_SCHEMA =
+      new SourceMetadataSchema(
+          "postgresql-schema-digest",
+          JSON.objectNode()
+              .put("type", "object")
+              .set(
+                  "properties",
+                  JSON.objectNode()
+                      .set(
+                          "comment",
+                          JSON.objectNode()
+                              .put("type", "string")
+                              .put("description", "The table's comment, from obj_description."))));
+
   private static void register(Scenario s) {
     register(s, "orders", ordersMetadata(), "One row per customer order");
   }
@@ -164,6 +180,7 @@ class MeaningInferenceTest extends StoreScenarioTest {
                 metadata,
                 new SourceMetadata(
                     "postgresql", JSON.objectNode().put("comment", comment).set("table", metadata)),
+                POSTGRESQL_SCHEMA,
                 Instant.parse("2026-11-16T00:00:00Z")),
             JSON.objectNode(),
             "digest-" + version));
@@ -369,6 +386,8 @@ class MeaningInferenceTest extends StoreScenarioTest {
     assertThat(table.path("sourceMetadata").path("connector").asText()).isEqualTo("postgresql");
     assertThat(table.path("sourceMetadata").path("document").path("comment").asText())
         .isEqualTo("One row per customer order");
+    // The schema the connector published for that document says what each of its items means.
+    assertThat(table.path("sourceMetadataSchema")).isEqualTo(POSTGRESQL_SCHEMA.schema());
     assertThat(table.path("countStatistics").path("rows").asLong()).isEqualTo(3);
     assertThat(
             table
@@ -393,6 +412,12 @@ class MeaningInferenceTest extends StoreScenarioTest {
     var amountKind = only(s, field(s, "amount"), Vocabulary.VALUE_KIND);
     assertThat(amountKind.checks().getFirst().reference()).isNotNull();
     assertThat(amountKind.inputsRead()).isNotEmpty();
+    // The schema is read, but a candidate does not rest on it: a new schema describes the same
+    // document, so it leaves what was inferred from the document standing.
+    var schema = Urns.sourceMetadataSchema(s.domain, POSTGRESQL_SCHEMA.digest());
+    assertThat(amountKind.inputsRead().toString()).contains(schema);
+    assertThat(amountKind.dependencies())
+        .noneSatisfy(dependency -> assertThat(dependency.toString()).contains(schema));
   }
 
   @Test

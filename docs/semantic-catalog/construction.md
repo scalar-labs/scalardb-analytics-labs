@@ -18,10 +18,13 @@ Construction starts from new or changed input, not from questions:
   that says so. Source metadata is the material for interpreting meaning, and it holds every
   declaration the table metadata states, such as names, columns, and constraints, because the
   connector derives the table metadata from it. The table metadata, with whether it is complete,
-  the read time, the retrieval information, and the content digest, is kept as a **derived record**
-  of the table metadata version, which is neither an Input Observation nor a Fact. Whether an
-  observation is new is judged by comparing the source metadata with the previous observation, so a
-  change only in the connector's mapping adds a derived record and no observation. The derived
+  the read time, the retrieval information, the content digest, and the digest of the source
+  metadata schema, is kept as a **derived record** of the table metadata version, which is neither
+  an Input Observation nor a Fact. The **source metadata schema** is the JSON Schema the connector
+  publishes for its source metadata documents, whose descriptions state what each item means; the
+  domain keeps each schema once under its digest. Whether an observation is new is judged by
+  comparing the source metadata with the previous observation, so a change only in the connector's
+  mapping, or only in its schema, adds a derived record and no observation. The derived
   record holds the table metadata only until the Physical Catalog keeps the table metadata it is
   built from; the Semantic Catalog then reads it there.
 - Documents the semantics owner registers or changes. A document observation creates no build task

@@ -308,8 +308,9 @@ identifier correspondence inference, and the triggers of documents and of feedba
 Facts are not.
 
 Meaning inference uses a model for predicates that declarations and data cannot decide. For a target
-element it passes names and types, confirmed Facts, relevant document parts, feedback, and permitted
-data statistics, and asks for predicate values with what supports them. An item that cites a
+element it passes names and types, the table's source metadata with the source metadata schema it
+was written against, confirmed Facts, relevant document parts, feedback, and permitted data
+statistics, and asks for predicate values with what supports them. An item that cites a
 registered document is `document`, with a quotation the Generator verifies against the document;
 anything else is `inference`, with the basis the model stated. Neither is deterministic, so no
 meaning-inference candidate is adopted inline; under `auto` the policy evaluation model decides
@@ -525,7 +526,13 @@ noticed.
 ## Input passed to external models
 
 Row and Field meaning inference apply the settings for data count statistics and value samples, pass
-the relevant parts of documents, and record what they pass as inputs read. **[Planned]** Length and
+the relevant parts of documents, and record what they pass as inputs read.
+
+The source metadata schema is the one the latest derived record names, so the model reads each
+document with the schema it was written against. A candidate records the schema's URN as read but
+does not depend on it: a schema describes the shape of source metadata, so a new one leaves what was
+inferred from a document standing, and no Generator reads schemas as an input kind. Reads of a Fact
+do not expand the schema's URN, so the schema is not repeated with every Fact inferred from it. **[Planned]** Length and
 shape distributions, the usage feedback setting, and turning data checks off are not implemented.
 
 The policy evaluation model's subject holds Fact content and what the candidate's Generator recorded
@@ -538,7 +545,7 @@ far as the domain's settings allow:
 
 | Input | Content | Default |
 | --- | --- | --- |
-| Physical schema | Table and column names, source types, constraints, and the connector's source metadata as the connector wrote it | Passed |
+| Physical schema | Table and column names, source types, constraints, the connector's source metadata as the connector wrote it, and the source metadata schema the connector publishes | Passed |
 | Confirmed Facts | Values and scopes of selected Fact Revisions | Passed |
 | Documents | Relevant parts | Passed |
 | Data count statistics | Row count, null ratio, distinct count, from a bounded sample | Passed; can be stopped |

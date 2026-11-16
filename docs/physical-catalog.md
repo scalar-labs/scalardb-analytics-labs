@@ -128,6 +128,7 @@ copied where nothing uses it:
 | Completeness, missing items, and "does not exist" | Persisted; used to avoid inferring deletions from missing information | "Does not exist" is an observation |
 | "Not retrieved" | Not made a version; reported in the change notification | Not received |
 | Retrieval information and content digest | Persisted with the version; used for version management | Kept as a derived record |
+| Source metadata schema (the JSON Schema the connector publishes for its source metadata, from the connector library's static information) | Not persisted | Kept once per schema; the derived record names it by digest |
 
 Until the Physical Catalog keeps the table metadata it is built from, the Semantic Catalog also
 keeps each version's whole table metadata in its derived record.

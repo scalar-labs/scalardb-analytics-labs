@@ -113,6 +113,11 @@ final class Scenario {
     return latest(snapshot -> snapshot.latestRevision(fact).orElseThrow());
   }
 
+  /** A source metadata schema for registrations whose schema a scenario does not look at. */
+  static final TableMetadataObservation.SourceMetadataSchema SCHEMA =
+      new TableMetadataObservation.SourceMetadataSchema(
+          "scenario-schema", JsonNodeFactory.instance.objectNode().put("type", "object"));
+
   /** A table named by its dotted registration, namespace, and table, such as {@code a.b.c}. */
   static PhysicalCatalogReference.Table table(String dotted) {
     var parts = dotted.split("\\.");

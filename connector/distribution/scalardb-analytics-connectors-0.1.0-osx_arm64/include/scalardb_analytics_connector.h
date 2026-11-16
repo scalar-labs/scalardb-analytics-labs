@@ -209,6 +209,9 @@ typedef struct ScalardbAnalyticsConnectorLibrarySettings {
   // Directory from which ADBC drivers are loaded; null or empty when none is
   // configured.
   const char *adbc_driver_directory;
+  // Directory from which ODBC drivers are loaded; null or empty when none is
+  // configured.
+  const char *odbc_driver_directory;
 } ScalardbAnalyticsConnectorLibrarySettings;
 
 // One connection option passed when opening a Data Source.

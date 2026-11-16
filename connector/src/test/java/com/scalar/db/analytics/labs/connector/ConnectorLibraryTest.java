@@ -7,6 +7,7 @@ package com.scalar.db.analytics.labs.connector;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.fasterxml.jackson.databind.node.MissingNode;
 import java.sql.DriverManager;
 import java.time.Duration;
 import java.util.List;
@@ -175,5 +176,23 @@ class ConnectorLibraryTest {
   @Test
   void staticInformationNamesThePackagedConnector() {
     assertThat(library.staticInformation()).contains("\"postgresql\"");
+  }
+
+  @Test
+  void eachPackagedConnectorPublishesASourceMetadataSchemaThatDescribesItsItems() {
+    var schemas = library.sourceMetadataSchemas();
+
+    assertThat(schemas).containsKeys("postgresql", "mysql", "salesforce");
+    var postgresql = schemas.getOrDefault("postgresql", MissingNode.getInstance());
+    assertThat(postgresql.path("$schema").asText()).contains("2020-12");
+    assertThat(
+            postgresql
+                .path("$defs")
+                .path("PostgresColumn")
+                .path("properties")
+                .path("attnum")
+                .path("description")
+                .asText())
+        .contains("renames");
   }
 }

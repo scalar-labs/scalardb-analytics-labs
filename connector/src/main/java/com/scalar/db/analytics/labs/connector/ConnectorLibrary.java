@@ -7,6 +7,9 @@ package com.scalar.db.analytics.labs.connector;
 import static java.lang.foreign.ValueLayout.ADDRESS;
 import static java.lang.foreign.ValueLayout.JAVA_LONG;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
@@ -18,6 +21,8 @@ import java.lang.foreign.SymbolLookup;
 import java.lang.invoke.MethodHandle;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.jspecify.annotations.Nullable;
@@ -39,6 +44,7 @@ import org.jspecify.annotations.Nullable;
  */
 public final class ConnectorLibrary implements AutoCloseable {
   private static final AtomicBoolean OPEN = new AtomicBoolean();
+  private static final ObjectMapper JSON = new ObjectMapper();
 
   private final Arena libraryArena;
   final Functions functions;
@@ -83,8 +89,11 @@ public final class ConnectorLibrary implements AutoCloseable {
 
   private void initialize(Path drivers) throws ConnectorException {
     try (var arena = Arena.ofConfined()) {
-      var settings = arena.allocate(ADDRESS);
+      // ScalardbAnalyticsConnectorLibrarySettings: the ADBC driver directory, then the ODBC driver
+      // directory, which no packaged Connector needs and is left null.
+      var settings = arena.allocate(ADDRESS, 2);
       settings.set(ADDRESS, 0, arena.allocateFrom(drivers.toAbsolutePath().toString()));
+      settings.set(ADDRESS, ADDRESS.byteSize(), MemorySegment.NULL);
       functions.check((MemorySegment) functions.libraryInitialize.invokeExact(settings));
     } catch (ConnectorException e) {
       throw e;
@@ -103,6 +112,32 @@ public final class ConnectorLibrary implements AutoCloseable {
     } catch (Throwable e) {
       throw new IllegalStateException(e);
     }
+  }
+
+  /**
+   * The JSON Schema each built-in Connector publishes for its source metadata documents, by
+   * Connector name. Its descriptions state what each item of a document means. The connector API
+   * requires every Connector to publish one.
+   */
+  public Map<String, JsonNode> sourceMetadataSchemas() {
+    final JsonNode information;
+    try {
+      information = JSON.readTree(staticInformation());
+    } catch (JsonProcessingException e) {
+      throw new IllegalStateException("The static information is not JSON", e);
+    }
+    var schemas = new LinkedHashMap<String, JsonNode>();
+    for (var entry : information.path("connectors")) {
+      var schema = entry.path("source_metadata_schema");
+      if (!schema.isObject()) {
+        throw new IllegalStateException(
+            "The static information states no source metadata schema for " + entry.path("name"));
+      }
+      for (var name : entry.path("connectors")) {
+        schemas.put(name.asText(), schema);
+      }
+    }
+    return Collections.unmodifiableMap(schemas);
   }
 
   /**

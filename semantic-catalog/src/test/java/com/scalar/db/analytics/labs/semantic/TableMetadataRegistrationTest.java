@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.scalar.db.analytics.labs.semantic.TableMetadataObservation.DoesNotExist;
 import com.scalar.db.analytics.labs.semantic.TableMetadataObservation.Read;
 import com.scalar.db.analytics.labs.semantic.TableMetadataObservation.SourceMetadata;
+import com.scalar.db.analytics.labs.semantic.TableMetadataObservation.SourceMetadataSchema;
 import com.scalar.db.analytics.labs.semantic.TableMetadataRegistration.DerivedRecordOnly;
 import com.scalar.db.analytics.labs.semantic.TableMetadataRegistration.NotNewer;
 import com.scalar.db.analytics.labs.semantic.TableMetadataRegistration.Observed;
@@ -56,11 +57,21 @@ class TableMetadataRegistrationTest extends StoreScenarioTest {
 
   private static TableMetadataObservation observation(
       long version, JsonNode tableMetadata, SourceMetadata sourceMetadata) {
+    return observation(TABLE, version, tableMetadata, sourceMetadata, Scenario.SCHEMA);
+  }
+
+  private static TableMetadataObservation observation(
+      String table,
+      long version,
+      JsonNode tableMetadata,
+      SourceMetadata sourceMetadata,
+      SourceMetadataSchema schema) {
     return new TableMetadataObservation(
-        TABLE,
-        Optional.of(Scenario.table(TABLE)),
+        table,
+        Optional.of(Scenario.table(table)),
         version,
-        new Read(true, tableMetadata, sourceMetadata, Instant.parse("2026-11-15T00:00:00Z")),
+        new Read(
+            true, tableMetadata, sourceMetadata, schema, Instant.parse("2026-11-15T00:00:00Z")),
         json("{\"connector\": {\"name\": \"postgresql\", \"version\": \"0.1.0\"}}"),
         "digest-" + version);
   }
@@ -142,6 +153,60 @@ class TableMetadataRegistrationTest extends StoreScenarioTest {
         .isEqualTo(new NotNewer(2));
   }
 
+  /** The schema the postgresql connector publishes, with the given description of a comment. */
+  private static SourceMetadataSchema schema(String description) {
+    return new SourceMetadataSchema(
+        "schema-" + description.length(),
+        json(
+            "{\"type\": \"object\", \"properties\": {\"comment\": {\"description\": \"%s\"}}}"
+                .formatted(description)));
+  }
+
+  @Test
+  void aChangeOnlyInTheSourceMetadataSchemaRecordsOnlyADerivedRecordNamingTheNewSchema() {
+    var s = scenario();
+    var described = schema("The table comment.");
+    var first =
+        (Observed)
+            store.registerTableMetadata(
+                s.domain,
+                "app",
+                observation(TABLE, 1, orders(DECIMAL, ""), ordersSource("Orders"), described));
+    // Another table the same connector read shares the schema, which the domain keeps once.
+    var customers = "shop.public.customers";
+    assertThat(
+            store.registerTableMetadata(
+                s.domain,
+                "app",
+                observation(
+                    customers,
+                    1,
+                    json("{\"table\": [\"shop\", \"public\", \"customers\"], \"columns\": []}"),
+                    ordersSource("Customers"),
+                    described)))
+        .isInstanceOf(Observed.class);
+    var commit = s.lastCommit();
+
+    // A library update describes the same document more fully; the source did not change.
+    var redescribed = schema("The table's comment, from obj_description.");
+    var registration =
+        store.registerTableMetadata(
+            s.domain,
+            "app",
+            observation(TABLE, 2, orders(DECIMAL, ""), ordersSource("Orders"), redescribed));
+
+    assertThat(registration)
+        .isEqualTo(new DerivedRecordOnly(first.inputResource(), first.inputObservation()));
+    assertThat(s.lastCommit()).isEqualTo(commit);
+    assertThat(store.derivedRecord(s.domain, TABLE, 1).orElseThrow().at("/sourceMetadataSchema"))
+        .isEqualTo(json("\"" + described.digest() + "\""));
+    assertThat(store.derivedRecord(s.domain, TABLE, 2).orElseThrow().at("/sourceMetadataSchema"))
+        .isEqualTo(json("\"" + redescribed.digest() + "\""));
+    assertThat(
+            store.derivedRecord(s.domain, customers, 1).orElseThrow().at("/sourceMetadataSchema"))
+        .isEqualTo(json("\"" + described.digest() + "\""));
+  }
+
   @Test
   void changedSourceMetadataIsANewObservationOfTheSameInputResource() {
     var s = scenario();
@@ -203,6 +268,7 @@ class TableMetadataRegistrationTest extends StoreScenarioTest {
                     false,
                     json("{\"table\": [\"shop\", \"public\", \"customers\"], \"columns\": []}"),
                     new SourceMetadata("postgresql", json("{}")),
+                    Scenario.SCHEMA,
                     Instant.parse("2026-11-15T00:00:00Z")),
                 json("{}"),
                 "digest"));

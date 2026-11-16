@@ -117,8 +117,9 @@ output says so.
   not interpreted. The whole record is passed exactly as
   the connector returned it, not the part the Physical Catalog stored: the connector's source
   metadata, the table metadata, the read time, whether the table was read completely or found not
-  to exist, the retrieval information, and the content digest. The source metadata is the
-  observation; the rest is the version's derived record. A version no newer than the latest one
+  to exist, the retrieval information, and the content digest, with the source metadata schema the
+  connector publishes and its digest. The source metadata is the
+  observation; the rest is the version's derived record, which names the schema by its digest. A version no newer than the latest one
   already received for that table records nothing, so a retrieval that arrives late cannot roll the
   table back. A new version whose source metadata is unchanged records only a derived record. Each is a success, and the output says which was recorded, with the Input Resource
   and Input Observation URNs. The application passes unchanged tables at every retrieval, so a
