@@ -332,7 +332,7 @@ UI. A review item carries:
 - **Review material,** when the policy evaluation model sent it to a person: what is to be decided,
   why it was not adopted and what remains uncertain, the evidence for and against, and a suggested
   answer with its reasons. The material is kept with the evaluation. It is written in the domain's
-  recording language, its primary language. **[Planned]** It reaches a deciding party who reads
+  recording language, its primary language. It reaches a deciding party who reads
   another language as a translation (see [`languages.md`](languages.md#translations)).
   **[Planned]** The policy
   evaluation model may sample values through the application's SQL execution within its build

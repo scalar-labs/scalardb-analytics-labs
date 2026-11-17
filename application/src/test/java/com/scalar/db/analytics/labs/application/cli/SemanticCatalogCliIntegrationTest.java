@@ -44,12 +44,15 @@ class SemanticCatalogCliIntegrationTest {
 
   /**
    * A model that infers that the orders table's rows are events, and, as the policy evaluation
-   * model, asks the deciding party about it. Every other Generator gets no targets.
+   * model, asks the deciding party about it. As the translator, it says each text in Japanese by
+   * prefixing it with {@code JA}. Every other Generator gets no targets.
    */
   private static final String INFERRING_ORDER_EVENTS =
       """
       input=$(cat)
       case "$input" in
+        *'"targetLanguage":"ja"'*)
+          printf '%s' "$input" | tail -n 1 | sed -e 's/.*"texts":/{"texts":/' -e 's/":"/":"JA /g' ;;
         *"row meaning inference generator"*)
           printf '%s' '{"targets": [{"ref": "warehouse.public.orders", "values": {"row-kind": \
       {"value": "event", "basis": "the table is named orders"}}}]}' ;;
@@ -425,6 +428,64 @@ class SemanticCatalogCliIntegrationTest {
     Files.writeString(path, OBJECT_MAPPER.writeValueAsString(configuration));
 
     assertError(semantic("languages"), "RECORDING_LANGUAGE_CHANGED");
+  }
+
+  @Test
+  void aReaderOfAnotherDeclaredLanguageGetsTranslationsBesideTheUnchangedReview() throws Exception {
+    assertSuccessful(semantic("build"));
+    // The domain records in English; Japanese is declared for its other readers.
+    var path = workspace.resolve(Workspace.CONFIG_FILE_NAME);
+    var configuration = (ObjectNode) OBJECT_MAPPER.readTree(path.toFile());
+    ((ObjectNode) configuration.get("semanticCatalog")).putArray("languages").add("en").add("ja");
+    Files.writeString(path, OBJECT_MAPPER.writeValueAsString(configuration));
+    var originals = single(semantic("review"));
+
+    // Before the translation task runs, the texts come pending and the read requests them.
+    var pending = single(semantic("review", "--language", "ja"));
+
+    assertThat(pending.get("groups")).isEqualTo(originals.get("groups"));
+    assertThat(pending.get("language").textValue()).isEqualTo("ja");
+    assertThat(pending.get("recordingLanguage").textValue()).isEqualTo("en");
+    var evaluation = onlyItem(pending, "row-kind").get("evaluation").get("logRecord").textValue();
+    var text = pending.get("texts").get(evaluation);
+    assertThat(text.get("status").textValue()).isEqualTo("pending");
+    assertThat(text.get("originals").get("reviewMaterial.question").textValue())
+        .isEqualTo("Is each row of orders one order placed?");
+    assertThat(pending.get("translationTask").longValue()).isPositive();
+
+    // After a build run, the same read returns each original beside its translation.
+    assertSuccessful(semantic("build"));
+    var translated = single(semantic("review", "--language", "ja"));
+
+    assertThat(translated.get("groups")).isEqualTo(originals.get("groups"));
+    assertThat(translated.has("translationTask")).isFalse();
+    var said = translated.get("texts").get(evaluation);
+    assertThat(said.get("status").textValue()).isEqualTo("translated");
+    assertThat(said.get("originals").get("reviewMaterial.question").textValue())
+        .isEqualTo("Is each row of orders one order placed?");
+    assertThat(said.get("translation").get("language").textValue()).isEqualTo("ja");
+    assertThat(said.get("translation").get("texts").get("reviewMaterial.question").textValue())
+        .isEqualTo("JA Is each row of orders one order placed?");
+
+    // The recording language, or no language, returns originals only and requests nothing.
+    var tasks = single(semantic("tasks")).get("tasks").size();
+    var recording = single(semantic("review", "--language", "en"));
+    assertThat(recording.get("texts")).isEmpty();
+    assertThat(recording.has("translationTask")).isFalse();
+    assertThat(originals.has("texts")).isFalse();
+    assertThat(single(semantic("tasks")).get("tasks")).hasSize(tasks);
+
+    // The other reads take the language too, and an undeclared one is invalid input.
+    var dataset = datasetOf(onlyItem(originals, "row-kind"));
+    var read = single(semantic("read", "--recursive", "--unconfirmed", "--language", "ja"));
+    assertThat(read.get("language").textValue()).isEqualTo("ja");
+    var knowledge = single(semantic("knowledge", "--element", dataset, "--language", "ja"));
+    assertThat(knowledge.get("language").textValue()).isEqualTo("ja");
+    assertThat(single(semantic("elements", "--term", "orders", "--language", "ja")).get("elements"))
+        .isEmpty();
+    assertError(semantic("review", "--language", "fr"), "INVALID_REQUEST");
+    assertError(semantic("elements", "--term", "orders", "--language", "fr"), "INVALID_REQUEST");
+    assertError(semantic("elements", "--language", "ja"), "INVALID_REQUEST");
   }
 
   @Test

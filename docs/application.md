@@ -228,14 +228,15 @@ Agent Skill v1 covers two workflows:
 In both, only the owner's answer consents. The agent never answers for the owner, and stops at a
 consent when the user is not one (see [Callers and authority](#callers-and-authority)).
 
-**[Planned]** Both workflows follow the reader's language. The agent knows the language the user
+Both workflows follow the reader's language. The agent knows the language the user
 reads from the conversation, or from a request in whatever words; when it is one of the domain's
 declared languages other than the primary one, the agent passes it on every read whose text it
 shows the user, and otherwise reads originals (see
 [`semantic-catalog/languages.md`](semantic-catalog/languages.md#agents-and-sessions)). The agent shows the translations the Semantic
 Catalog returns and never translates knowledge itself, so a reader can always tell a translation
-from the wording that was judged, and writes its own explanations in the reader's language. What
-the user writes for the Semantic Catalog to record, such as a correction's wording or usage
+from the wording that was judged, and writes its own explanations in the reader's language. A
+translation still pending it reports as not available yet, and shows the original only on request.
+What the user writes for the Semantic Catalog to record, such as a correction's wording or usage
 feedback, the agent translates into the domain's recording language before submitting it. When
 answering a question, it composes SQL from original text and requests translations only for text it
 shows the user, such as a definition it cites, so an unreviewed translation never shapes a query.

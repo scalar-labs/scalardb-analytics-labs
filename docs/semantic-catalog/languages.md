@@ -21,10 +21,11 @@ two kinds:
 
 Every description in the log is to be in the recording language, whoever writes it.
 
-Generators and the policy evaluation model write in the recording language. **[Planned]** So do the
-Semantic Catalog's own deterministic writers, and an agent translates what a person writes into it
-before submitting. **[Planned]** An agent that knows its user reads another declared language names
-that language on the reads whose text it shows; without one, a read returns originals only. A Query Agent reasons on originals.
+Generators and the policy evaluation model write in the recording language, and an agent
+translates what a person writes into it before submitting. **[Planned]** So do the Semantic
+Catalog's own deterministic writers, which write in English today. An agent that knows its user reads another declared language
+names that language on the reads whose text it shows; without one, a read returns originals only. A
+Query Agent reasons on originals.
 
 The split rests on what the Semantic Catalog guarantees: that meaning is right. A translation says
 the same meaning in other words, so recording it as a Fact would make the deciding party judge
@@ -141,7 +142,7 @@ Every writer writes in the recording language:
   language too: the business definition schema interpretation states for a foreign key, the reason
   inline policy evaluation gives, and the reason of a new domain's default user policy version. How
   is not decided yet; these texts are written in English today, whatever the recording language.
-- **[Planned]** A person may write in any language. The agent that submits a person's answer
+- A person may write in any language. The agent that submits a person's answer
   wording, conflict resolution wording, or usage feedback translates it into the recording language
   first, so the Semantic Catalog records only text in the recording language (see
   [Agents and sessions](#agents-and-sessions)).
@@ -211,8 +212,6 @@ party who reads another language reviews it as a translation, with the original 
 
 ## Agents and sessions
 
-**[Planned]** This section describes design that is not implemented yet.
-
 An agent working with a person, in review or in answering a question, knows the language the person
 reads from the conversation, or from a request in whatever words. When that language is declared
 and is not the domain's primary language, it passes it on every read whose text it shows the person;
@@ -221,7 +220,9 @@ language is kept for a principal, because the agent decides the language. It sho
 itself, so a reader can always tell a translation from the wording that was judged. Its own
 explanations it writes in the reader's language. What the person writes for the Semantic Catalog to
 record, such as a correction's wording or usage feedback, it translates into the recording language
-before submitting it.
+before submitting it. When a text's translation is still pending, it tells the person the
+translation is not available yet and reads again after the translation task has run, showing the
+original only when the person asks for it.
 
 A Query Agent composes SQL from original text and requests translations only for text it shows the
 user, such as a definition it cites, so an unreviewed translation never shapes a query. How the

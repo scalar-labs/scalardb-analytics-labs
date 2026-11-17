@@ -42,7 +42,48 @@ You are not the semantics owner. Only the owner's own answer confirms knowledge.
   `--unconfirmed`. Every level of `semantic read` carries `counts` of confirmed Fact Addresses,
   items awaiting review, and core predicates with missing knowledge.
 - Show the knowledge in the words the catalog returns. Do not translate or reword a definition
-  you cite.
+  you cite. For a user who reads another language, show the catalog's own translations, as
+  [Reading in the user's language](#reading-in-the-users-language) says.
+
+## Reading in the user's language
+
+The catalog records every description in one **recording language**, the domain's primary
+language. A user may read another of the domain's declared languages. Find out which:
+
+```console
+scalardb-analytics semantic languages --workspace <dir>
+```
+
+It returns the `declared` languages and the `primary` one, the recording language.
+
+1. **Decide the session language from the user.** Use the language the user writes in, or the one
+   they ask for in whatever words, such as "show me in English" or "日本語で". Switch whenever they
+   ask again. Nothing is stored for the user: you decide the language for this session.
+2. **When it is declared and not the primary language,** pass `--language <tag>` on every read
+   whose text you show the user: `semantic review`, and the `semantic read`, `knowledge`, and
+   `fact` reads whose definitions, reasons, or review material you present or cite. Otherwise, and
+   for a language the domain does not declare, pass no `--language` and show the originals.
+3. **Reason and compose SQL from originals only.** The reads you use to plan and compose a query
+   take no `--language`, and you never build SQL from a translation, which nobody reviewed. Read
+   again with `--language` only the text you will show, such as a definition you cite.
+4. **Show the catalog's translations; never translate knowledge yourself.** With `--language`, a
+   read returns its usual fields unchanged, plus `language`, `recordingLanguage`, and `texts`:
+   for each URN in the result that holds text, its `originals` by key and either
+   `"status": "translated"` with a `translation` (its `texts` under the same keys), or
+   `"status": "pending"`. Show the translation and say it is one; give the original when the user
+   asks for it. Write your own explanations in the user's language.
+5. **A pending text has no translation yet.** The read already requested it as a translation build
+   task (`translationTask`), which the build runs. Tell the user the translation is not available
+   yet and that it will be after the next build run, and read again then. Do not translate it
+   yourself, and show the original only when the user asks for it.
+6. **Submit what the user writes in the recording language.** An answer's or a conflict choice's
+   wording, a correction, and usage feedback are recorded as text. Translate what the user wrote
+   into the recording language before you submit it, keeping its meaning exactly, and tell the user
+   what you submitted.
+
+Business-term names are not translated: a term has its own name in each declared language, and
+`semantic elements --term` matches a name in any of them. Add `--language <tag>` there to match
+only that language's names.
 
 ## Discovering sources
 
@@ -85,7 +126,10 @@ Semantic Catalog returned.
    scalardb-analytics semantic review --workspace <dir>
    ```
 
-   Narrow it with `--source`, `--namespace`, and `--table`, or with `--kind`. Items come in
+   For an owner who reads another declared language, add `--language <tag>` (see
+   [Reading in the user's language](#reading-in-the-users-language)) and present the review material
+   from its translations. Narrow it with `--source`, `--namespace`, and `--table`, or with
+   `--kind`. Items come in
    `groups`, one per table (`table` is null for domain-wide items). Each item has:
    - `item`: `candidate` (consent to it), `retirement` (consent to retiring a confirmed Fact), or
      `conflict` (choose one Fact);
@@ -120,7 +164,8 @@ Semantic Catalog returned.
    `--kind` is `confirmation`, `retirement`, or `conflict`. The output's `presentation` number goes
    with the answers to it.
 
-5. **Submit exactly what the owner answered**, in one call, from the owner's own words:
+5. **Submit exactly what the owner answered**, in one call, from the owner's own words, put into
+   the recording language when the owner wrote in another:
 
    ```console
    scalardb-analytics semantic answer --workspace <dir> --file - <<'EOF'
@@ -237,7 +282,8 @@ scalardb-analytics semantic document register --workspace <dir> <file>
        --context "<the question, summarized>" [--related-fact <fact-urn>]
      ```
 
-     Add `--related-fact` when the feedback is about a Fact you read, such as one the user says is
+     Write `--content` and `--context` in the recording language. Add `--related-fact` when the
+     feedback is about a Fact you read, such as one the user says is
      wrong. Feedback with related Facts creates build tasks, which the watching build runs.
 
      A classification's `classified-field` is optional and never listed under `missing`: a
@@ -276,7 +322,8 @@ scalardb-analytics semantic document register --workspace <dir> <file>
    `--sql '<sql>'` and `--stdin` also work. Add `--time-limit-seconds <n>` to bound it.
 
 7. **Answer with the citation.** Give the result and the definitions you applied, in the
-   catalog's wording. End with the `catalogSnapshot` URN you read and the Fact Revision URN
+   catalog's wording; for a user who reads another declared language, read the cited Fact
+   Revisions again with `--language <tag>` and show their translations. End with the `catalogSnapshot` URN you read and the Fact Revision URN
    (`fact.revision.urn`) of every Fact the SQL relies on. Anyone can retrieve each one, with its
    checks, confirmation path, and deciding party:
 

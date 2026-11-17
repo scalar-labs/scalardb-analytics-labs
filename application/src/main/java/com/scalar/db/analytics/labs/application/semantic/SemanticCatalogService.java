@@ -12,6 +12,7 @@ import com.scalar.db.analytics.labs.semantic.Answers;
 import com.scalar.db.analytics.labs.semantic.CatalogSnapshot;
 import com.scalar.db.analytics.labs.semantic.ConflictResolution;
 import com.scalar.db.analytics.labs.semantic.FeedbackRegistration;
+import com.scalar.db.analytics.labs.semantic.LanguageRead;
 import com.scalar.db.analytics.labs.semantic.Point;
 import com.scalar.db.analytics.labs.semantic.SemanticCatalogStore;
 import com.scalar.db.analytics.labs.semantic.model.BuildTask;
@@ -31,8 +32,11 @@ import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Preset;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
@@ -71,8 +75,34 @@ public final class SemanticCatalogService {
     this.principal = principal;
   }
 
-  /** A read's result with the Catalog Snapshot it read. */
-  public record Read<T>(String catalogSnapshot, T result) {}
+  /**
+   * A read's result with the Catalog Snapshot it read and, when the read was made in a language,
+   * the translations beside it.
+   *
+   * @param translations present exactly when the read was made in a language
+   */
+  public record Read<T>(String catalogSnapshot, T result, Optional<Translations> translations) {
+    Read(String catalogSnapshot, T result) {
+      this(catalogSnapshot, result, Optional.empty());
+    }
+  }
+
+  /**
+   * The translations a read in a language returns beside its unchanged result (see {@code
+   * docs/semantic-catalog/languages.md}, "Reading in a language").
+   *
+   * @param language the language read in
+   * @param recordingLanguage the language every original is written in
+   * @param texts for each URN in the result that names a record with text, its originals with the
+   *     translation or a pending mark; empty when the language read in is the recording language
+   * @param translationTask the translation task the read requested the pending texts in; absent
+   *     when it requested nothing
+   */
+  public record Translations(
+      String language,
+      String recordingLanguage,
+      Map<String, LanguageRead.Text> texts,
+      OptionalLong translationTask) {}
 
   /** The point a caller names: a Catalog Snapshot URN of this domain, or the latest commit. */
   public Point point(@Nullable String catalogSnapshot) {
@@ -93,10 +123,18 @@ public final class SemanticCatalogService {
         "Not a Catalog Snapshot URN of the workspace's domain: " + catalogSnapshot);
   }
 
-  /** Reads along the hierarchy from a position. */
+  /**
+   * Reads along the hierarchy from a position.
+   *
+   * @param language the language to read in; originals only when absent
+   */
   public Read<Hierarchy.Level> read(
-      Point point, Review.Position position, Hierarchy.Depth depth, Knowledge.View view) {
-    return snapshot(point, snapshot -> snapshot.read(position, depth, view));
+      Point point,
+      Review.Position position,
+      Hierarchy.Depth depth,
+      Knowledge.View view,
+      @Nullable String language) {
+    return snapshot(point, language, snapshot -> snapshot.read(position, depth, view));
   }
 
   /** Finds the elements whose existence is selected at a point. */
@@ -107,26 +145,43 @@ public final class SemanticCatalogService {
 
   /**
    * Finds the elements that business terms with a written form refer to at a point, matching the
-   * names of every declared language.
+   * names of one declared language, or of every declared language when none is named.
    */
   public Read<List<Knowledge.NamedElement>> elements(
-      Point point, @Nullable ElementKind kind, @Nullable String parent, String writtenForm) {
-    return snapshot(point, snapshot -> snapshot.findElements(kind, parent, writtenForm, null));
+      Point point,
+      @Nullable ElementKind kind,
+      @Nullable String parent,
+      String writtenForm,
+      @Nullable String language) {
+    if (language != null) {
+      requireDeclared(language);
+    }
+    return snapshot(point, snapshot -> snapshot.findElements(kind, parent, writtenForm, language));
   }
 
-  /** Requests knowledge at a point. */
+  /**
+   * Requests knowledge at a point.
+   *
+   * @param language the language to read in; originals only when absent
+   */
   public Read<List<Knowledge.Answer>> knowledge(
-      Point point, List<KnowledgeRequest> requests, Knowledge.View view) {
-    return snapshot(point, snapshot -> snapshot.request(requests, view));
+      Point point,
+      List<KnowledgeRequest> requests,
+      Knowledge.View view,
+      @Nullable String language) {
+    return snapshot(point, language, snapshot -> snapshot.request(requests, view));
   }
 
   /**
    * Retrieves a Fact Revision's content, by its URN, or by a Fact URN as the Fact's latest revision
    * at a point.
+   *
+   * @param language the language to read in; originals only when absent
    */
-  public Read<Knowledge.RevisionContent> fact(Point point, String urn) {
+  public Read<Knowledge.RevisionContent> fact(Point point, String urn, @Nullable String language) {
     return snapshot(
         point,
+        language,
         snapshot -> {
           String revision;
           try {
@@ -146,9 +201,14 @@ public final class SemanticCatalogService {
         });
   }
 
-  /** Retrieves the review list below a position. */
-  public Read<List<Review.Group>> review(Point point, Review.Query query) {
-    return snapshot(point, snapshot -> snapshot.reviewList(query));
+  /**
+   * Retrieves the review list below a position.
+   *
+   * @param language the language to read in; originals only when absent
+   */
+  public Read<List<Review.Group>> review(
+      Point point, Review.Query query, @Nullable String language) {
+    return snapshot(point, language, snapshot -> snapshot.reviewList(query));
   }
 
   /**
@@ -275,6 +335,50 @@ public final class SemanticCatalogService {
 
   private String domain() {
     return workspace.semanticCatalogDomain();
+  }
+
+  /**
+   * Reads at a point in a language: the result keeps its originals, and the translations come
+   * beside it. A read in a language other than the recording one requests the pending translations.
+   */
+  private <T> Read<T> snapshot(
+      Point point, @Nullable String language, Function<CatalogSnapshot, T> reader) {
+    if (language == null) {
+      return snapshot(point, reader);
+    }
+    requireDeclared(language);
+    // The reader returns the bare result, which the store collects the text-bearing URNs from, so
+    // the Catalog Snapshot it read is carried out beside it.
+    var catalogSnapshot = new AtomicReference<String>();
+    LanguageRead<T> read =
+        store(
+            store ->
+                store.read(
+                    domain(),
+                    point,
+                    language,
+                    snapshot -> {
+                      catalogSnapshot.set(snapshot.urn());
+                      return reader.apply(snapshot);
+                    }));
+    return new Read<>(
+        Objects.requireNonNull(catalogSnapshot.get()),
+        read.result(),
+        Optional.of(
+            new Translations(
+                read.language(), read.recordingLanguage(), read.texts(), read.translationTask())));
+  }
+
+  /** Rejects a language the workspace configuration does not declare for the domain. */
+  private void requireDeclared(String language) {
+    var languages = workspace.semanticCatalogLanguages();
+    if (!languages.declares(language)) {
+      throw invalid(
+          "The domain does not declare the language "
+              + language
+              + "; its languages are "
+              + String.join(", ", languages.declared()));
+    }
   }
 
   private <T> Read<T> snapshot(Point point, Function<CatalogSnapshot, T> reader) {

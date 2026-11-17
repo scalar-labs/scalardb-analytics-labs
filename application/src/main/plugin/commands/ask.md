@@ -14,5 +14,6 @@ Wherever the skill writes `scalardb-analytics`, run `${CLAUDE_PLUGIN_ROOT}/bin/s
 with the Bash tool. Pass `--workspace <dir>` if this session settled one; otherwise the CLI uses
 `SCALARDB_ANALYTICS_WORKSPACE`.
 
-Answer in the user's language, and cite as the skill says: the Catalog Snapshot and the Fact
-Revisions the SQL relies on.
+Answer in the user's language, reading as the skill's "Reading in the user's language" says:
+compose the SQL from originals, and show the catalog's translations of the definitions you cite.
+Cite as the skill says: the Catalog Snapshot and the Fact Revisions the SQL relies on.

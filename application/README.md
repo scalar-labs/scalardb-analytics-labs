@@ -164,10 +164,21 @@ JSON line. Reads take `--snapshot <catalogSnapshot>` to read at that Catalog Sna
 commit otherwise, and return the `catalogSnapshot` they read; `--unconfirmed` adds unconfirmed
 knowledge to the confirmed knowledge they return by default.
 
+`read`, `knowledge`, `fact`, and `review` take `--language TAG`, a language the domain declares,
+for a reader of that language (see
+[`../docs/semantic-catalog/languages.md`](../docs/semantic-catalog/languages.md#reading-in-a-language)).
+Their fields stay the same, with original text only, and the output adds `language`,
+`recordingLanguage`, and `texts`: for each URN in the result whose record holds text, its
+`originals` by key with either `"status": "translated"` and the `translation`, or
+`"status": "pending"`. A read that found pending texts requested them and adds the
+`translationTask` that will translate them on the next `semantic build`. In the recording language
+`texts` is empty. With `--term`, `elements` takes `--language TAG` to match only that language's
+names. A language the domain does not declare is `INVALID_REQUEST`.
+
 | Command | Schema | Does |
 | --- | --- | --- |
 | `semantic read [--source S [--namespace N [--table T]]] [--recursive]` | `semantic-read` | Reads along the hierarchy: a position with its children and counts, or every table unit below it |
-| `semantic elements [--kind K] [--parent URN] [--term TEXT]` | `semantic-elements` | Finds elements by kind, parent, or a business term's written form |
+| `semantic elements [--kind K] [--parent URN] [--term TEXT [--language TAG]]` | `semantic-elements` | Finds elements by kind, parent, or a business term's written form |
 | `semantic knowledge --element URN [--predicate P]` or `--file FILE` | `semantic-knowledge` | Requests one predicate or every predicate of an element, or a JSON batch `{"requests": [...]}` that can name edges by kind and ends |
 | `semantic fact URN` | `semantic-fact` | Retrieves a Fact Revision's content, or a Fact's latest revision at the point |
 | `semantic review [position] [--kind K] [--element URN] [--fact-address URN]` | `semantic-review` | Retrieves the review list, grouped per table, with each item's review material |

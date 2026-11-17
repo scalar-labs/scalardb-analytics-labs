@@ -4,9 +4,14 @@
  */
 package com.scalar.db.analytics.labs.application.cli.semantic;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectWriter;
 import com.scalar.db.analytics.labs.application.ApplicationFailure;
 import com.scalar.db.analytics.labs.application.semantic.SemanticCatalogService;
+import com.scalar.db.analytics.labs.semantic.LanguageRead;
 import com.scalar.db.analytics.labs.semantic.model.Hierarchy;
 import com.scalar.db.analytics.labs.semantic.model.Knowledge;
 import com.scalar.db.analytics.labs.semantic.model.KnowledgeRequest;
@@ -48,6 +53,57 @@ final class ReadCommands {
     }
   }
 
+  /**
+   * A read whose text can come with translations: {@code --language} names the language the reader
+   * reads, and the output adds the translations beside the unchanged result.
+   */
+  abstract static class TranslatableRead extends SnapshotRead {
+    // Written as the map's declared type, so each text carries its status.
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final ObjectWriter TEXTS =
+        OBJECT_MAPPER.writerFor(new TypeReference<Map<String, LanguageRead.Text>>() {});
+
+    @Option(
+        names = "--language",
+        paramLabel = "TAG",
+        description =
+            "Also return each text's translation into this declared language, or a pending mark,"
+                + " beside the unchanged originals; originals only when absent.")
+    private @Nullable String language;
+
+    TranslatableRead(Map<String, String> environment) {
+      super(environment);
+    }
+
+    @Nullable String language() {
+      return language;
+    }
+
+    /** The output with the read's translations, when it named a language, after its fields. */
+    static Map<String, Object> withTranslations(
+        Map<String, Object> output, SemanticCatalogService.Read<?> read) {
+      read.translations()
+          .ifPresent(
+              translations -> {
+                output.put("language", translations.language());
+                output.put("recordingLanguage", translations.recordingLanguage());
+                output.put("texts", texts(translations.texts()));
+                translations
+                    .translationTask()
+                    .ifPresent(task -> output.put("translationTask", task));
+              });
+      return output;
+    }
+
+    private static JsonNode texts(Map<String, LanguageRead.Text> texts) {
+      try {
+        return OBJECT_MAPPER.readTree(TEXTS.writeValueAsString(texts));
+      } catch (JsonProcessingException e) {
+        throw new IllegalStateException("A read's texts are not writable as JSON", e);
+      }
+    }
+  }
+
   /** A position in the hierarchy, named by data source, namespace, and table. */
   static final class PositionOptions {
     @Option(names = "--source", paramLabel = "NAME", description = "A data source.")
@@ -76,7 +132,7 @@ final class ReadCommands {
       description =
           "Reads along the hierarchy: a position with its direct children and counts, or with"
               + " --recursive every table below it with the knowledge of each element.")
-  static final class ReadCommand extends SnapshotRead {
+  static final class ReadCommand extends TranslatableRead {
     @picocli.CommandLine.ArgGroup(exclusive = false)
     private @Nullable PositionOptions position;
 
@@ -97,9 +153,12 @@ final class ReadCommands {
               service.point(snapshot()),
               PositionOptions.of(position),
               recursive ? Hierarchy.Depth.RECURSIVE : Hierarchy.Depth.CHILDREN,
-              view(unconfirmed));
-      return envelope(
-          "semantic-read", "catalogSnapshot", read.catalogSnapshot(), "level", read.result());
+              view(unconfirmed),
+              language());
+      return withTranslations(
+          envelope(
+              "semantic-read", "catalogSnapshot", read.catalogSnapshot(), "level", read.result()),
+          read);
     }
   }
 
@@ -123,6 +182,12 @@ final class ReadCommands {
         description = "A business term's written form, matched exactly in any language.")
     private @Nullable String term;
 
+    @Option(
+        names = "--language",
+        paramLabel = "TAG",
+        description = "With --term, match only the names in this declared language.")
+    private @Nullable String language;
+
     ElementsCommand(Map<String, String> environment) {
       super(environment);
     }
@@ -131,10 +196,13 @@ final class ReadCommands {
     Map<String, Object> call(SemanticCatalogService service) {
       var point = service.point(snapshot());
       var elementKind = kind == null ? null : constant(ElementKind.class, kind, "--kind");
+      if (term == null && language != null) {
+        throw new ApplicationFailure("INVALID_REQUEST", "--language goes with --term.");
+      }
       var read =
           term == null
               ? service.elements(point, elementKind, parent)
-              : service.elements(point, elementKind, parent, term);
+              : service.elements(point, elementKind, parent, term, language);
       return envelope(
           "semantic-elements",
           "catalogSnapshot",
@@ -149,7 +217,7 @@ final class ReadCommands {
       description =
           "Requests knowledge: one predicate, or every predicate, of an element; or a batch of"
               + " requests, including edges by kind and ends, from a JSON file.")
-  static final class KnowledgeCommand extends SnapshotRead {
+  static final class KnowledgeCommand extends TranslatableRead {
     private final InputStream standardInput;
 
     @Option(names = "--element", paramLabel = "URN", description = "The element to read.")
@@ -181,13 +249,16 @@ final class ReadCommands {
     @Override
     Map<String, Object> call(SemanticCatalogService service) {
       var requests = requests();
-      var read = service.knowledge(service.point(snapshot()), requests, view(unconfirmed));
-      return envelope(
-          "semantic-knowledge",
-          "catalogSnapshot",
-          read.catalogSnapshot(),
-          "answers",
-          read.result());
+      var read =
+          service.knowledge(service.point(snapshot()), requests, view(unconfirmed), language());
+      return withTranslations(
+          envelope(
+              "semantic-knowledge",
+              "catalogSnapshot",
+              read.catalogSnapshot(),
+              "answers",
+              read.result()),
+          read);
     }
 
     private List<KnowledgeRequest> requests() {
@@ -254,7 +325,7 @@ final class ReadCommands {
       description =
           "Retrieves a Fact Revision's content by its URN, or a Fact's latest revision at the"
               + " point by the Fact URN.")
-  static final class FactCommand extends SnapshotRead {
+  static final class FactCommand extends TranslatableRead {
     @Parameters(index = "0", paramLabel = "URN", description = "A Fact Revision or Fact URN.")
     private @Nullable String urn;
 
@@ -264,9 +335,11 @@ final class ReadCommands {
 
     @Override
     Map<String, Object> call(SemanticCatalogService service) {
-      var read = service.fact(service.point(snapshot()), Objects.requireNonNull(urn));
-      return envelope(
-          "semantic-fact", "catalogSnapshot", read.catalogSnapshot(), "fact", read.result());
+      var read = service.fact(service.point(snapshot()), Objects.requireNonNull(urn), language());
+      return withTranslations(
+          envelope(
+              "semantic-fact", "catalogSnapshot", read.catalogSnapshot(), "fact", read.result()),
+          read);
     }
   }
 
@@ -275,7 +348,7 @@ final class ReadCommands {
       description =
           "Retrieves the items awaiting review below a position, grouped per table, each with the"
               + " review material the Semantic Catalog built.")
-  static final class ReviewCommand extends SnapshotRead {
+  static final class ReviewCommand extends TranslatableRead {
     @picocli.CommandLine.ArgGroup(exclusive = false)
     private @Nullable PositionOptions position;
 
@@ -306,9 +379,15 @@ final class ReadCommands {
               kind == null ? null : constant(ReviewPresentation.Kind.class, kind, "--kind"),
               element,
               factAddress);
-      var read = service.review(service.point(snapshot()), query);
-      return envelope(
-          "semantic-review", "catalogSnapshot", read.catalogSnapshot(), "groups", read.result());
+      var read = service.review(service.point(snapshot()), query, language());
+      return withTranslations(
+          envelope(
+              "semantic-review",
+              "catalogSnapshot",
+              read.catalogSnapshot(),
+              "groups",
+              read.result()),
+          read);
     }
   }
 

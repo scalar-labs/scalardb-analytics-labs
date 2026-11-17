@@ -21,7 +21,9 @@ with the Bash tool. The workspace is the one this command settles:
 
 1. `${CLAUDE_PLUGIN_ROOT}/bin/scalardb-analytics version`
 2. `${CLAUDE_PLUGIN_ROOT}/bin/scalardb-analytics semantic languages`, which opens the workspace and
-   its catalog store.
+   its catalog store. Report the declared languages and the primary one. When the user reads a
+   declared language other than the primary one, say that the session will show the catalog's
+   translations into it, as the skill's "Reading in the user's language" says.
    - `INVALID_WORKSPACE`: no workspace was given or found. Ask the user where it is, or tell them
      to restart Claude Code with `SCALARDB_ANALYTICS_WORKSPACE` exported.
    - `MISSING_CREDENTIAL`: the store password variable the workspace names is not set. Tell the
