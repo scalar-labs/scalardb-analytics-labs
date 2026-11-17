@@ -479,17 +479,28 @@ final class BuildRunner {
 
   private static final JsonMapper MAPPER = JsonMapper.builder().build();
 
-  /** Reads a model's answer as one JSON object, allowing a Markdown code fence around it. */
+  /**
+   * Reads a model's answer as one JSON object, allowing a Markdown code fence around it and prose
+   * before or after it, such as a sentence that sums up the answer. The object starts at the first
+   * brace; one that does not parse from there fails rather than falling back to an object nested in
+   * it, which would read part of a broken answer as the whole.
+   */
   static JsonNode answerObject(String answer) {
     var text = answer.strip();
-    if (text.startsWith("```")) {
-      var firstLine = text.indexOf('\n');
+    var fence = text.indexOf("```");
+    if (fence >= 0) {
+      var firstLine = text.indexOf('\n', fence);
       var closing = text.lastIndexOf("```");
       if (firstLine >= 0 && closing > firstLine) {
         text = text.substring(firstLine + 1, closing).strip();
       }
     }
+    var start = text.indexOf('{');
+    if (start > 0) {
+      text = text.substring(start);
+    }
     try {
+      // Text after the object is ignored: the mapper does not fail on trailing tokens.
       var json = MAPPER.readTree(text);
       if (json != null && json.isObject()) {
         return json;

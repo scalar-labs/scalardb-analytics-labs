@@ -533,6 +533,27 @@ class MeaningInferenceTest extends StoreScenarioTest {
   }
 
   @Test
+  void anAnswerWithASentenceAroundItsJsonIsStillRead() {
+    var s = scenario();
+    register(s);
+    // Models sometimes sum up the answer in a sentence before the object or after it.
+    var model =
+        new ScriptedModel()
+            .answering(
+                FIELD,
+                input ->
+                    "The amount column holds the order total.\n"
+                        + answer(target("shop.public.orders.amount", "meaning", "合計金額"))
+                        + "\nNothing else is proposed.");
+
+    drain(s, new AskingConsent(), orders(), model);
+
+    assertThat(facts(s, field(s, "amount"), Vocabulary.MEANING))
+        .singleElement()
+        .satisfies(fact -> assertThat(fact.value().asText()).isEqualTo("合計金額"));
+  }
+
+  @Test
   void aWideTableIsAskedAboutInCallsOfABoundedSize() {
     var s = scenario();
     var columns = 30;
