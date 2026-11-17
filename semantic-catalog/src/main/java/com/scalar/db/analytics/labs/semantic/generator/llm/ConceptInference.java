@@ -871,6 +871,7 @@ final class ConceptInference implements ModelGenerator {
       Plan plan,
       List<DataGenerator.Read> reads,
       List<Answered> answers,
+      List<DataGenerator.Read> checked,
       Output output) {
     var recording = new Recording(context, output);
     for (var answered : answers) {

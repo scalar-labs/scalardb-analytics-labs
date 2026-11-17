@@ -8,6 +8,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.scalar.db.analytics.labs.application.construction.QueryEngineSqlParser;
 import com.scalar.db.analytics.labs.application.workspace.Workspace;
 import com.scalar.db.analytics.labs.semantic.SemanticCatalogStore;
 import com.scalar.db.analytics.labs.semantic.StoreSettings;
@@ -189,7 +190,8 @@ class ScalarDbAnalyticsCliIntegrationTest {
     var domain = catalogName.replace('_', '-');
     try (var store =
         SemanticCatalogStore.open(
-            new StoreSettings(STORE.getJdbcUrl(), STORE.getUsername(), STORE.getPassword()))) {
+            new StoreSettings(STORE.getJdbcUrl(), STORE.getUsername(), STORE.getPassword()),
+            QueryEngineSqlParser.INSTANCE)) {
       var observation =
           store.observationContent(domain, lines.get("inputObservation").asText()).orElseThrow();
       // The source metadata is the observation; the table metadata derived from it is not.
@@ -227,7 +229,8 @@ class ScalarDbAnalyticsCliIntegrationTest {
     var domain = catalogName.replace('_', '-');
     try (var store =
         SemanticCatalogStore.open(
-            new StoreSettings(STORE.getJdbcUrl(), STORE.getUsername(), STORE.getPassword()))) {
+            new StoreSettings(STORE.getJdbcUrl(), STORE.getUsername(), STORE.getPassword()),
+            QueryEngineSqlParser.INSTANCE)) {
       var observation =
           store
               .observationContent(domain, customers.get("inputObservation").asText())

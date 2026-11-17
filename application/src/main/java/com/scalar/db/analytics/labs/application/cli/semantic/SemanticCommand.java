@@ -9,6 +9,7 @@ import com.scalar.db.analytics.labs.application.ApplicationFailure;
 import com.scalar.db.analytics.labs.application.SemanticCatalogDomains;
 import com.scalar.db.analytics.labs.application.cli.CliOutput;
 import com.scalar.db.analytics.labs.application.construction.BuildTaskRun;
+import com.scalar.db.analytics.labs.application.construction.QueryEngineSqlParser;
 import com.scalar.db.analytics.labs.application.workspace.Workspace;
 import com.scalar.db.analytics.labs.physical.PhysicalCatalogException;
 import com.scalar.db.analytics.labs.semantic.DocumentRegistration;
@@ -193,7 +194,9 @@ public final class SemanticCommand implements Runnable {
         var document = read(path);
         var domain = workspace.semanticCatalogDomain();
         DocumentRegistration registration;
-        try (var semanticCatalog = SemanticCatalogStore.open(workspace.semanticCatalogSettings())) {
+        try (var semanticCatalog =
+            SemanticCatalogStore.open(
+                workspace.semanticCatalogSettings(), QueryEngineSqlParser.INSTANCE)) {
           SemanticCatalogDomains.ensure(semanticCatalog, domain);
           registration =
               semanticCatalog.registerDocument(

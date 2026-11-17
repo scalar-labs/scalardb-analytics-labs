@@ -140,7 +140,8 @@ output says so.
 - *Documents*, which the semantics owner wrote. The input is the Input Resource (an existing
   document's URN, or none for a new document) and the content: the document's name and text. Text
   equal to the document's latest observation records nothing. The output returns the Input Resource
-  and the latest Input Observation URNs and whether anything was recorded.
+  and the latest Input Observation URNs, whether anything was recorded, and the build tasks a new
+  observation created for the Generators that read documents.
 - **[Planned]** *Usage feedback*. The input is the content with its session purpose and a summary of
   the session's context, and can carry related Fact URNs; feedback is always a new Input Resource.
   The output returns the Input Resource and Input Observation URNs. Today feedback is registered

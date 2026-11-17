@@ -28,8 +28,8 @@ Construction starts from new or changed input, not from questions:
   record holds the table metadata only until the Physical Catalog keeps the table metadata it is
   built from; the Semantic Catalog then reads it there.
 - Documents the semantics owner registers or changes. A document observation starts concept
-  inference for the Datasets it names; meaning inference also reads the domain's documents when its
-  other inputs start it.
+  inference for the Datasets it names and analytical semantics inference; meaning inference also
+  reads the domain's documents when its other inputs start it.
 - Usage feedback: corrections given in review. **[Planned]** Missing knowledge and statements from a
   user's LLM session.
 
@@ -134,10 +134,13 @@ task does not pile up records.
 At acceptance the Semantic Catalog checks only what a Generator running outside the serialized write
 cannot know: that dependencies form no cycle among Facts, that every referenced record exists, and
 that every Input Observation a check references is also a dependency. It also makes the slug of a
-new element unique (see [`record-model.md`](record-model.md#identity-and-urns)). **[Planned]** It
-also parses expression values and adds the Fields they reference as premise dependencies (see
-[`record-model.md`](record-model.md#elements-and-predicates)). If any check fails, nothing is
-written and the task fails with the reason.
+new element unique (see [`record-model.md`](record-model.md#identity-and-urns)). It also parses
+expression values with the Query Engine's parser and adds the Fields they reference as premise
+dependencies, before comparing the acceptance with the Fact's latest one, so producing the same
+expression again records nothing (see
+[`record-model.md`](record-model.md#elements-and-predicates)). An acceptance of an expression value
+depends on exactly one base-dataset Fact of its Measure, over whose table the expression is read.
+If any check fails, nothing is written and the task fails with the reason.
 
 ## Choosing the confirmation path
 

@@ -30,8 +30,8 @@ class ConcurrentWritersTest {
 
   @BeforeAll
   static void open() {
-    store = SemanticCatalogStore.open(TestStore.settings());
-    otherProcess = SemanticCatalogStore.open(TestStore.settings());
+    store = SemanticCatalogStore.open(TestStore.settings(), TestStore.PARSER);
+    otherProcess = SemanticCatalogStore.open(TestStore.settings(), TestStore.PARSER);
     executor = Executors.newCachedThreadPool();
   }
 

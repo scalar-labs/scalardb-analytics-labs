@@ -586,6 +586,7 @@ abstract class MeaningInference implements ModelGenerator {
       Plan plan,
       List<DataGenerator.Read> reads,
       List<Answered> answers,
+      List<DataGenerator.Read> checked,
       Output output) {
     var observed = new LinkedHashMap<String, List<DataObservations.Observed>>();
     var statistics = new LinkedHashMap<String, DataObservations.Observed>();

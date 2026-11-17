@@ -19,6 +19,7 @@ import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.InputKind;
+import com.scalar.db.analytics.labs.semantic.projection.ExpressionValues;
 import com.scalar.db.analytics.labs.semantic.projection.IdentityLookup;
 import com.scalar.db.analytics.labs.semantic.projection.Projection;
 import com.scalar.db.analytics.labs.semantic.storage.StoreTransaction;
@@ -42,24 +43,28 @@ public final class GeneratorContext {
   private final IdentityLookup lookup;
   private final List<Trigger> triggers;
   private final JsonNode provenance;
+  private final ExpressionValues expressions;
   private @Nullable Map<String, OptionalLong> latestVersions;
   private final Map<String, Optional<Table>> tables = new HashMap<>();
 
   /**
    * @param triggers the URNs of the log records that called for the run
    * @param provenance the provenance every acceptance and retirement proposal of the run records
+   * @param expressions parses expression values with the Query Engine's parser
    */
   public GeneratorContext(
       StoreTransaction transaction,
       String domain,
       Projection projection,
       List<String> triggers,
-      JsonNode provenance) {
+      JsonNode provenance,
+      ExpressionValues expressions) {
     this.transaction = transaction;
     this.domain = domain;
     this.projection = projection;
     this.lookup = transaction.identityLookup(domain);
     this.provenance = provenance;
+    this.expressions = expressions;
     this.triggers = new ArrayList<>();
     for (var trigger : triggers) {
       resolve(trigger).ifPresent(this.triggers::add);
@@ -147,6 +152,11 @@ public final class GeneratorContext {
 
   public JsonNode provenance() {
     return provenance;
+  }
+
+  /** Expression values, parsed with the Query Engine's parser as acceptance parses them. */
+  public ExpressionValues expressions() {
+    return expressions;
   }
 
   // Physical schemas
@@ -340,6 +350,17 @@ public final class GeneratorContext {
   }
 
   // Elements
+
+  /** The elements of a kind whose existence Fact is confirmed, oldest first. */
+  public List<String> confirmedElements(ElementKind kind) {
+    return elements(kind).stream()
+        .filter(
+            element ->
+                closedRangeFact(element, Vocabulary.EXISTENCE, IdentityKey.choice(EXISTS))
+                    .filter(fact -> fact.state() == FactState.CONFIRMED)
+                    .isPresent())
+        .toList();
+  }
 
   /** The kind of an element, if it exists. */
   public Optional<ElementKind> elementKind(String element) {

@@ -37,7 +37,9 @@ class StartupTest {
   @Test
   void aStoreThatIsNotPostgreSqlFailsStartupWithTheReason() {
     assertThatThrownBy(
-            () -> SemanticCatalogStore.open(new StoreSettings("jdbc:duckdb:", null, null)))
+            () ->
+                SemanticCatalogStore.open(
+                    new StoreSettings("jdbc:duckdb:", null, null), TestStore.PARSER))
         .isInstanceOf(SemanticCatalogException.class)
         .hasMessageContaining("must be PostgreSQL")
         .hasMessageContaining("DuckDB");
@@ -54,7 +56,8 @@ class StartupTest {
           executor.submit(
               () -> {
                 start.await();
-                try (var opened = SemanticCatalogStore.open(TestStore.settings(database))) {
+                try (var opened =
+                    SemanticCatalogStore.open(TestStore.settings(database), TestStore.PARSER)) {
                   return opened != null;
                 }
               }));
@@ -76,7 +79,7 @@ class StartupTest {
       assertThat(applied).isEqualTo(SCHEMA_VERSIONS);
     }
     // A later start finds nothing to apply, and the store is usable.
-    try (var reopened = SemanticCatalogStore.open(TestStore.settings(database))) {
+    try (var reopened = SemanticCatalogStore.open(TestStore.settings(database), TestStore.PARSER)) {
       var domain = TestStore.newDomain();
       reopened.createDomain(domain);
       assertThat(reopened.domainExists(domain)).isTrue();
@@ -85,7 +88,7 @@ class StartupTest {
 
   @Test
   void aDomainIsCreatedOnceUnderItsIdentifier() {
-    try (var store = SemanticCatalogStore.open(TestStore.settings())) {
+    try (var store = SemanticCatalogStore.open(TestStore.settings(), TestStore.PARSER)) {
       var domain = TestStore.newDomain();
       assertThat(store.domainExists(domain)).isFalse();
       store.createDomain(domain);

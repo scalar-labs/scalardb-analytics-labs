@@ -127,8 +127,11 @@ Some values deserve note:
   meaning** is `{"meaning": ..., "timeZone": ...}`: which moment the value records, and the IANA
   time zone it is in, or null when unknown.
 - A Measure's **aggregation rule** is an aggregate function, chosen from a closed list, over a value
-  expression on its base Dataset's Fields. A period that changes per question belongs to the
-  question, not to the Measure. Its default time granularity refers to a level of a calendar
+  expression on its base Dataset's Fields: `{"function": ..., "expression": ...}`, the function one
+  of `sum`, `count`, `count-distinct`, `avg`, `min`, and `max`; `count` alone also takes `*` to
+  count rows, which references no Field. Its **filter conditions** are one
+  SQL condition in text. A period that changes per question belongs to the question, not to the
+  Measure. Its default time granularity refers to a level of a calendar
   Dimension, because "monthly" may mean calendar or fiscal month.
 - **Expression values**, the value expression of an aggregation rule, a Measure's filter
   conditions, and a Dimension's classification expression, are SQL expression strings in the Query
@@ -138,7 +141,9 @@ Some values deserve note:
   it. At acceptance the Semantic Catalog parses it with the Query Engine's parser and adds the
   Fields it references as premise dependencies, so a column that disappears cascades to the
   definitions that use it. An expression that does not parse or names a missing column is not
-  accepted.
+  accepted, and neither is text that is more than one expression over that table, such as one
+  with a subquery, another table, or a further clause. **[Planned]** A Dimension's classification
+  expression is not parsed yet, because no Generator proposes Dimensions.
   [`../design/semantic-catalog-expression-values.md`](../design/semantic-catalog-expression-values.md)
   records why.
 - An identifier correspondence's **set relationship** is equal, subset, superset, partial overlap,

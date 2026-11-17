@@ -74,10 +74,16 @@ class AgentReadsTest extends StoreScenarioTest {
 
     c = s.begin();
     var measureRef = written.ref(measure);
-    c.confirmByMachine(
-        c.closedRangeCandidate(
-            c.address(measureRef, Vocabulary.BASE_DATASET), written.urn(orders)));
-    var rule = c.candidate(c.address(measureRef, Vocabulary.AGGREGATION_RULE), "sum(amount)");
+    var base =
+        c.closedRangeDependency(
+            c.address(measureRef, Vocabulary.BASE_DATASET), written.urn(orders));
+    c.confirmByMachine(base.fact());
+    var rule =
+        c.aggregationRule(
+            c.address(measureRef, Vocabulary.AGGREGATION_RULE),
+            "count-distinct",
+            "customer_id",
+            base);
     c.evaluate(rule, Transition.CONFIRM, PolicyResult.REQUEST_CONSENT);
     var termRef = written.ref(term);
     c.confirmByMachine(c.closedRangeCandidate(c.address(termRef, Vocabulary.WRITTEN_FORM), "売上"));

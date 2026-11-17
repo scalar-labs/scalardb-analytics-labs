@@ -24,7 +24,7 @@ abstract class StoreScenarioTest {
 
   @BeforeAll
   static void open() {
-    store = SemanticCatalogStore.open(TestStore.settings());
+    store = SemanticCatalogStore.open(TestStore.settings(), TestStore.PARSER);
   }
 
   @AfterAll

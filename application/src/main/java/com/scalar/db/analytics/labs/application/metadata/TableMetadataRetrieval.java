@@ -14,6 +14,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.scalar.db.analytics.labs.application.ApplicationFailure;
 import com.scalar.db.analytics.labs.application.ApplicationRuntime;
 import com.scalar.db.analytics.labs.application.SemanticCatalogDomains;
+import com.scalar.db.analytics.labs.application.construction.QueryEngineSqlParser;
 import com.scalar.db.analytics.labs.application.workspace.Workspace;
 import com.scalar.db.analytics.labs.connector.ConnectorException;
 import com.scalar.db.analytics.labs.connector.ConnectorLibrary;
@@ -121,7 +122,9 @@ public final class TableMetadataRetrieval {
         };
     var options = connectorOptions(connection);
     var domain = workspace.semanticCatalogDomain();
-    try (var semanticCatalog = SemanticCatalogStore.open(workspace.semanticCatalogSettings())) {
+    try (var semanticCatalog =
+        SemanticCatalogStore.open(
+            workspace.semanticCatalogSettings(), QueryEngineSqlParser.INSTANCE)) {
       return retrieve(
           catalog,
           workspace.catalogName(),

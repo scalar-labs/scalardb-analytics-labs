@@ -26,6 +26,7 @@ import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.PolicyResult;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Transition;
 import com.scalar.db.analytics.labs.semantic.policy.PolicyEvaluationModel;
+import com.scalar.db.analytics.labs.semantic.projection.ExpressionValues;
 import com.scalar.db.analytics.labs.semantic.projection.Projection;
 import com.scalar.db.analytics.labs.semantic.projection.TransitionResolver;
 import com.scalar.db.analytics.labs.semantic.projection.TransitionResolver.ModelWait;
@@ -54,11 +55,17 @@ final class BuildRunner {
   static final String POLICY_EVALUATION_MODEL = "policy-evaluation-model";
 
   private final JdbcStore store;
+  private final ExpressionValues expressions;
   private final String domain;
   private final BuildRun.Environment environment;
 
-  BuildRunner(JdbcStore store, String domain, BuildRun.Environment environment) {
+  BuildRunner(
+      JdbcStore store,
+      ExpressionValues expressions,
+      String domain,
+      BuildRun.Environment environment) {
     this.store = store;
+    this.expressions = expressions;
     this.domain = domain;
     this.environment = environment;
   }
@@ -272,7 +279,8 @@ final class BuildRunner {
             decision.reason());
     var request = CommitRequest.builder("evaluate-policy", POLICY_EVALUATION_MODEL);
     request.add(evaluation);
-    var result = SemanticCatalogStore.commit(transaction, domain, request.build(), true);
+    var result =
+        SemanticCatalogStore.commit(transaction, expressions, domain, request.build(), true);
     return finish(
         transaction,
         task,
@@ -419,7 +427,8 @@ final class BuildRunner {
    * domain's settings allow at the latest commit, runs the reads and asks the model outside any
    * transaction, and records what the answer proposes inside the recording transaction, for the
    * targets that still call for a candidate there. Its targets are split into model calls of a
-   * bounded size; a run with no target asks nothing.
+   * bounded size; a run with no target asks nothing. The queries that check what the answers
+   * propose run after the model answers, outside any transaction too.
    *
    * <p>An unavailable model, one that gives no answer in time, and an answer not in the form asked
    * for fail the task, which can be resumed.
@@ -442,13 +451,15 @@ final class BuildRunner {
               ask,
               answerObject(model.complete(generator.instructions(), generator.input(ask, reads)))));
     }
+    var checks = generator.checks(plan, answers);
+    List<DataGenerator.Read> checked = checks.isEmpty() ? List.of() : read(checks, failed);
     return store.write(
         transaction -> {
           var context = context(transaction, task, generator, version);
           var output = new Output();
           plan.missing().forEach(output::missing);
           failed.forEach(output::missing);
-          generator.record(context, plan, reads, answers, output);
+          generator.record(context, plan, reads, answers, checked, output);
           return recordRun(transaction, task, generator, version, output);
         });
   }
@@ -510,7 +521,8 @@ final class BuildRunner {
             .put("generator", generator.name())
             .put("version", version)
             .put("buildTask", task.number());
-    return new GeneratorContext(transaction, domain, projection, task.triggers(), provenance);
+    return new GeneratorContext(
+        transaction, domain, projection, task.triggers(), provenance, expressions);
   }
 
   private BuildTask recordRun(
@@ -523,7 +535,11 @@ final class BuildRunner {
     if (output.hasRecords()) {
       var result =
           SemanticCatalogStore.commit(
-              transaction, domain, output.request("generator-run", generator.name()), true);
+              transaction,
+              expressions,
+              domain,
+              output.request("generator-run", generator.name()),
+              true);
       commit = result.commit().isPresent() ? result.commit().getAsLong() : null;
     }
     return finish(

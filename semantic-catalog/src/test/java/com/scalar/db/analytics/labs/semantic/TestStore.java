@@ -15,6 +15,9 @@ final class TestStore {
   private static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16.4");
   private static final AtomicInteger NAMES = new AtomicInteger();
 
+  /** The Query Engine's parser every store opened by the tests parses expression values with. */
+  static final SqlParser PARSER = new DuckDbSqlParser();
+
   static {
     POSTGRES.start();
   }

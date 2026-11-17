@@ -4,6 +4,8 @@
  */
 package com.scalar.db.analytics.labs.semantic;
 
+import java.util.List;
+
 /**
  * What registering a document recorded (see {@link SemanticCatalogStore#registerDocument}). Every
  * outcome is a success.
@@ -31,8 +33,18 @@ public sealed interface DocumentRegistration {
    * @param inputObservation the URN of the new Input Observation
    * @param commit the number of the commit written
    * @param newInputResource whether the Input Resource was created by this registration
+   * @param buildTasks the build tasks the observation created or added a trigger to, for the
+   *     Generators that read documents
    */
   record Observed(
-      String inputResource, String inputObservation, long commit, boolean newInputResource)
-      implements DocumentRegistration {}
+      String inputResource,
+      String inputObservation,
+      long commit,
+      boolean newInputResource,
+      List<Long> buildTasks)
+      implements DocumentRegistration {
+    public Observed {
+      buildTasks = List.copyOf(buildTasks);
+    }
+  }
 }

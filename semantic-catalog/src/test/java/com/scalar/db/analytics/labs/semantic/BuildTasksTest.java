@@ -579,9 +579,9 @@ class BuildTasksTest extends StoreScenarioTest {
     var rule =
         fact(
             c,
-            c.address(measure, "aggregation-rule"),
-            "sum(amount)",
-            List.of(supported(ValidationMethod.DECLARED_ENFORCED, "sum(amount)")),
+            c.address(measure, Vocabulary.MEANING),
+            "EC sales",
+            List.of(supported(ValidationMethod.DECLARED_ENFORCED, "EC sales")),
             existence.on());
     var written = s.judge(c);
     var ruleUrn = written.urn(rule.fact());
@@ -655,7 +655,7 @@ class BuildTasksTest extends StoreScenarioTest {
 
   @Test
   void aRunWorksWithAPoolOfOneConnection() {
-    try (var small = SemanticCatalogStore.open(TestStore.settingsWithPool(1))) {
+    try (var small = SemanticCatalogStore.open(TestStore.settingsWithPool(1), TestStore.PARSER)) {
       var s = new Scenario(small);
       var inferred = inferredRowKind(s, "shop.public.orders");
       small.runBuildTasks(

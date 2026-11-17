@@ -1,6 +1,8 @@
 # How are expression values in the Semantic Catalog represented?
 
-**[Planned]** This decision is accepted but not implemented yet.
+Acceptance and analytical semantics inference implement this decision for a Measure's aggregation
+rule and filter conditions. **[Planned]** A Dimension's classification expression is not
+implemented yet.
 
 ## Current answer
 

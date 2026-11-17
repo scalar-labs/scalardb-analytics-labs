@@ -293,6 +293,7 @@ public final class CorrectionInterpretation implements ModelGenerator {
       Plan plan,
       List<DataGenerator.Read> reads,
       List<Answered> answers,
+      List<DataGenerator.Read> checked,
       Output output) {
     for (var answered : answers) {
       record(context, answered, output);

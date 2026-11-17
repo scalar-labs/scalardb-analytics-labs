@@ -148,7 +148,9 @@ It prints one `scalardb-analytics/document-registration` line with `recorded`, t
 pass the `inputResource` it printed to register a changed version of the same document. Unchanged
 text records nothing and prints `recorded: false`. A `--resource` that names no document fails with
 `DOCUMENT_REGISTRATION_FAILED`. A new observation creates a concept-inference build task for the
-tables the document names, and the next build tasks of meaning inference also read it.
+tables the document names and an analytical-semantics-inference build task, which proposes the
+Measures and business terms the document defines; the next build tasks of meaning inference also
+read it.
 
 `query` accepts exactly one of `--sql`, `--file`, or `--stdin`. Successful commands and classified
 operational failures write versioned JSON to stdout and return exit code `0` or `1`, respectively.

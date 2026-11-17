@@ -42,16 +42,39 @@ class DocumentRegistrationTest extends StoreScenarioTest {
               assertThat(content.path("text").asText()).isEqualTo(GLOSSARY.text());
             });
     // The observation starts a run of each Generator that reads documents, triggered by it.
+    var tasks = store.buildTasks(s.domain);
+    assertThat(tasks)
+        .extracting(BuildTask::work)
+        .containsExactly(
+            new BuildTask.Work.GeneratorRun("concept-inference"),
+            new BuildTask.Work.GeneratorRun("analytical-semantics-inference"));
+    assertThat(tasks)
+        .allSatisfy(
+            task ->
+                assertThat(task.triggers())
+                    .containsExactly(
+                        Urns.logRecord(s.domain, Urns.position(observed.inputObservation()))));
+    assertThat(observed.buildTasks())
+        .containsExactlyElementsOf(tasks.stream().map(BuildTask::number).toList());
+  }
+
+  @Test
+  void aChangedDocumentAddsItsObservationToTheRunNotStartedYet() {
+    var s = scenario();
+    var first = (Observed) store.registerDocument(s.domain, "owner", null, GLOSSARY);
+
+    var second =
+        (Observed)
+            store.registerDocument(
+                s.domain,
+                "owner",
+                first.inputResource(),
+                new Document("glossary.md", GLOSSARY.text() + "- **店舗売上**: 実店舗の販売の税抜金額の合計。\n"));
+
+    assertThat(second.buildTasks()).isEqualTo(first.buildTasks());
     assertThat(store.buildTasks(s.domain))
-        .singleElement()
-        .satisfies(
-            task -> {
-              assertThat(task.work())
-                  .isEqualTo(new BuildTask.Work.GeneratorRun("concept-inference"));
-              assertThat(task.triggers())
-                  .containsExactly(
-                      Urns.logRecord(s.domain, Urns.position(observed.inputObservation())));
-            });
+        .hasSize(2)
+        .allSatisfy(task -> assertThat(task.triggers()).hasSize(2));
   }
 
   @Test

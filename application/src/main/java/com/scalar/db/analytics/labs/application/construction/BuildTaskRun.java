@@ -88,7 +88,9 @@ public final class BuildTaskRun {
           case Mode.Watch watch -> BuildRun.keepWaiting(POLL_INTERVAL, watch.stopRequested());
         };
     var domain = workspace.semanticCatalogDomain();
-    try (var semanticCatalog = SemanticCatalogStore.open(workspace.semanticCatalogSettings())) {
+    try (var semanticCatalog =
+        SemanticCatalogStore.open(
+            workspace.semanticCatalogSettings(), QueryEngineSqlParser.INSTANCE)) {
       SemanticCatalogDomains.ensure(semanticCatalog, domain);
       return semanticCatalog.runBuildTasks(
           domain,

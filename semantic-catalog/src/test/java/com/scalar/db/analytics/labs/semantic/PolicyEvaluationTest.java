@@ -229,16 +229,16 @@ class PolicyEvaluationTest extends StoreScenarioTest {
     var rule =
         fact(
             c,
-            c.address(measure, "aggregation-rule"),
-            "sum(amount)",
-            List.of(supported(ValidationMethod.DECLARED_ENFORCED, "sum(amount)")),
+            c.address(measure, Vocabulary.MEANING),
+            "EC sales",
+            List.of(supported(ValidationMethod.DECLARED_ENFORCED, "EC sales")),
             existence.on());
     var written = s.judge(c);
     // The existence awaits consent, so the rule is evaluated now and adopted pending it.
     assertThat(s.state(written.urn(rule.fact()))).contains(FactState.CANDIDATE);
     var waiting =
         (Knowledge.AwaitingJudgement)
-            s.only(s.lastCommit(), written.urn(measure), "aggregation-rule");
+            s.only(s.lastCommit(), written.urn(measure), Vocabulary.MEANING);
     assertThat(waiting.candidates().getFirst().waitingFor())
         .isEqualTo(Knowledge.Waiting.DEPENDENCIES);
 

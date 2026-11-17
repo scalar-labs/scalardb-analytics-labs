@@ -17,6 +17,8 @@ import com.scalar.db.analytics.labs.semantic.model.LogRecord.Basis;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord.FactEvent;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
 import com.scalar.db.analytics.labs.semantic.model.Urns;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.ElementRow;
 import java.util.ArrayList;
@@ -25,6 +27,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.UnaryOperator;
@@ -53,12 +56,21 @@ import org.jspecify.annotations.Nullable;
  * <p>What a temporary number stands for depends on where it is used. It names the record created or
  * matched where a record is expected, the log record where a basis or a policy version is expected,
  * and the Fact Revision a Fact Event produced where a dependency's revision is expected.
+ *
+ * <p>An acceptance of a Measure's aggregation rule or filter conditions gets, before it is compared
+ * with the Fact's latest acceptance, a premise dependency on the existence of each Field its
+ * expressions reference (see {@code docs/semantic-catalog/record-model.md}, "Elements and
+ * predicates"). The expressions are parsed with the Query Engine's parser and read over the table
+ * of the base Dataset whose base-dataset Fact the acceptance depends on. An expression that does
+ * not parse, an acceptance that depends on no base-dataset Fact of its Measure, and a column the
+ * base Dataset has no existing Field for reject the commit.
  */
 public final class CommitResolver {
   private final String domain;
   private final long commit;
   private final Projection projection;
   private final IdentityLookup lookup;
+  private final ExpressionValues expressions;
   private final List<Target> targets = new ArrayList<>();
   private final Map<String, String> localIdentities = new HashMap<>();
   private final Map<String, String> localLatestObservations = new HashMap<>();
@@ -67,6 +79,9 @@ public final class CommitResolver {
   private final Set<String> issued = new HashSet<>();
   private final Map<String, Integer> nextFactNumbers = new HashMap<>();
   private final Map<String, String> localParents = new HashMap<>();
+  private final Map<String, ElementKind> localKinds = new HashMap<>();
+  private final Map<String, About> localAddresses = new HashMap<>();
+  private final Map<String, LocalFact> localFacts = new HashMap<>();
 
   /**
    * @param records the log records to write, in log order
@@ -91,11 +106,23 @@ public final class CommitResolver {
   private record Target(
       @Nullable String record, @Nullable String logRecord, @Nullable String revision) {}
 
-  private CommitResolver(String domain, long commit, Projection projection, IdentityLookup lookup) {
+  /** The element and predicate of a Fact Address, and the value of a Fact there when known. */
+  private record About(String element, String predicate, @Nullable JsonNode value) {}
+
+  /** A Fact this request creates: its Fact Address and its value. */
+  private record LocalFact(String address, JsonNode value) {}
+
+  private CommitResolver(
+      String domain,
+      long commit,
+      Projection projection,
+      IdentityLookup lookup,
+      ExpressionValues expressions) {
     this.domain = domain;
     this.commit = commit;
     this.projection = projection;
     this.lookup = lookup;
+    this.expressions = expressions;
   }
 
   /**
@@ -106,16 +133,18 @@ public final class CommitResolver {
    * @param projection the projection the commit will be applied to, which supplies the latest
    *     observations of Input Resources
    * @param lookup finds existing records in the writing transaction's snapshot
+   * @param expressions parses expression values with the Query Engine's parser
    * @throws com.scalar.db.analytics.labs.semantic.model.CommitRejectedException when a reference
-   *     cannot be resolved
+   *     cannot be resolved, or an expression value is not one over its base Dataset's Fields
    */
   public static Resolution resolve(
       String domain,
       long commit,
       List<LogRecord> request,
       Projection projection,
-      IdentityLookup lookup) {
-    var resolver = new CommitResolver(domain, commit, projection, lookup);
+      IdentityLookup lookup,
+      ExpressionValues expressions) {
+    var resolver = new CommitResolver(domain, commit, projection, lookup, expressions);
     for (var record : request) {
       try {
         resolver.add(record);
@@ -129,6 +158,9 @@ public final class CommitResolver {
 
   private void add(LogRecord request) {
     var record = resolveRefs(request);
+    if (record instanceof LogRecord.Accept accept) {
+      record = withExpressionPremises(accept);
+    }
     var existing = existing(record);
     var index = targets.size();
     if (existing.isPresent()) {
@@ -152,6 +184,7 @@ public final class CommitResolver {
       case LogRecord.Named named -> {
         created = issue(named);
         record = withUrn(named, created);
+        remember(named, created);
         if (named instanceof LogRecord.Element element
             && element.identity() instanceof ElementIdentity.PhysicalCatalogObject physical
             && physical.parent() != null) {
@@ -234,6 +267,163 @@ public final class CommitResolver {
                 + parent);
       }
     }
+  }
+
+  // Expression values
+
+  /** Keeps what a new element, Fact Address, or Fact of this request is, for later records. */
+  private void remember(LogRecord.Named named, String created) {
+    switch (named) {
+      case LogRecord.Element element -> localKinds.put(created, element.identity().kind());
+      case LogRecord.FactAddress address ->
+          localAddresses.put(
+              created, new About(address.element().urnValue(), address.predicate(), null));
+      case LogRecord.Fact fact ->
+          localFacts.put(created, new LocalFact(fact.address().urnValue(), fact.value()));
+    }
+  }
+
+  /**
+   * An acceptance of a Measure's expression value with a premise dependency on the existence of
+   * each Field its expressions reference that it does not already depend on; any other acceptance
+   * as it is.
+   */
+  private LogRecord.Accept withExpressionPremises(LogRecord.Accept accept) {
+    var about = about(accept.fact().urnValue());
+    if (about.isEmpty()
+        || !ExpressionValues.holdsExpressions(about.get().predicate())
+        || kind(about.get().element()).orElse(null) != ElementKind.MEASURE) {
+      return accept;
+    }
+    var measure = about.get().element();
+    var value = about.get().value();
+    if (value == null) {
+      throw new IllegalArgumentException("Fact " + accept.fact().urnValue() + " has no value");
+    }
+    var table = baseTable(accept, measure);
+    var dependencies = new ArrayList<>(accept.dependencies());
+    var depended = new HashSet<String>();
+    for (var dependency : dependencies) {
+      if (dependency instanceof Dependency.OnFact onFact) {
+        depended.add(onFact.fact().urnValue());
+      }
+    }
+    for (var expression : ExpressionValues.of(about.get().predicate(), value)) {
+      for (var column : expressions.columns(expression)) {
+        var existence = fieldExistence(table, column);
+        if (depended.add(existence.fact().urnValue())) {
+          dependencies.add(existence);
+        }
+      }
+    }
+    return new LogRecord.Accept(
+        accept.fact(), dependencies, accept.checks(), accept.inputsRead(), accept.provenance());
+  }
+
+  /**
+   * The canonical Physical Catalog reference of the table of the base Dataset an acceptance of a
+   * Measure's expression value depends on: the value of the one base-dataset Fact of the Measure
+   * among its dependencies.
+   */
+  private String baseTable(LogRecord.Accept accept, String measure) {
+    var datasets = new HashSet<String>();
+    for (var dependency : accept.dependencies()) {
+      if (dependency instanceof Dependency.OnFact onFact) {
+        about(onFact.fact().urnValue())
+            .filter(
+                found ->
+                    found.element().equals(measure)
+                        && found.predicate().equals(Vocabulary.BASE_DATASET)
+                        && found.value() != null
+                        && found.value().isTextual())
+            .ifPresent(found -> datasets.add(Objects.requireNonNull(found.value()).asText()));
+      }
+    }
+    if (datasets.size() != 1) {
+      throw new IllegalArgumentException(
+          "An expression value of Measure "
+              + measure
+              + " depends on exactly one base Dataset of it, not "
+              + datasets.size());
+    }
+    var dataset = datasets.iterator().next();
+    var table =
+        projection
+            .element(dataset)
+            .filter(row -> row.kind() == ElementKind.DATASET)
+            .map(ElementRow::physicalCatalogReference);
+    if (table.isEmpty()) {
+      throw new IllegalArgumentException(
+          "The base Dataset " + dataset + " of Measure " + measure + " has no table");
+    }
+    return table.get();
+  }
+
+  /**
+   * A dependency on the existence Fact of the Field of a column of a table, a Fact that is neither
+   * rejected nor retired.
+   */
+  private Dependency.OnFact fieldExistence(String table, String column) {
+    // A Field's Physical Catalog reference is its table's canonical form and the encoded column,
+    // as PhysicalCatalogReference.Column#canonical() writes it.
+    var field =
+        lookup.physicalCatalogElement(
+            ElementKind.FIELD, IdentityKey.choice(table + "." + Urns.encode(column)).canonical());
+    if (field.isEmpty()) {
+      throw new IllegalArgumentException(
+          "An expression names column " + column + ", which " + table + " has no Field for");
+    }
+    var record =
+        lookup
+            .emptyScopeAddress(field.get(), Vocabulary.EXISTENCE)
+            .flatMap(address -> lookup.closedRangeFact(address, EXISTS_KEY))
+            .flatMap(projection::fact)
+            .map(Projection.FactSlice::record);
+    if (record.isEmpty()
+        || record.get().is(FactState.REJECTED)
+        || record.get().is(FactState.RETIRED)
+        || record.get().latestAcceptance().isEmpty()) {
+      throw new IllegalArgumentException(
+          "An expression names column " + column + ", whose Field " + field.get() + " is gone");
+    }
+    var urn = record.get().fact();
+    return new Dependency.OnFact(
+        Ref.urn(urn), Ref.urn(Urns.factRevision(urn, record.get().latestAcceptance().get())));
+  }
+
+  private static final String EXISTS_KEY = IdentityKey.choice("exists").canonical();
+
+  /** What a Fact is about, from this request or the projection. */
+  private Optional<About> about(String fact) {
+    var local = localFacts.get(fact);
+    if (local != null) {
+      return address(local.address())
+          .map(found -> new About(found.element(), found.predicate(), local.value()));
+    }
+    var value =
+        projection
+            .fact(fact)
+            .flatMap(slice -> slice.record().revision())
+            .map(revision -> revision.value());
+    return projection
+        .factAddress(fact)
+        .flatMap(this::address)
+        .map(found -> new About(found.element(), found.predicate(), value.orElse(null)));
+  }
+
+  private Optional<About> address(String address) {
+    var local = localAddresses.get(address);
+    if (local != null) {
+      return Optional.of(local);
+    }
+    return projection
+        .address(address)
+        .map(found -> new About(found.row().element(), found.row().predicate(), null));
+  }
+
+  private Optional<ElementKind> kind(String element) {
+    var local = localKinds.get(element);
+    return local != null ? Optional.of(local) : projection.element(element).map(ElementRow::kind);
   }
 
   // URNs

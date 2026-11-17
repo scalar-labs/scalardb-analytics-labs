@@ -54,12 +54,12 @@ final class BuildTasks {
   /**
    * Creates or triggers the Generator runs a commit calls for (see {@code
    * docs/semantic-catalog/generators.md}, "The Generator contract"): each new physical schema
-   * observation triggers the Generators that read physical schemas, each observation of usage
-   * feedback with related Facts those that read it, each confirmation triggers the Generators that
-   * read confirmed Facts of its predicate and element kind, and each acceptance written triggers
-   * those that read accepted ones. The trigger is the log record of the observation, the
-   * confirmation, or the acceptance. A data observation triggers nothing, because it is written
-   * with the results that read it.
+   * observation triggers the Generators that read physical schemas, each document observation those
+   * that read documents, each observation of usage feedback with related Facts those that read it,
+   * each confirmation triggers the Generators that read confirmed Facts of its predicate and
+   * element kind, and each acceptance written triggers those that read accepted ones. The trigger
+   * is the log record of the observation, the confirmation, or the acceptance. A data observation
+   * triggers nothing, because it is written with the results that read it.
    *
    * @param records the commit's log records
    * @return the numbers of the tasks, each once

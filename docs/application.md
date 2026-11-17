@@ -114,7 +114,9 @@ Flight SQL. A CLI without an endpoint runs standalone; it never discovers a runn
 switches modes implicitly.
 
 SQL interpretation and execution belong to the Query Engine. The product adds no SQL parser or
-second execution contract. Non-interactive SQL takes one statement from an argument, a file, or
+second execution contract. The application passes the Query Engine's parser to the Semantic
+Catalog, which parses expression values such as a Measure's aggregation rule with it, without
+binding or running them. Non-interactive SQL takes one statement from an argument, a file, or
 standard input.
 
 **[Planned]** The interactive shell adds editing, history, completion, catalog discovery,

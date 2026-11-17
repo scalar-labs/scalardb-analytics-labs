@@ -102,11 +102,25 @@ public interface ModelGenerator extends Generator {
   String input(Ask ask, List<DataGenerator.Read> reads);
 
   /**
+   * The queries that check what the answers propose before anything is recorded, such as running a
+   * proposed aggregation through the Query Engine. They run outside any transaction, as the planned
+   * reads do; one that is rejected or fails is recorded as missing input and is absent from the
+   * checked reads. None by default.
+   *
+   * @throws com.scalar.db.analytics.labs.semantic.llm.LanguageModelException when an answer is not
+   *     in the form the instructions ask for
+   */
+  default List<DataGenerator.Query> checks(Plan plan, List<Answered> answers) {
+    return List.of();
+  }
+
+  /**
    * Produces candidates from the model's answers for the targets that still call for one.
    *
    * @param context what the run reads, in the recording transaction
    * @param reads the outcome of each planned query that ran
    * @param answers each call with its answer
+   * @param checked the outcome of each check query that ran
    * @param output where the run puts what it produces
    * @throws com.scalar.db.analytics.labs.semantic.llm.LanguageModelException when an answer is not
    *     in the form the instructions ask for
@@ -116,6 +130,7 @@ public interface ModelGenerator extends Generator {
       Plan plan,
       List<DataGenerator.Read> reads,
       List<Answered> answers,
+      List<DataGenerator.Read> checked,
       Output output);
 
   /**

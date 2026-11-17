@@ -559,6 +559,7 @@ class ConceptInferenceTest extends StoreScenarioTest {
     var glossary = registerGlossary(s, GLOSSARY);
     assertThat(store.buildTasks(s.domain))
         .filteredOn(task -> task.status() instanceof BuildTask.Status.Created)
+        .filteredOn(task -> task.work().equals(new BuildTask.Work.GeneratorRun(CONCEPT)))
         .singleElement()
         .satisfies(
             task -> {

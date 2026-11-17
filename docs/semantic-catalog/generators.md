@@ -11,9 +11,10 @@ counts that are expected to be tuned from use of the product.
 
 ## One rule per Generator
 
-The schema-interpretation and data-check Generators, and row and Field meaning inference, concept
-inference, and correction interpretation, are implemented. **[Planned]** Analytical semantics
-inference and identifier correspondence inference are not.
+The schema-interpretation and data-check Generators, row and Field meaning inference, concept
+inference, analytical semantics inference for Measures and business terms, and correction
+interpretation are implemented. **[Planned]** Identifier correspondence inference and Dimensions are
+not.
 
 Each interpretation or check rule is its own Generator. The rule that derives a key from a primary
 key and the rule that derives an identifier correspondence from a foreign key are separate
@@ -60,10 +61,10 @@ never by itself a basis for derivation.
 **Input kinds.** Each Generator declares what it may read, and build tasks are created from these
 declarations. A commit that records a new observation, a confirmation, or an acceptance creates, in
 the same transaction, a run of each Generator that reads it, or adds the commit's log record as a
-trigger to the run of that Generator not started yet. Concept inference declares document input.
-**[Planned]** No Generator declares usage feedback without related Facts yet, so that feedback
-creates no build tasks. Row and Field meaning inference read the domain's current documents when
-their other inputs start them.
+trigger to the run of that Generator not started yet. Concept inference and analytical semantics
+inference declare document input. **[Planned]** No Generator declares usage feedback without related
+Facts yet, so that feedback creates no build tasks. Row and Field meaning inference read the
+domain's current documents when their other inputs start them.
 
 | Input kind | Creates build tasks when |
 | --- | --- |
@@ -113,7 +114,8 @@ A deciding party's wording is never support for a new candidate. Correction inte
 correction through the usage feedback it registers: the feedback's observation is an input read and
 a dependency, but never a check reference. A candidate made from a correction is therefore never
 adopted inline, and the original correction can be traced and shown from its inputs read.
-**[Planned]** No implemented Generator reads answers or proposes new nodes yet. An answer is an
+Analytical semantics inference proposes new nodes: Measures and business terms. **[Planned]** No
+implemented Generator reads answers yet. An answer is an
 input read, referenced by its log record. It is neither a dependency, because it never changes, nor
 a check reference.
 
@@ -305,9 +307,10 @@ coincidental correspondence. For the same reason, keys from candidate key discov
 ## Meaning inference
 
 Row and Field meaning inference, with documents as input and `document` checks, concept inference,
-with the trigger of documents, and correction interpretation are implemented. **[Planned]**
-Analytical semantics inference, identifier correspondence inference, and the trigger of feedback
-without related Facts are not.
+with the trigger of documents, analytical semantics inference for Measures and business terms,
+triggered by documents and confirmed Field meaning, and correction interpretation are implemented.
+**[Planned]** Identifier correspondence inference, Dimensions and a Measure's default time
+granularity, and the trigger of feedback without related Facts are not.
 
 Meaning inference uses a model for predicates that declarations and data cannot decide. For a target
 element it passes names and types, the table's source metadata with the source metadata schema it
@@ -373,6 +376,19 @@ declarations. Without documents, meaning inference can offer only `inference`, a
 party's judgement becomes the main source: a tax treatment that only a column name suggests is a
 signal too weak for the policy evaluation model to adopt alone.
 
+Analytical semantics inference reads the domain's documents, the confirmed Datasets with their
+confirmed Fields and Field meanings, the Measures and business terms that are neither rejected nor
+retired with their values, and the slugs in use. It runs only when documents exist and a Dataset is
+confirmed. The model either points to an existing element, which gets values only at its open Fact
+Addresses, or proposes a new one under a slug not in use; an answer whose new slug is not one fails
+the task. A Measure's aggregation rule and filter conditions are parsed as acceptance parses them
+and run once through the application's SQL execution on a sample of the base table before anything
+is recorded. A new Measure is proposed only with a base Dataset and an aggregation rule that passed
+both; otherwise the build task records it as missing. Each candidate depends on the documents the
+call read and on the existence of its element; a Measure's expression values, reference time Field,
+and a business term's referenced element also depend on what they refer to, so the existence and
+the aggregation rule of a new Measure reach the deciding party together.
+
 Correction interpretation gives the model the feedback's content and context and the related Facts'
 content, and asks for a revised value or applicability scope for the same element and predicate. Its
 candidate always depends on the feedback observation. If the related Fact was a rejected candidate,
@@ -393,10 +409,11 @@ recorded on the build task as not interpreted yet.
 What concerns deterministic Generators is implemented: order through declared inputs, targets from
 observations and confirmations, and producing for every target. The conditions and bounds for
 non-deterministic Generators are implemented for row and Field meaning inference, which confirmations
-trigger, and for correction interpretation, which feedback with related Facts triggers.
-Concept inference also runs on a new document observation. **[Planned]** The other triggers of
-non-deterministic Generators are not: feedback without related Facts, a Fact no longer selected, an
-impact judgement, and a rejection, retirement, or cascade.
+trigger, for analytical semantics inference, which documents and confirmed Field meaning trigger,
+and for correction interpretation, which feedback with related Facts triggers. Concept inference
+also runs on a new document observation. **[Planned]** The other triggers of non-deterministic
+Generators are not: feedback without related Facts, a Fact no longer selected, an impact judgement,
+and a rejection, retirement, or cascade.
 
 **Order.** The strategy defines no global order. Order emerges because a later Generator declares as
 input the confirmation of what an earlier one produces. When the e-commerce database is registered:
@@ -463,6 +480,9 @@ Generators are bounded by initial behavior:
 - One model call asks about at most 25 targets, those of one table for row and Field meaning
   inference and of several Datasets for concept inference, so a large catalog becomes several calls
   a model can answer in time rather than one that fails each time it is resumed.
+- Analytical semantics inference makes one model call per run over every confirmed Dataset, with
+  the documents' sections in document order up to 20,000 characters; the rest is recorded as
+  missing, because table and column names do not tell which glossary sections define a Measure.
 - After a rejection, as opposed to a correction, at most one further candidate with another value
   until a depended-on input gets a newer observation.
 - One candidate per correction.
@@ -491,9 +511,8 @@ and a Physical Catalog reference never moves; a renamed table likewise becomes a
 The policy evaluation model (see
 [`construction.md`](construction.md#choosing-the-confirmation-path)) calls a language model through
 an **adapter**, the only part of the Semantic Catalog that knows how a model is reached.
-Row and Field meaning inference, concept inference, and correction interpretation call it the same
-way. **[Planned]** So will the other meaning-inference Generators, impact judgement, and the
-duplicate check. A
+The implemented meaning-inference Generators call it the same way. **[Planned]** So will the
+other meaning-inference Generators, impact judgement, and the duplicate check. A
 caller passes a prompt and receives the model's answer; it never depends on a particular provider,
 so the provider can change without changing a Generator.
 
@@ -548,7 +567,9 @@ noticed.
 ## Input passed to external models
 
 Row and Field meaning inference apply the settings for data count statistics and value samples, pass
-the relevant parts of documents, and record what they pass as inputs read. Concept inference reads
+the relevant parts of documents, and record what they pass as inputs read. Analytical semantics
+inference passes no data values; it passes documents and the confirmed Facts it reads, and records
+them as inputs read. Concept inference reads
 no data values; besides confirmed Facts and documents, it passes the Concepts in use and their
 relationships, candidates included, because a Concept another call proposed must be visible to be
 referred to rather than created again.

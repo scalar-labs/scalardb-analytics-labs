@@ -178,17 +178,32 @@ final class DocumentSections {
    *     does not match inside {@code paid} but {@code status} matches beside Japanese text
    */
   static Chosen choose(List<Section> all, Collection<String> names, int bound) {
-    var total = all.stream().mapToLong(section -> section.text().length()).sum();
-    if (total <= bound) {
+    var named = patterns(names);
+    return chooseWhere(
+        all,
+        section -> named.stream().anyMatch(name -> name.matcher(section.text()).find()),
+        bound);
+  }
+
+  /**
+   * The sections a call reads when no name tells which ones are relevant, as when it asks what
+   * business definitions documents state: every section when they fit within the bound, otherwise
+   * the sections in document order up to it, the rest recorded as missing.
+   */
+  static Chosen leading(List<Section> all, int bound) {
+    return chooseWhere(all, section -> true, bound);
+  }
+
+  private static Chosen chooseWhere(
+      List<Section> all, java.util.function.Predicate<Section> relevant, int bound) {
+    if (all.stream().mapToLong(section -> section.text().length()).sum() <= bound) {
       return new Chosen(all, List.of());
     }
-    var named = patterns(names);
     var chosen = new ArrayList<Section>();
     var leftOut = new LinkedHashSet<DocumentObservation>();
     var used = 0L;
     for (var section : all) {
-      if (named.stream().anyMatch(name -> name.matcher(section.text()).find())
-          && used + section.text().length() <= bound) {
+      if (relevant.test(section) && used + section.text().length() <= bound) {
         chosen.add(section);
         used += section.text().length();
       } else {

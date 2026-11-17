@@ -237,6 +237,28 @@ final class Scenario {
       return fact;
     }
 
+    /** A closed-range Fact accepted as a candidate, as a dependency on it names it. */
+    Dependency.OnFact closedRangeDependency(Ref address, String value, Dependency... dependencies) {
+      var fact = closedRangeFact(address, value);
+      return new Dependency.OnFact(fact, accept(fact, dependencies));
+    }
+
+    /**
+     * A Measure's aggregation rule, accepted as a candidate resting on its base-dataset Fact, over
+     * whose table acceptance parses the expression.
+     */
+    Ref aggregationRule(
+        Ref address, String function, String expression, Dependency.OnFact baseDataset) {
+      var value =
+          JsonNodeFactory.instance
+              .objectNode()
+              .put("function", function)
+              .put("expression", expression);
+      var fact = add(new LogRecord.Fact(address, value, null));
+      accept(fact, baseDataset);
+      return fact;
+    }
+
     /** A Fact that is the same as another only when the proposer points to it, accepted. */
     Ref candidate(Ref address, String value, Dependency... dependencies) {
       var fact = add(new LogRecord.Fact(address, JsonNodeFactory.instance.textNode(value), null));

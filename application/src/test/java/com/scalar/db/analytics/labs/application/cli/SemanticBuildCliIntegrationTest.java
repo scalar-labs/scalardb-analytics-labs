@@ -9,6 +9,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.scalar.db.analytics.labs.application.construction.QueryEngineSqlParser;
 import com.scalar.db.analytics.labs.application.workspace.Workspace;
 import com.scalar.db.analytics.labs.semantic.Point;
 import com.scalar.db.analytics.labs.semantic.SemanticCatalogStore;
@@ -247,14 +248,17 @@ class SemanticBuildCliIntegrationTest {
     assertThat(changed.get("inputResource").textValue()).isEqualTo(resource);
     assertThat(changed.get("inputObservation").textValue())
         .isNotEqualTo(registered.get("inputObservation").textValue());
-    // Each new observation triggers the one concept-inference run not started yet.
+    // Each new observation triggers the one run not started yet of each Generator that reads
+    // documents.
     assertThat(buildTasks())
-        .singleElement()
-        .satisfies(
+        .extracting(BuildTask::work)
+        .containsExactly(
+            new BuildTask.Work.GeneratorRun("concept-inference"),
+            new BuildTask.Work.GeneratorRun("analytical-semantics-inference"));
+    assertThat(buildTasks())
+        .allSatisfy(
             task -> {
               assertThat(isState(task, BuildTask.State.CREATED)).isTrue();
-              assertThat(task.work())
-                  .isEqualTo(new BuildTask.Work.GeneratorRun("concept-inference"));
               assertThat(task.triggers()).hasSize(2);
             });
 
@@ -368,7 +372,8 @@ class SemanticBuildCliIntegrationTest {
 
   private static SemanticCatalogStore store() {
     return SemanticCatalogStore.open(
-        new StoreSettings(STORE.getJdbcUrl(), STORE.getUsername(), STORE.getPassword()));
+        new StoreSettings(STORE.getJdbcUrl(), STORE.getUsername(), STORE.getPassword()),
+        QueryEngineSqlParser.INSTANCE);
   }
 
   private ScalarDbAnalyticsCli cli(ByteArrayOutputStream standardOutput) {
