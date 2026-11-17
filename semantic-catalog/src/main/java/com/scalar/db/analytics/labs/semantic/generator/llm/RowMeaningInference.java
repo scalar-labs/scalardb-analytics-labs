@@ -4,7 +4,6 @@
  */
 package com.scalar.db.analytics.labs.semantic.generator.llm;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
 import java.util.List;
@@ -17,9 +16,6 @@ import java.util.List;
  */
 final class RowMeaningInference extends MeaningInference {
   static final String NAME = "row-meaning-inference";
-
-  static final List<String> ROW_KINDS =
-      List.of("current-state", "event", "state-per-point", "pre-aggregated");
 
   static final String INSTRUCTIONS =
       """
@@ -76,10 +72,5 @@ final class RowMeaningInference extends MeaningInference {
   @Override
   List<String> predicates() {
     return List.of(Vocabulary.ROW_KIND, Vocabulary.ROW_GRAIN, Vocabulary.ROW_INCLUSION);
-  }
-
-  @Override
-  Valued value(String predicate, JsonNode given) {
-    return predicate.equals(Vocabulary.ROW_KIND) ? choice(given, ROW_KINDS) : text(given);
   }
 }

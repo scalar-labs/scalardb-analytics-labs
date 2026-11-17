@@ -17,9 +17,9 @@ import com.scalar.db.analytics.labs.semantic.generator.GeneratorContext.Trigger;
 import com.scalar.db.analytics.labs.semantic.generator.ModelGenerator;
 import com.scalar.db.analytics.labs.semantic.generator.Output;
 import com.scalar.db.analytics.labs.semantic.generator.Proposals;
+import com.scalar.db.analytics.labs.semantic.generator.llm.PredicateValues.Valued;
 import com.scalar.db.analytics.labs.semantic.llm.LanguageModelException;
 import com.scalar.db.analytics.labs.semantic.model.Dependency;
-import com.scalar.db.analytics.labs.semantic.model.IdentityKey;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.PhysicalCatalogReference;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
@@ -102,7 +102,13 @@ abstract class MeaningInference implements ModelGenerator {
   /**
    * A value the model gave for a predicate, in the form the predicate takes, or why it is not one.
    */
-  abstract Valued value(String predicate, JsonNode given);
+  final Valued value(String predicate, JsonNode given) {
+    return switch (PredicateValues.of(kind, predicate).orElseThrow()) {
+      case PredicateValues.Plain plain -> plain.read(given);
+      case PredicateValues.Naming ignored -> throw new IllegalStateException(predicate);
+      case PredicateValues.Expressed ignored -> throw new IllegalStateException(predicate);
+    };
+  }
 
   /**
    * Whether a Fact Address is one that schema interpretation fills from a current declaration of
@@ -110,28 +116,6 @@ abstract class MeaningInference implements ModelGenerator {
    */
   boolean declared(Located target, String predicate) {
     return false;
-  }
-
-  /** A predicate value read from the answer, or why the answer gives none. */
-  sealed interface Valued {
-    /**
-     * @param key the identity key of a closed-range value; absent for a free description
-     */
-    record Value(JsonNode value, @Nullable IdentityKey key) implements Valued {}
-
-    record Invalid(String why) implements Valued {}
-  }
-
-  static Valued text(JsonNode given) {
-    return given.isTextual() && !given.asText().isBlank()
-        ? new Valued.Value(JSON.textNode(given.asText().strip()), null)
-        : new Valued.Invalid("it is not a non-empty text");
-  }
-
-  static Valued choice(JsonNode given, List<String> choices) {
-    return given.isTextual() && choices.contains(given.asText())
-        ? new Valued.Value(JSON.textNode(given.asText()), IdentityKey.choice(given.asText()))
-        : new Valued.Invalid("it is not one of " + String.join(", ", choices));
   }
 
   // Targets

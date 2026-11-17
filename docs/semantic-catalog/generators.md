@@ -361,11 +361,17 @@ relationships, which data checks decide. It also does not propose a Fact
 Address that schema interpretation is filling from a current declaration, or the key of a Dataset
 without a primary key, which candidate key discovery proposes. An inferred candidate beside a
 checked one would add judgement and, if both were confirmed, a conflict. Correction interpretation
-can reach any predicate, because a correction may revise any value. It interprets corrections of
-the predicates whose values an implemented Generator defines: row meaning, Field meaning, set
-relationships, and uniqueness. **[Planned]** Corrections of other predicates are recorded on the
-build task as not interpreted yet, because each Generator owns the value form and identity key of
-its predicates and no shared definition covers the rest.
+can reach any predicate, because a correction may revise any value.
+
+Each predicate whose value a model reads or writes has one value rule: the form its value takes,
+how a value a model gives is read into the value stored and its identity key, and whether the
+value names other elements. The model-backed Generators that propose a predicate and correction
+interpretation read values through the same rule, so a corrected value is read exactly as a
+proposed one. A key, uniqueness, and a set relationship, which schema interpretation and data
+checks build without a model, have rules in the same form for correction interpretation. Each
+caller still decides which elements a value may name, since only it knows what its call passed or
+created. Predicates no Generator proposes yet, such as a Dimension's, get their rule with the
+Generator that proposes them; until then no Fact of them exists to correct.
 
 Undeclared identifier correspondences are central to combining sources. Identifier correspondence
 inference proposes, for example, that e-commerce customers and POS members correspond through the
@@ -420,9 +426,22 @@ the corrected value. If the related Fact is the selected confirmed Fact, the new
 on it and replaces it once confirmed. A revised value goes to the related Fact's Fact Address and
 depends on every confirmed Fact there; a revised scope goes to a new Fact Address with that scope's
 description. When the wording yields no value or scope, the build task records that and the
-unreadable correction. **[Planned]** A revised scope for a confirmed Fact, which a candidate at
-another Fact Address cannot replace, and a correction of a Fact at a scoped Fact Address are
-recorded on the build task as not interpreted yet.
+unreadable correction.
+
+The call states each related Fact's value form. A value that names other elements, such as the
+Concept a Field represents, a key's Fields, or a Measure's base Dataset, is shown by name with the
+names a revision may choose from: the Concepts whose existence stands, the Dataset's columns whose
+Field is confirmed, or the confirmed Datasets. The revision depends on the existence of what it
+names instead of what the corrected value named; a name not listed, such as a new Concept, creates
+nothing and is recorded as missing input. A revised aggregation rule or filter condition is parsed
+over its base Dataset's Fields and run once on a sample of the base table with the Measure's other
+expression, as analytical semantics inference does, and is recorded as missing input when either
+fails. A revised name keeps its language. A correction of an element's existence or of a Physical
+Catalog reference is recorded on the build task as not revised: a correction of an existence
+rejects the element or names another one, which a revised value cannot state, and a Physical
+Catalog reference follows from what the source declares. **[Planned]** A revised scope for a
+confirmed Fact, which a candidate at another Fact Address cannot replace, and a correction of a
+Fact at a scoped Fact Address are recorded on the build task as not interpreted yet.
 
 ## Generation strategy
 

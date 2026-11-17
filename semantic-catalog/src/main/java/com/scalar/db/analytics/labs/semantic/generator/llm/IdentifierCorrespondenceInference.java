@@ -629,8 +629,8 @@ final class IdentifierCorrespondenceInference implements ModelGenerator {
             ask);
     var definition = given.definition();
     if (definition == null
-        || !definition.value().isTextual()
-        || definition.value().asText().isBlank()) {
+        || !(PredicateValues.text(definition.value())
+            instanceof PredicateValues.Valued.Value definitionValue)) {
       output.missing(Vocabulary.BUSINESS_DEFINITION + " of " + described);
       return;
     }
@@ -642,7 +642,7 @@ final class IdentifierCorrespondenceInference implements ModelGenerator {
         output,
         edge,
         Vocabulary.BUSINESS_DEFINITION,
-        JSON.textNode(definition.value().asText().strip()),
+        definitionValue.value(),
         null,
         definitionDependencies,
         Supported.check(definition, cited.verified(ask, definition.citation()), null),

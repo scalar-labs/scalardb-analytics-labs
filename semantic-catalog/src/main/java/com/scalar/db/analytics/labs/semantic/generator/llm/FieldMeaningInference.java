@@ -4,7 +4,6 @@
  */
 package com.scalar.db.analytics.labs.semantic.generator.llm;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.scalar.db.analytics.labs.semantic.generator.GeneratorContext;
 import com.scalar.db.analytics.labs.semantic.generator.schema.SchemaInterpretation;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
@@ -20,16 +19,6 @@ import java.util.List;
  */
 final class FieldMeaningInference extends MeaningInference {
   static final String NAME = "field-meaning-inference";
-
-  static final List<String> VALUE_KINDS =
-      List.of(
-          "identifier",
-          "classification",
-          "amount",
-          "quantity",
-          "time-or-date",
-          "string",
-          "boolean");
 
   static final String INSTRUCTIONS =
       """
@@ -113,34 +102,5 @@ final class FieldMeaningInference extends MeaningInference {
       }
     }
     return false;
-  }
-
-  @Override
-  Valued value(String predicate, JsonNode given) {
-    return switch (predicate) {
-      case Vocabulary.VALUE_KIND -> choice(given, VALUE_KINDS);
-      case Vocabulary.TIME_MEANING -> timeMeaning(given);
-      default -> text(given);
-    };
-  }
-
-  private static Valued timeMeaning(JsonNode given) {
-    var meaning = given.path("meaning");
-    var zone = given.path("timeZone");
-    if (!given.isObject() || !meaning.isTextual() || meaning.asText().isBlank()) {
-      return new Valued.Invalid("it is not an object with a meaning");
-    }
-    if (!zone.isNull()
-        && !zone.isMissingNode()
-        && !(zone.isTextual() && !zone.asText().isBlank())) {
-      return new Valued.Invalid("its time zone is neither a name nor null");
-    }
-    var value = JSON.objectNode().put("meaning", meaning.asText().strip());
-    if (zone.isTextual()) {
-      value.put("timeZone", zone.asText().strip());
-    } else {
-      value.putNull("timeZone");
-    }
-    return new Valued.Value(value, null);
   }
 }

@@ -579,7 +579,7 @@ final class ConceptInference implements ModelGenerator {
       if (slugs.contains(name)) {
         return "whose slug is already taken";
       }
-      if (!meaning.value().isTextual() || meaning.value().asText().isBlank()) {
+      if (PredicateValues.text(meaning.value()) instanceof PredicateValues.Valued.Invalid) {
         return "whose meaning is not a non-empty text";
       }
       return null;
@@ -620,7 +620,7 @@ final class ConceptInference implements ModelGenerator {
       propose(
           element,
           Vocabulary.MEANING,
-          JSON.textNode(meaning.value().asText().strip()),
+          ((PredicateValues.Valued.Value) PredicateValues.text(meaning.value())).value(),
           null,
           meaningDependencies,
           check,
@@ -653,7 +653,8 @@ final class ConceptInference implements ModelGenerator {
       if (concept.isEmpty()) {
         return;
       }
-      var key = IdentityKey.of(new IdentityKey.Part.Reference(concept.get().element()));
+      var value = PredicateValues.naming(predicate, concept.get().element());
+      var key = java.util.Objects.requireNonNull(value.key());
       if (concept.get().element() instanceof Ref.Urn urn
           && context.factsAt(target.element(), predicate).stream()
               .anyMatch(
@@ -674,7 +675,7 @@ final class ConceptInference implements ModelGenerator {
       propose(
           Ref.urn(target.element()),
           predicate,
-          JSON.nullNode(),
+          value.value(),
           key,
           dependencies,
           Supported.check(given, cited.verified(ask, given.citation()), null),
@@ -788,16 +789,8 @@ final class ConceptInference implements ModelGenerator {
       var dependencies = new ArrayList<Dependency>();
       dependencies.add(existencePremise);
       dependencies.addAll(documents);
-      var value = JSON.objectNode().put("from", oriented[0]).put("to", oriented[1]);
-      propose(
-          edge,
-          Vocabulary.MULTIPLICITY,
-          value,
-          IdentityKey.of(
-              new IdentityKey.Part.Choice(oriented[0]), new IdentityKey.Part.Choice(oriented[1])),
-          dependencies,
-          check,
-          ask);
+      var value = PredicateValues.multiplicity(oriented[0], oriented[1]);
+      propose(edge, Vocabulary.MULTIPLICITY, value.value(), value.key(), dependencies, check, ask);
     }
 
     private Proposed proposeExistence(
@@ -840,16 +833,10 @@ final class ConceptInference implements ModelGenerator {
 
   /** The from and to bounds of a multiplicity value, or null when it is not one. */
   private static String @Nullable [] bounds(JsonNode value) {
-    var from = value.path("from");
-    var to = value.path("to");
-    if (!value.isObject()
-        || !from.isTextual()
-        || !to.isTextual()
-        || !Vocabulary.MULTIPLICITY_BOUNDS.contains(from.asText())
-        || !Vocabulary.MULTIPLICITY_BOUNDS.contains(to.asText())) {
+    if (!(PredicateValues.multiplicity(value) instanceof PredicateValues.Valued.Value valid)) {
       return null;
     }
-    return new String[] {from.asText(), to.asText()};
+    return new String[] {valid.value().path("from").asText(), valid.value().path("to").asText()};
   }
 
   /** The dependencies on the documents a call read, which every candidate of the call rests on. */

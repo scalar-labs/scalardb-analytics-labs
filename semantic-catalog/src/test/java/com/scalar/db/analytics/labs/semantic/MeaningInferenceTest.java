@@ -790,7 +790,7 @@ class MeaningInferenceTest extends StoreScenarioTest {
   }
 
   @Test
-  void aCorrectionOfAPredicateItDoesNotInterpretIsRecordedWithoutAskingTheModel() {
+  void aCorrectionOfAnElementsExistenceIsRecordedWithoutAskingTheModel() {
     var s = scenario();
     register(s);
     var policy = new AskingConsent();
@@ -811,7 +811,7 @@ class MeaningInferenceTest extends StoreScenarioTest {
         .satisfies(
             missing ->
                 assertThat(missing)
-                    .contains("whose predicate existence correction interpretation does not")
+                    .contains("whose predicate existence a correction does not revise, because")
                     .endsWith(": 列名が変わっただけです"));
   }
 

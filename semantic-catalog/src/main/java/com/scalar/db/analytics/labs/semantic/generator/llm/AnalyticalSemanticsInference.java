@@ -572,29 +572,50 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
                 table.path("_registration").asText(),
                 table.path("_namespace").asText(),
                 table.path("_table").asText());
-        var sql =
-            "SELECT "
-                + aggregate
-                + " AS \"value\"\nFROM "
-                + quoted(reference)
-                + (condition == null ? "" : "\nWHERE " + condition + "\n");
         queries.add(
-            new DataGenerator.Query(
-                AGGREGATION_CHECK,
-                JSON.objectNode()
-                    .put("measure", element.reference())
-                    .put("table", reference.canonical()),
+            aggregationCheck(
                 element.reference(),
-                List.of(table.path("_observation").asText()),
-                List.of(
-                    new ConstructionSql.Request(
-                        sql,
-                        List.of(
-                            new ConstructionSql.Input(
-                                reference, ConstructionSql.Reading.SAMPLED))))));
+                element.reference(),
+                reference,
+                table.path("_observation").asText(),
+                aggregate,
+                condition));
       }
     }
     return queries;
+  }
+
+  /**
+   * The query that checks a Measure's aggregation: the aggregate, filtered by the conditions, over
+   * a sample of its base table.
+   *
+   * @param measure how the run names the Measure
+   * @param targetKey what the run finds the query's outcome by
+   * @param observation the base table's observation the query reads
+   * @param aggregate the aggregate as the Query Engine runs it
+   * @param condition the filter conditions; absent when every row counts
+   */
+  static DataGenerator.Query aggregationCheck(
+      String measure,
+      String targetKey,
+      PhysicalCatalogReference.Table table,
+      String observation,
+      String aggregate,
+      @Nullable String condition) {
+    var sql =
+        "SELECT "
+            + aggregate
+            + " AS \"value\"\nFROM "
+            + quoted(table)
+            + (condition == null ? "" : "\nWHERE " + condition + "\n");
+    return new DataGenerator.Query(
+        AGGREGATION_CHECK,
+        JSON.objectNode().put("measure", measure).put("table", table.canonical()),
+        targetKey,
+        List.of(observation),
+        List.of(
+            new ConstructionSql.Request(
+                sql, List.of(new ConstructionSql.Input(table, ConstructionSql.Reading.SAMPLED)))));
   }
 
   /**
@@ -861,8 +882,8 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
             propose(
                 measure.elementRef(),
                 Vocabulary.BASE_DATASET,
-                JSON.textNode(dataset),
-                IdentityKey.of(new IdentityKey.Part.Reference(Ref.urn(dataset))),
+                PredicateValues.naming(Vocabulary.BASE_DATASET, Ref.urn(dataset)).value(),
+                PredicateValues.naming(Vocabulary.BASE_DATASET, Ref.urn(dataset)).key(),
                 dependencies,
                 Objects.requireNonNull(values.get(Vocabulary.BASE_DATASET)),
                 JSON.textNode(Vocabulary.VALUE_ITEM));
@@ -881,32 +902,11 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
       }
       var onBase = new ArrayList<>(premises);
       onBase.add(baseFact);
-      if (rule != null && open(measure, Vocabulary.AGGREGATION_RULE)) {
-        if (expressionsChecked) {
-          var parsed = AggregationRule.of(rule.value());
-          var value =
-              JSON.objectNode()
-                  .put("function", parsed.function())
-                  .put("expression", parsed.expression());
-          propose(
-              measure.elementRef(),
-              Vocabulary.AGGREGATION_RULE,
-              value,
-              null,
-              onBase,
-              rule,
-              JSON.arrayNode().add("function").add("expression"));
-        }
+      if (rule != null && open(measure, Vocabulary.AGGREGATION_RULE) && expressionsChecked) {
+        expression(answered, measure, Vocabulary.AGGREGATION_RULE, rule, onBase);
       }
       if (filter != null && open(measure, Vocabulary.FILTER) && expressionsChecked) {
-        propose(
-            measure.elementRef(),
-            Vocabulary.FILTER,
-            JSON.textNode(filter.value().asText()),
-            null,
-            onBase,
-            filter,
-            JSON.textNode(Vocabulary.VALUE_ITEM));
+        expression(answered, measure, Vocabulary.FILTER, filter, onBase);
       }
       var time = values.get(Vocabulary.REFERENCE_TIME_FIELD);
       if (time != null && open(measure, Vocabulary.REFERENCE_TIME_FIELD)) {
@@ -922,12 +922,37 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
           propose(
               measure.elementRef(),
               Vocabulary.REFERENCE_TIME_FIELD,
-              JSON.textNode(field.field()),
-              IdentityKey.of(new IdentityKey.Part.Reference(Ref.urn(field.field()))),
+              PredicateValues.naming(Vocabulary.REFERENCE_TIME_FIELD, Ref.urn(field.field()))
+                  .value(),
+              PredicateValues.naming(Vocabulary.REFERENCE_TIME_FIELD, Ref.urn(field.field())).key(),
               dependencies,
               time,
               JSON.textNode(Vocabulary.VALUE_ITEM));
         }
+      }
+    }
+
+    /** Proposes a checked expression value of a Measure, read through its predicate's rule. */
+    private void expression(
+        Answered answered,
+        Proposed measure,
+        String predicate,
+        Given given,
+        List<Dependency> onBase) {
+      var rule =
+          (PredicateValues.Expressed)
+              PredicateValues.of(ElementKind.MEASURE, predicate).orElseThrow();
+      switch (rule.read(given.value())) {
+        case PredicateValues.Valued.Invalid invalid -> invalid(answered, predicate, invalid.why());
+        case PredicateValues.Valued.Value value ->
+            propose(
+                measure.elementRef(),
+                predicate,
+                value.value(),
+                null,
+                onBase,
+                given,
+                PredicateValues.items(predicate));
       }
     }
 
@@ -1098,11 +1123,12 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
           dependencies.add(target.dependency());
           // No value: the commit writes the URN the reference resolves to, which for a Measure
           // proposed in this run is issued only then.
+          var value = PredicateValues.naming(Vocabulary.REFERENCED_ELEMENT, target.elementRef());
           propose(
               term.elementRef(),
               Vocabulary.REFERENCED_ELEMENT,
-              JSON.nullNode(),
-              IdentityKey.of(new IdentityKey.Part.Reference(target.elementRef())),
+              value.value(),
+              value.key(),
               dependencies,
               referenced,
               JSON.textNode(Vocabulary.VALUE_ITEM));
@@ -1158,8 +1184,8 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
     // Proposing
 
     private static Optional<JsonNode> text(Given given) {
-      return given.value().isTextual() && !given.value().asText().isBlank()
-          ? Optional.of(JSON.textNode(given.value().asText().strip()))
+      return PredicateValues.text(given.value()) instanceof PredicateValues.Valued.Value value
+          ? Optional.of(value.value())
           : Optional.empty();
     }
 

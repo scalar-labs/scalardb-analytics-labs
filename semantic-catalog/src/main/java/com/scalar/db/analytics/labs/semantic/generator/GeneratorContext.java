@@ -119,6 +119,7 @@ public final class GeneratorContext {
   /**
    * A Fact as a Generator reads it.
    *
+   * @param language the language of its Fact Address, for a language-qualified predicate
    * @param revision the URN of the Fact Revision of its latest acceptance, which a dependency on it
    *     names: later evaluations and confirmations do not change what it states
    * @param dependencies the dependency references in effect
@@ -130,6 +131,7 @@ public final class GeneratorContext {
       String urn,
       String element,
       String predicate,
+      @Nullable String language,
       FactState state,
       String revision,
       JsonNode value,
@@ -557,6 +559,7 @@ public final class GeneratorContext {
             urn,
             address.get().row().element(),
             address.get().row().predicate(),
+            address.get().row().language(),
             state.get(),
             Urns.factRevision(urn, accepted.get()),
             revision.get().value(),
