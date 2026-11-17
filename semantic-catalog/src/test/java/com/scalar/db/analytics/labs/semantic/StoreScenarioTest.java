@@ -8,6 +8,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.scalar.db.analytics.labs.semantic.model.CommitRejectedException;
+import com.scalar.db.analytics.labs.semantic.model.Languages;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.AfterAll;
@@ -19,12 +20,15 @@ import org.junit.jupiter.api.BeforeAll;
  * each domain it used must equal a replay of that domain's log.
  */
 abstract class StoreScenarioTest {
+  /** The languages every test domain declares: Japanese, the primary one, and English. */
+  static final Languages LANGUAGES = new Languages(List.of("ja", "en"), "ja");
+
   static SemanticCatalogStore store;
   private final List<Scenario> scenarios = new ArrayList<>();
 
   @BeforeAll
   static void open() {
-    store = SemanticCatalogStore.open(TestStore.settings(), TestStore.PARSER);
+    store = SemanticCatalogStore.open(TestStore.settings(), TestStore.PARSER, domain -> LANGUAGES);
   }
 
   @AfterAll

@@ -57,15 +57,16 @@ adapter and the concrete model it uses (see
 [`semantic-catalog/generators.md`](semantic-catalog/generators.md#reaching-a-language-model)), and
 whether count statistics (on by default) and value samples (off by default) reach the model (see
 [`semantic-catalog/generators.md`](semantic-catalog/generators.md#input-passed-to-external-models)),
+and the languages the domain's readers use and which of them is primary, English alone by default
+(see [`semantic-catalog/languages.md`](semantic-catalog/languages.md#declared-languages)),
 under `semanticCatalog` in `workspace.json` (see
 [`../application/README.md`](../application/README.md#standalone-cli)). **[Planned]** It is also to
 hold:
 
 - the semantics owners, and the Query Agents an administrator permits (see
   [Callers and authority](#callers-and-authority));
-- the languages the domain's readers use and which of them is primary (see
-  [`semantic-catalog/languages.md`](semantic-catalog/languages.md#declared-languages)), and the
-  language each principal prefers to read in, which the application passes on reads that name none;
+- the language each principal prefers to read in, which the application passes on reads that name
+  none (see [`semantic-catalog/languages.md`](semantic-catalog/languages.md#agents-and-sessions));
 - whether value distributions (off by default) and usage feedback (on by default) reach models;
 - whether data checks run (on by default).
 

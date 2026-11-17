@@ -86,7 +86,10 @@ class AgentReadsTest extends StoreScenarioTest {
             base);
     c.evaluate(rule, Transition.CONFIRM, PolicyResult.REQUEST_CONSENT);
     var termRef = written.ref(term);
-    c.confirmByMachine(c.closedRangeCandidate(c.address(termRef, Vocabulary.WRITTEN_FORM), "売上"));
+    c.confirmByMachine(
+        c.closedRangeCandidate(c.address(termRef, Vocabulary.WRITTEN_FORM, "ja"), "売上"));
+    c.confirmByMachine(
+        c.closedRangeCandidate(c.address(termRef, Vocabulary.WRITTEN_FORM, "en"), "revenue"));
     c.confirmByMachine(
         c.closedRangeCandidate(
             c.address(termRef, Vocabulary.REFERENCED_ELEMENT), written.urn(measure)));
@@ -165,7 +168,7 @@ class AgentReadsTest extends StoreScenarioTest {
         .extracting(e -> e.element().element())
         .containsExactlyInAnyOrder(sample.concept, sample.term);
     // The concept adds its existence and its missing meaning; the business term its three Facts.
-    assertThat(root.counts()).isEqualTo(new Hierarchy.Counts(11, 1, 29));
+    assertThat(root.counts()).isEqualTo(new Hierarchy.Counts(12, 1, 29));
   }
 
   @Test
@@ -329,9 +332,11 @@ class AgentReadsTest extends StoreScenarioTest {
   @Test
   void aBusinessTermsWrittenFormFindsTheElementItRefersTo() {
     var sample = sample();
-    List<Knowledge.Element> found =
-        sample.s.latest(snapshot -> snapshot.findElements(null, null, "売上"));
-    assertThat(found).extracting(Knowledge.Element::element).containsExactly(sample.measure);
+    for (var name : List.of("売上", "revenue")) {
+      List<Knowledge.Element> found =
+          sample.s.latest(snapshot -> snapshot.findElements(null, null, name));
+      assertThat(found).extracting(Knowledge.Element::element).containsExactly(sample.measure);
+    }
     List<Knowledge.Element> none =
         sample.s.latest(snapshot -> snapshot.findElements(null, null, "sales"));
     assertThat(none).isEmpty();
@@ -356,7 +361,7 @@ class AgentReadsTest extends StoreScenarioTest {
     assertThat(again).isEqualTo(then);
     Hierarchy.Level now =
         sample.s.latest(snapshot -> snapshot.read(Review.Position.ROOT, Hierarchy.Depth.RECURSIVE));
-    assertThat(now.counts()).isEqualTo(new Hierarchy.Counts(12, 1, 28));
+    assertThat(now.counts()).isEqualTo(new Hierarchy.Counts(13, 1, 28));
   }
 
   @Test

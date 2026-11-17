@@ -81,8 +81,10 @@ public sealed interface MaterializedRow {
       String endA, String endB, boolean directed, String identityKey, JsonNode identifyingPart) {}
 
   /**
-   * A Fact Address, used to find empty-scope Fact Addresses by element and predicate.
+   * A Fact Address, used to find empty-scope Fact Addresses by element, predicate, and language.
    *
+   * @param language the language of a language-qualified predicate's Fact Address; absent for other
+   *     predicates
    * @param scopeDescription the applicability scope's description; absent for the empty scope
    * @param scopeEntities the URNs of the entities the applicability scope mentions
    * @param predicateDefinition the definition of a free-description predicate
@@ -92,6 +94,7 @@ public sealed interface MaterializedRow {
       String factAddress,
       String element,
       String predicate,
+      @Nullable String language,
       @Nullable String scopeDescription,
       List<String> scopeEntities,
       @Nullable String predicateDefinition,
@@ -107,8 +110,8 @@ public sealed interface MaterializedRow {
     }
 
     /**
-     * Whether the Fact Address is found by element and predicate alone: its scope is empty and its
-     * predicate is not free-description.
+     * Whether the Fact Address is found by element, predicate, and language alone: its scope is
+     * empty and its predicate is not free-description.
      */
     public boolean matchable() {
       return scopeDescription == null && predicateDefinition == null;

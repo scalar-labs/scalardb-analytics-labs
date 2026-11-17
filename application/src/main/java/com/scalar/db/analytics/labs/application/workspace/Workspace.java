@@ -17,6 +17,7 @@ import com.scalar.db.analytics.labs.physical.Secret;
 import com.scalar.db.analytics.labs.semantic.ModelInputSettings;
 import com.scalar.db.analytics.labs.semantic.StoreSettings;
 import com.scalar.db.analytics.labs.semantic.llm.LanguageModelSettings;
+import com.scalar.db.analytics.labs.semantic.model.Languages;
 import java.io.IOException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -28,6 +29,7 @@ import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -289,6 +291,16 @@ public final class Workspace {
   }
 
   /**
+   * The languages the domain declares, as {@code semanticCatalog.languages} and {@code
+   * semanticCatalog.primaryLanguage} set them (see {@code docs/semantic-catalog/languages.md},
+   * "Declared languages"); English alone when the workspace configuration declares none.
+   */
+  public Languages semanticCatalogLanguages() {
+    var semanticCatalog = configuration.semanticCatalog();
+    return semanticCatalog == null ? Languages.DEFAULT : semanticCatalog.declaredLanguages();
+  }
+
+  /**
    * The language model the domain's build tasks call, as {@code semanticCatalog.languageModel} sets
    * it; empty when the workspace configuration sets none.
    */
@@ -357,16 +369,49 @@ public final class Workspace {
    * @param constructionQueryTimeLimitSeconds how long one construction query may take
    * @param languageModel the language model the domain's build tasks call
    * @param modelInput which data reads reach the language model
+   * @param languages the languages the domain's readers use, as canonical BCP 47 language tags
+   * @param primaryLanguage the primary one of those languages; the first when unset
    */
   @JsonInclude(JsonInclude.Include.NON_NULL)
   record SemanticCatalogConfiguration(
       @Nullable Long sampleSize,
       @Nullable Long constructionQueryTimeLimitSeconds,
       @Nullable LanguageModelConfiguration languageModel,
-      @Nullable ModelInputConfiguration modelInput) {
+      @Nullable ModelInputConfiguration modelInput,
+      @Nullable List<String> languages,
+      @Nullable String primaryLanguage) {
+
+    /**
+     * The declared languages, or the default when the configuration declares none.
+     *
+     * @throws IllegalArgumentException when the languages are not valid declared languages
+     */
+    Languages declaredLanguages() {
+      if (languages == null) {
+        if (primaryLanguage != null) {
+          throw new IllegalArgumentException("A primary language needs declared languages");
+        }
+        return Languages.DEFAULT;
+      }
+      if (languages.isEmpty() || languages.contains(null)) {
+        throw new IllegalArgumentException("A domain declares at least one language, none null");
+      }
+      return new Languages(
+          languages, primaryLanguage != null ? primaryLanguage : languages.getFirst());
+    }
+
+    private boolean languagesValid() {
+      try {
+        declaredLanguages();
+        return true;
+      } catch (IllegalArgumentException e) {
+        return false;
+      }
+    }
 
     boolean isValid() {
       return (languageModel == null || languageModel.isValid())
+          && languagesValid()
           && (sampleSize == null
               || (sampleSize > 0 && sampleSize <= ConstructionSqlSettings.MAX_SAMPLE_SIZE))
           && (constructionQueryTimeLimitSeconds == null
@@ -408,7 +453,7 @@ public final class Workspace {
       try {
         settings();
         return true;
-      } catch (IllegalArgumentException | NullPointerException e) {
+      } catch (IllegalArgumentException e) {
         return false;
       }
     }

@@ -273,14 +273,15 @@ public final class StoreTransaction {
       case FactAddressRow address ->
           jdbc.sql(
                   "INSERT INTO semantic_catalog.fact_addresses (domain, fact_address, element,"
-                      + " predicate, scope_description, scope_entities, predicate_definition,"
-                      + " created_commit)"
-                      + " VALUES (:domain, :address, :element, :predicate, :description,"
-                      + " CAST(:entities AS jsonb), :definition, :created)")
+                      + " predicate, language, scope_description, scope_entities,"
+                      + " predicate_definition, created_commit)"
+                      + " VALUES (:domain, :address, :element, :predicate, :language,"
+                      + " :description, CAST(:entities AS jsonb), :definition, :created)")
               .param("domain", domain)
               .param("address", address.factAddress())
               .param("element", address.element())
               .param("predicate", address.predicate())
+              .param("language", address.language(), Types.VARCHAR)
               .param("description", address.scopeDescription(), Types.VARCHAR)
               .param("entities", LogRecordJson.writeStrings(address.scopeEntities()))
               .param("definition", address.predicateDefinition(), Types.VARCHAR)
@@ -1423,12 +1424,14 @@ public final class StoreTransaction {
     }
 
     @Override
-    public Optional<String> emptyScopeAddress(String element, String predicate) {
+    public Optional<String> emptyScopeAddress(
+        String element, String predicate, @Nullable String language) {
       return jdbc.sql(
               "SELECT fact_address FROM semantic_catalog.fact_addresses"
                   + " WHERE domain = ? AND element = ? AND predicate = ?"
+                  + " AND COALESCE(language, '') = ?"
                   + " AND scope_description IS NULL AND predicate_definition IS NULL")
-          .params(domain, element, predicate)
+          .params(domain, element, predicate, language == null ? "" : language)
           .query(String.class)
           .optional();
     }
@@ -1504,7 +1507,7 @@ public final class StoreTransaction {
           + " FROM semantic_catalog.elements";
 
   private static final String ADDRESSES =
-      "SELECT fact_address, element, predicate, scope_description,"
+      "SELECT fact_address, element, predicate, language, scope_description,"
           + " scope_entities::text AS scope_entities, predicate_definition, created_commit"
           + " FROM semantic_catalog.fact_addresses";
 
@@ -1568,6 +1571,7 @@ public final class StoreTransaction {
         rs.getString("fact_address"),
         rs.getString("element"),
         rs.getString("predicate"),
+        rs.getString("language"),
         rs.getString("scope_description"),
         LogRecordJson.readStrings(rs.getString("scope_entities")),
         rs.getString("predicate_definition"),

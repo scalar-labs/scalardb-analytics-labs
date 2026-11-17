@@ -9,6 +9,7 @@ import com.scalar.db.analytics.labs.semantic.model.Check;
 import com.scalar.db.analytics.labs.semantic.model.Document;
 import com.scalar.db.analytics.labs.semantic.model.ElementIdentity;
 import com.scalar.db.analytics.labs.semantic.model.IdentityKey;
+import com.scalar.db.analytics.labs.semantic.model.Languages;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.LogRecordJson;
 import com.scalar.db.analytics.labs.semantic.model.MatchingCondition;
@@ -44,6 +45,7 @@ public final class GeneratorContext {
   private final List<Trigger> triggers;
   private final JsonNode provenance;
   private final ExpressionValues expressions;
+  private final Languages languages;
   private @Nullable Map<String, OptionalLong> latestVersions;
   private final Map<String, Optional<Table>> tables = new HashMap<>();
 
@@ -51,6 +53,7 @@ public final class GeneratorContext {
    * @param triggers the URNs of the log records that called for the run
    * @param provenance the provenance every acceptance and retirement proposal of the run records
    * @param expressions parses expression values with the Query Engine's parser
+   * @param languages the languages the domain declares
    */
   public GeneratorContext(
       StoreTransaction transaction,
@@ -58,13 +61,15 @@ public final class GeneratorContext {
       Projection projection,
       List<String> triggers,
       JsonNode provenance,
-      ExpressionValues expressions) {
+      ExpressionValues expressions,
+      Languages languages) {
     this.transaction = transaction;
     this.domain = domain;
     this.projection = projection;
     this.lookup = transaction.identityLookup(domain);
     this.provenance = provenance;
     this.expressions = expressions;
+    this.languages = languages;
     this.triggers = new ArrayList<>();
     for (var trigger : triggers) {
       resolve(trigger).ifPresent(this.triggers::add);
@@ -565,14 +570,30 @@ public final class GeneratorContext {
   /** The closed-range Fact with an identity key at an element's empty-scope Fact Address. */
   public Optional<Fact> closedRangeFact(String element, String predicate, IdentityKey key) {
     return lookup
-        .emptyScopeAddress(element, predicate)
+        .emptyScopeAddress(element, predicate, null)
         .flatMap(address -> lookup.closedRangeFact(address, key.canonical()))
         .flatMap(this::fact);
   }
 
+  /** The languages the domain declares (see {@code docs/semantic-catalog/languages.md}). */
+  public Languages languages() {
+    return languages;
+  }
+
   /** The Facts at an element's empty-scope Fact Address of a predicate. */
   public List<Fact> factsAt(String element, String predicate) {
-    var address = lookup.emptyScopeAddress(element, predicate).flatMap(projection::address);
+    return factsAt(element, predicate, null);
+  }
+
+  /**
+   * The Facts at an element's empty-scope Fact Address of a predicate in a language.
+   *
+   * @param language the language of a language-qualified predicate's Fact Address; absent for other
+   *     predicates
+   */
+  public List<Fact> factsAt(String element, String predicate, @Nullable String language) {
+    var address =
+        lookup.emptyScopeAddress(element, predicate, language).flatMap(projection::address);
     if (address.isEmpty()) {
       return List.of();
     }

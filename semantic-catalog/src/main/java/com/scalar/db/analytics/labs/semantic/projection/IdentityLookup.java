@@ -7,6 +7,7 @@ package com.scalar.db.analytics.labs.semantic.projection;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.EdgeIdentity;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Finds the existing record a proposed record is the same as, by the identity rules of {@code
@@ -33,8 +34,13 @@ public interface IdentityLookup {
   /** The edge of a kind with the same ends, direction, and identifying part. */
   Optional<String> edge(ElementKind kind, EdgeIdentity identity);
 
-  /** The empty-scope Fact Address of an element and a predicate that is not free-description. */
-  Optional<String> emptyScopeAddress(String element, String predicate);
+  /**
+   * The empty-scope Fact Address of an element and a predicate that is not free-description.
+   *
+   * @param language the language of a language-qualified predicate's Fact Address; absent for other
+   *     predicates
+   */
+  Optional<String> emptyScopeAddress(String element, String predicate, @Nullable String language);
 
   /**
    * The closed-range Fact at a Fact Address with an identity key.

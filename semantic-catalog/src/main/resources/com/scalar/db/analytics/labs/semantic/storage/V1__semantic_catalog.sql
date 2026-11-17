@@ -82,6 +82,7 @@ CREATE TABLE semantic_catalog.fact_addresses (
     fact_address text NOT NULL,
     element text NOT NULL,
     predicate text NOT NULL,
+    language text,
     scope_description text,
     scope_entities jsonb NOT NULL,
     predicate_definition text,
@@ -89,10 +90,11 @@ CREATE TABLE semantic_catalog.fact_addresses (
     PRIMARY KEY (domain, fact_address)
 );
 
--- An empty-scope Fact Address of a closed-core or Generator-declared predicate is found by element
--- and predicate.
+-- An empty-scope Fact Address of a closed-core or Generator-declared predicate is found by element,
+-- predicate, and, for a language-qualified predicate, language. A missing language is indexed as the
+-- empty string, which no language tag is, so the Fact Addresses without one stay unique too.
 CREATE UNIQUE INDEX fact_addresses_empty_scope
-    ON semantic_catalog.fact_addresses (domain, element, predicate)
+    ON semantic_catalog.fact_addresses (domain, element, predicate, COALESCE(language, ''))
     WHERE scope_description IS NULL AND predicate_definition IS NULL;
 
 CREATE INDEX fact_addresses_element

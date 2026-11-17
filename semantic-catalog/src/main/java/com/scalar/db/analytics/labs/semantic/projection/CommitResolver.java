@@ -375,7 +375,7 @@ public final class CommitResolver {
     }
     var record =
         lookup
-            .emptyScopeAddress(field.get(), Vocabulary.EXISTENCE)
+            .emptyScopeAddress(field.get(), Vocabulary.EXISTENCE, null)
             .flatMap(address -> lookup.closedRangeFact(address, EXISTS_KEY))
             .flatMap(projection::fact)
             .map(Projection.FactSlice::record);
@@ -441,7 +441,8 @@ public final class CommitResolver {
           case LogRecord.Element element -> free(elementUrn(element.identity()), true);
           case LogRecord.FactAddress address ->
               free(
-                  Urns.factAddress(address.element().urnValue(), address.predicate()),
+                  Urns.factAddress(
+                      address.element().urnValue(), address.predicate(), address.language()),
                   address.foundByPredicate());
           case LogRecord.Fact fact -> {
             // Facts are never deleted and every one at an address is numbered, so the count of
@@ -502,6 +503,7 @@ public final class CommitResolver {
               urn,
               address.element(),
               address.predicate(),
+              address.language(),
               address.scope(),
               address.predicateDefinition());
       case LogRecord.Fact fact ->
@@ -533,7 +535,8 @@ public final class CommitResolver {
             case ElementIdentity.Unique ignored -> Optional.empty();
           };
       case LogRecord.FactAddress address ->
-          lookup.emptyScopeAddress(address.element().urnValue(), address.predicate());
+          lookup.emptyScopeAddress(
+              address.element().urnValue(), address.predicate(), address.language());
       case LogRecord.Fact fact ->
           lookup.closedRangeFact(
               fact.address().urnValue(), requireKey(fact.identityKey()).canonical());
@@ -576,7 +579,13 @@ public final class CommitResolver {
           };
       case LogRecord.FactAddress address ->
           address.foundByPredicate()
-              ? Optional.of("address " + address.element().urnValue() + " " + address.predicate())
+              ? Optional.of(
+                  "address "
+                      + address.element().urnValue()
+                      + " "
+                      + address.predicate()
+                      + " "
+                      + address.language())
               : Optional.empty();
       case LogRecord.Fact fact -> {
         var key = fact.identityKey();
@@ -618,6 +627,7 @@ public final class CommitResolver {
           new LogRecord.FactAddress(
               toRecord.apply(address.element()),
               address.predicate(),
+              address.language(),
               address.scope().mapRefs(toRecord),
               address.predicateDefinition());
       case LogRecord.Fact fact -> {

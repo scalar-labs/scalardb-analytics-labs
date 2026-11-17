@@ -12,6 +12,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The form of URNs: {@code urn:scalardb:analytics:<domain>:<record kind>:<identifier>} (see {@code
@@ -32,7 +33,8 @@ import java.util.stream.Collectors;
  *       ({@code
  *       identifier-correspondence:shop.public.orders.customer_id,shop.public.customers.id});
  *   <li>a Fact Address's identifier is its element's kind and identifier and its predicate ({@code
- *       fact-address:field:shop.public.orders.amount/meaning});
+ *       fact-address:field:shop.public.orders.amount/meaning}), followed by the language for a
+ *       language-qualified predicate ({@code fact-address:business-term:ec-sales/written-form;ja});
  *   <li>a Fact's identifier is its Fact Address's identifier and a sequence number ({@code
  *       fact:field:shop.public.orders.amount/meaning/1}).
  * </ul>
@@ -166,8 +168,17 @@ public final class Urns {
         .collect(Collectors.joining("+"));
   }
 
-  /** The URN of the Fact Address of an element and a predicate. */
+  /** The URN of the Fact Address of an element and a predicate that is not language-qualified. */
   public static String factAddress(String element, String predicate) {
+    return factAddress(element, predicate, null);
+  }
+
+  /**
+   * The URN of the Fact Address of an element, a predicate, and, for a language-qualified
+   * predicate, a language ({@code fact-address:business-term:ec-sales/written-form;ja}). A language
+   * tag holds only letters, digits, and hyphens, so it needs no encoding.
+   */
+  public static String factAddress(String element, String predicate, @Nullable String language) {
     var parsed = parse(element);
     return PREFIX
         + parsed.domain()
@@ -178,7 +189,8 @@ public final class Urns {
         + ":"
         + parsed.identifier()
         + "/"
-        + encode(predicate);
+        + encode(predicate)
+        + (language == null ? "" : ";" + Languages.requireTag(language));
   }
 
   /** The URN of the Fact with a sequence number at a Fact Address. */

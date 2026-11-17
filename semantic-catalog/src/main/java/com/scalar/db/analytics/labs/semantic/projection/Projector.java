@@ -10,6 +10,7 @@ import com.scalar.db.analytics.labs.semantic.model.Dependency;
 import com.scalar.db.analytics.labs.semantic.model.Document;
 import com.scalar.db.analytics.labs.semantic.model.ElementIdentity;
 import com.scalar.db.analytics.labs.semantic.model.IdentityKey;
+import com.scalar.db.analytics.labs.semantic.model.Languages;
 import com.scalar.db.analytics.labs.semantic.model.LogPosition;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord.Basis;
@@ -74,6 +75,7 @@ public final class Projector {
   private final Projection projection;
   private final String domain;
   private final boolean validating;
+  private final Languages languages;
   private long commit;
   private final Set<String> touchedFacts = new LinkedHashSet<>();
   private final Map<String, ElementIdentity> newElements = new LinkedHashMap<>();
@@ -82,20 +84,29 @@ public final class Projector {
   private final Set<String> selectionAffected = new LinkedHashSet<>();
   private final Map<String, String> resolutions = new LinkedHashMap<>();
 
-  private Projector(Projection projection, boolean validating) {
+  private Projector(Projection projection, boolean validating, Languages languages) {
     this.projection = projection;
     this.domain = projection.domain();
     this.validating = validating;
+    this.languages = languages;
   }
 
-  /** A projector for writing new commits, which rejects invalid records. */
-  public static Projector validating(Projection projection) {
-    return new Projector(projection, true);
+  /**
+   * A projector for writing new commits, which rejects invalid records.
+   *
+   * @param languages the domain's declared languages, which a new Fact Address of a
+   *     language-qualified predicate must carry one of
+   */
+  public static Projector validating(Projection projection, Languages languages) {
+    return new Projector(projection, true, languages);
   }
 
-  /** A projector for records already in the log. */
+  /**
+   * A projector for records already in the log, which were validated when they were written; a
+   * language declared then stays valid in the log however the declaration changes.
+   */
   public static Projector replaying(Projection projection) {
-    return new Projector(projection, false);
+    return new Projector(projection, false, Languages.DEFAULT);
   }
 
   /** Starts applying the records of a commit. */
@@ -297,6 +308,7 @@ public final class Projector {
       if (address.predicate().isBlank()) {
         throw reject("A Fact Address names a predicate");
       }
+      requireLanguage(address);
       requireIssued(urn, Urns.FACT_ADDRESS);
       if (projection.address(urn).isPresent()) {
         throw reject("Fact Address URN " + urn + " is already taken");
@@ -308,6 +320,7 @@ public final class Projector {
             urn,
             address.element().urnValue(),
             address.predicate(),
+            address.language(),
             scope.description(),
             scope.entities().stream().map(Ref::urnValue).toList(),
             address.predicateDefinition(),
@@ -997,6 +1010,38 @@ public final class Projector {
 
   private static CommitRejectedException missing(String what, Ref reference) {
     return reject("Missing reference: no " + what + " " + reference.urnValue());
+  }
+
+  /**
+   * Requires a language on exactly the Fact Addresses of language-qualified predicates, and one the
+   * domain declares (see {@code docs/semantic-catalog/languages.md}, "Names: one Fact per
+   * language").
+   */
+  private void requireLanguage(LogRecord.FactAddress address) {
+    var language = address.language();
+    if (!Vocabulary.languageQualified(address.predicate())) {
+      if (language != null) {
+        throw reject(
+            "Predicate "
+                + address.predicate()
+                + " is not language-qualified and takes no language");
+      }
+      return;
+    }
+    if (language == null) {
+      throw reject(
+          "Predicate "
+              + address.predicate()
+              + " is language-qualified and needs one of the declared languages "
+              + languages.declared());
+    }
+    if (!languages.declares(language)) {
+      throw reject(
+          "Language "
+              + language
+              + " is not among the domain's declared languages "
+              + languages.declared());
+    }
   }
 
   private static CommitRejectedException reject(String reason) {

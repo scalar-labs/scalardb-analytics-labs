@@ -1,7 +1,5 @@
 # Languages in the Semantic Catalog
 
-**[Planned]** This document describes accepted design that is not implemented yet.
-
 One Semantic Catalog serves a team whose members read different languages, such as a team that
 works mainly in Japanese with members who read only English. This document explains how language
 runs through the Semantic Catalog: what a domain declares, which text is knowledge in each language
@@ -15,13 +13,13 @@ two kinds:
 
 - **Names** of business terms are knowledge in each language. A term has its own name in each
   declared language, and each name is a Fact the deciding party confirms.
-- **Descriptions**, every other text, have one original, written in one language and recorded with
-  that language. Readers of other declared languages read a **translation**, which is derived for
-  display and is not knowledge.
+- **[Planned]** **Descriptions**, every other text, have one original, written in one language and
+  recorded with that language. Readers of other declared languages read a **translation**, which is
+  derived for display and is not knowledge.
 
-Generators and the policy evaluation model write in the primary language. A person reads in the
-language their principal prefers, and an agent session can switch it. A Query Agent reasons on
-originals.
+**[Planned]** Generators and the policy evaluation model write in the primary language. A person
+reads in the language their principal prefers, and an agent session can switch it. A Query Agent
+reasons on originals.
 
 The split rests on what the Semantic Catalog guarantees: that meaning is right. A translation says
 the same meaning in other words, so recording it as a Fact would make the deciding party judge
@@ -37,9 +35,9 @@ them primary. The declaration lives in the workspace configuration (see
 [`../application.md`](../application.md#workspace)) and decides:
 
 - for which languages a business term's name is missing knowledge;
-- into which languages text is translated;
-- which languages a read can ask for;
-- in which language generated text is written, the primary one.
+- **[Planned]** into which languages text is translated;
+- **[Planned]** which languages a read can ask for;
+- **[Planned]** in which language generated text is written, the primary one.
 
 A domain chooses as primary the language most of its readers, and its semantics owner, read
 directly, because they then read generated text as written and only the others read translations. A
@@ -71,22 +69,28 @@ questions; language separates values that hold at the same time for different re
 language as an attribute of the value instead would put names in different languages at one Fact
 Address and force selection, conflicts, and review to run per language inside it.
 
-Analytical semantics inference proposes a name for each declared language, and a confirmed business
-term that lacks a selected name in some declared language triggers it again for that name (see
-[`generators.md`](generators.md#meaning-inference)). It proposes the name the domain's documents and
-feedback use in that language, with the term's other names and the element it refers to as input;
-with nothing that states one, the name is an `inference`, judged like any other candidate. A name is
-never copied from a translation, because the word a team uses is the knowledge being recorded.
+Analytical semantics inference proposes a business term's names in the languages the domain's
+documents use them in (see [`generators.md`](generators.md#meaning-inference)). The model is told
+the declared languages and gives each name with the language it is written in; each name becomes a
+candidate at the Fact Address of its language, and a name in a language the domain does not
+declare is dropped and recorded as missing input. A name is never copied from a translation,
+because the word a team uses is the knowledge being recorded. **[Planned]** A confirmed business
+term that lacks a selected name in some declared language triggers the inference again for that
+name, with the term's other names and the element it refers to as input; with nothing that states
+one, the name is an `inference`, judged like any other candidate.
 
-Finding elements by written form matches the names of every declared language unless the call
-names one, because a reader may use a name from a language other than the one they read in. Each
-result says which language's name matched and carries the term's names in the other languages (see
-[`public-api.md`](public-api.md#finding-elements)).
+Finding elements by written form matches the names of every language, because a reader may use a
+name from a language other than the one they read in (see
+[`public-api.md`](public-api.md#finding-elements)). **[Planned]** A call can name one language to
+match only its names, and each result says which language's name matched and carries the term's
+names in the other languages.
 
 A name is one per language; synonyms within a language, such as 売上 and 売上高, are not
 represented.
 
 ## Descriptions: one original with its language
+
+**[Planned]** This section describes design that is not implemented yet.
 
 Every other text, a description such as a Field's meaning, a Dataset's row inclusion, a
 correspondence's business definition, an applicability scope's description, or a free-description
@@ -108,6 +112,8 @@ whether they read the original or a translation, and lets a read skip translatio
 language is the original's.
 
 ## Translations
+
+**[Planned]** This section describes design that is not implemented yet.
 
 A **translation** says an original's text in another declared language. A commit that records text,
 in a Fact's value, an evaluation's reason or review material, an answer's wording, or usage
@@ -131,6 +137,8 @@ original language, and the original is always returned with it.
 
 ## Reading in a language
 
+**[Planned]** This section describes design that is not implemented yet.
+
 A read takes, optionally, the language to read in, one of the domain's declared languages. Without
 one, the application supplies the language the using party's principal prefers, and without a
 preference the domain's primary language is used. Every text a read returns comes as its original
@@ -143,6 +151,8 @@ who reads another language reviews it as a translation, with the original beside
 [`construction.md`](construction.md#review)).
 
 ## Agents and sessions
+
+**[Planned]** This section describes design that is not implemented yet.
 
 The application keeps each principal's preferred language and fills it in on reads that name none.
 An agent working with a person, in review or in answering a question, follows the language the

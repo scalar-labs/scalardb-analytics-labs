@@ -196,6 +196,10 @@ class AnalyticalSemanticsInferenceTest extends StoreScenarioTest {
 
   /** The glossary's Measures and terms, plus one Measure whose aggregation does not run. */
   private static String glossaryAnswer(JsonNode input) {
+    return glossaryAnswerNode(input).toString();
+  }
+
+  private static ObjectNode glossaryAnswerNode(JsonNode input) {
     var document = input.path("documents").get(0).path("document").asText();
     var answer = JSON.objectNode();
     var measures = answer.putArray("measures");
@@ -246,6 +250,21 @@ class AnalyticalSemanticsInferenceTest extends StoreScenarioTest {
     term(terms, "business-term:ec-sales", "EC売上", "measure:ec-sales");
     term(terms, "business-term:sales", "売上", "measure:ec-sales");
     term(terms, "business-term:store-sales", "店舗売上", "measure:store-sales");
+    return answer;
+  }
+
+  /**
+   * The glossary's answer with the EC sales term named in Japanese, English, and French, a language
+   * the catalog does not record names in.
+   */
+  private static String multilingualAnswer(JsonNode input) {
+    var answer = glossaryAnswerNode(input);
+    var names =
+        ((ObjectNode) answer.path("businessTerms").get(0).path("values"))
+            .putArray(Vocabulary.WRITTEN_FORM);
+    names.add(value("EC売上", "the glossary", "", null).put("language", "ja"));
+    names.add(value("EC sales", "the glossary heading", "", null).put("language", "en"));
+    names.add(value("ventes en ligne", "a guess", "", null).put("language", "fr"));
     return answer.toString();
   }
 
@@ -257,7 +276,9 @@ class AnalyticalSemanticsInferenceTest extends StoreScenarioTest {
     var term = terms.addObject().put("ref", ref);
     term.putObject("existence").put("basis", "the glossary uses " + written);
     var values = term.putObject("values");
-    values.set(Vocabulary.WRITTEN_FORM, value(written, "the glossary", "", null));
+    values
+        .putArray(Vocabulary.WRITTEN_FORM)
+        .add(value(written, "the glossary", "", null).put("language", "ja"));
     values.set(Vocabulary.REFERENCED_ELEMENT, value(referenced, "the glossary", "", null));
   }
 
@@ -268,7 +289,9 @@ class AnalyticalSemanticsInferenceTest extends StoreScenarioTest {
   }
 
   private static Optional<FactRevision> first(Scenario s, String element, String predicate) {
-    var urn = Urns.fact(Urns.factAddress(element, predicate), 1);
+    // A business term's name is recorded in the language the answer gave, Japanese here.
+    var language = Vocabulary.languageQualified(predicate) ? "ja" : null;
+    var urn = Urns.fact(Urns.factAddress(element, predicate, language), 1);
     return s.latest(snapshot -> snapshot.latestRevision(urn));
   }
 
@@ -445,6 +468,39 @@ class AnalyticalSemanticsInferenceTest extends StoreScenarioTest {
     assertThat(s.lastCommit()).isEqualTo(commit + 1);
     assertThat(first(s, element(s, ElementKind.MEASURE, "ec-sales~2"), Vocabulary.EXISTENCE))
         .isEmpty();
+  }
+
+  @Test
+  void aTermsNamesAreRecordedPerDeclaredLanguageAndOthersAreDropped() {
+    var s = scenario();
+    var sql = data();
+    registerTables(s);
+    var policy = new AdoptingDataSemantics();
+    var model = model(AnalyticalSemanticsInferenceTest::multilingualAnswer);
+    drain(s, policy, sql, model);
+    store.registerDocument(s.domain, "owner", null, GLOSSARY);
+    var summary = drain(s, policy, sql, model);
+
+    var term = element(s, ElementKind.BUSINESS_TERM, "ec-sales");
+    for (var name : List.of(List.of("ja", "EC売上"), List.of("en", "EC sales"))) {
+      var urn = Urns.fact(Urns.factAddress(term, Vocabulary.WRITTEN_FORM, name.get(0)), 1);
+      Optional<FactRevision> recorded = s.latest(snapshot -> snapshot.latestRevision(urn));
+      assertThat(recorded)
+          .hasValueSatisfying(
+              revision -> assertThat(revision.value().asText()).isEqualTo(name.get(1)));
+    }
+    assertThat(generated(summary).missingInputs())
+        .anyMatch(missing -> missing.startsWith("written-form in fr of business-term:ec-sales"));
+
+    // The model was told which languages the catalog records names in.
+    var call =
+        model.calls.stream()
+            .filter(each -> each.generator().equals(ANALYTICAL))
+            .findFirst()
+            .orElseThrow();
+    assertThat(call.input().path("languages"))
+        .extracting(JsonNode::asText)
+        .containsExactly("ja", "en");
   }
 
   @Test

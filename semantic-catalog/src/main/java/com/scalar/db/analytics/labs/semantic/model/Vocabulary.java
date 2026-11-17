@@ -89,6 +89,11 @@ public final class Vocabulary {
   public static final String SOURCE_TIME_FIELD = "source-time-field";
   public static final String HIERARCHY = "hierarchy";
   public static final String CALENDAR_RULE = "calendar-rule";
+
+  /**
+   * A business term's name. It is {@linkplain #languageQualified language-qualified}: a term has
+   * one name per declared language, each at its own Fact Address.
+   */
   public static final String WRITTEN_FORM = "written-form";
 
   /** A business term's referenced element, whose value is the element's URN. */
@@ -96,6 +101,15 @@ public final class Vocabulary {
 
   public static final String SET_RELATIONSHIP = "set-relationship";
   public static final String BUSINESS_DEFINITION = "business-definition";
+
+  /**
+   * Whether a predicate holds one value per declared language, with the language as part of its
+   * Fact Address's identity (see {@code docs/semantic-catalog/languages.md}, "Names: one Fact per
+   * language"). Only a business term's written form does.
+   */
+  public static boolean languageQualified(String predicate) {
+    return predicate.equals(WRITTEN_FORM);
+  }
 
   /**
    * A concept relationship's multiplicity, whose value is {@code {"from": <bound>, "to": <bound>}},

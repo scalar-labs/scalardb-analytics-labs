@@ -576,9 +576,10 @@ instructions, named and hashed, so changing either makes a new version.
 product owns, such as one built on Pi or on a DeepSeek harness. The adapter boundary is what keeps
 that change away from the Generators.
 
+Analytical semantics inference records each business-term name in the language the model says it
+is written in, among the domain's declared languages (see [`languages.md`](languages.md)).
 **[Planned]** Every caller instructs the model to write in the domain's primary language and
-records that language on what it writes, and analytical semantics inference proposes a business
-term's name for each declared language (see [`languages.md`](languages.md)).
+records that language on what it writes.
 
 An unavailable model fails the build task, which can be resumed. So do a model that gives no answer
 in time and an answer not in the form the caller asked for: the policy evaluation model fails rather

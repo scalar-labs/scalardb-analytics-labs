@@ -223,6 +223,11 @@ final class Scenario {
       return add(new LogRecord.FactAddress(element, predicate, Scope.EMPTY, null));
     }
 
+    /** The empty-scope Fact Address of a language-qualified predicate in one language. */
+    Ref address(Ref element, String predicate, String language) {
+      return add(new LogRecord.FactAddress(element, predicate, language, Scope.EMPTY, null));
+    }
+
     /** A Fact whose value is the same as another's exactly when the values are equal. */
     Ref closedRangeFact(Ref address, String value) {
       return add(

@@ -211,6 +211,8 @@ public sealed interface Knowledge {
   /**
    * What a request receives for one Fact Address of the requested predicate on a target.
    *
+   * @param language the language of a language-qualified predicate's Fact Address, such as the
+   *     language of a business term's name; absent for other predicates
    * @param predicateDefinition the definition of a free-description predicate; absent otherwise
    * @param scopeDescription the applicability scope's description; absent for the empty scope
    * @param scopeEntities the URNs of the entities the applicability scope mentions
@@ -219,6 +221,7 @@ public sealed interface Knowledge {
       String factAddress,
       String element,
       String predicate,
+      @Nullable String language,
       @Nullable String predicateDefinition,
       @Nullable String scopeDescription,
       List<String> scopeEntities,
@@ -246,8 +249,19 @@ public sealed interface Knowledge {
     }
   }
 
-  /** A predicate requested of an element that has no Fact Address for it. */
-  record Missing(String element, String predicate) {}
+  /**
+   * A predicate requested of an element that has no Fact Address for it, or whose every Fact
+   * Address offers missing knowledge.
+   *
+   * @param language for a language-qualified predicate, the declared language it is missing in;
+   *     absent for other predicates
+   */
+  record Missing(String element, String predicate, @Nullable String language) {
+    /** A missing predicate that is not language-qualified. */
+    public Missing(String element, String predicate) {
+      this(element, predicate, null);
+    }
+  }
 
   /**
    * An element whose existence Fact is selected at the point.

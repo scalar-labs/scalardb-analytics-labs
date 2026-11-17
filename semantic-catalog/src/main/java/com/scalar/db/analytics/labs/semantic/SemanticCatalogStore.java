@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.scalar.db.analytics.labs.semantic.model.BuildTask;
 import com.scalar.db.analytics.labs.semantic.model.Document;
+import com.scalar.db.analytics.labs.semantic.model.Languages;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.LogRecordJson;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
@@ -62,10 +63,26 @@ import org.springframework.dao.DuplicateKeyException;
 public final class SemanticCatalogStore implements AutoCloseable {
   private final JdbcStore store;
   private final ExpressionValues expressions;
+  private final Function<String, Languages> languages;
 
-  private SemanticCatalogStore(JdbcStore store, SqlParser parser) {
+  private SemanticCatalogStore(
+      JdbcStore store, SqlParser parser, Function<String, Languages> languages) {
     this.store = store;
     this.expressions = new ExpressionValues(parser::parse);
+    this.languages = languages;
+  }
+
+  /**
+   * Opens the Semantic Catalog's own connection pool to the store and prepares the {@code
+   * semantic_catalog} schema, for domains that each declare only the {@linkplain Languages#DEFAULT
+   * default language}.
+   *
+   * @param parser the Query Engine's parser, with which expression values are parsed at acceptance
+   * @throws SemanticCatalogException when the store cannot be reached or is not PostgreSQL; the
+   *     message names the product found
+   */
+  public static SemanticCatalogStore open(StoreSettings settings, SqlParser parser) {
+    return open(settings, parser, domain -> Languages.DEFAULT);
   }
 
   /**
@@ -73,10 +90,13 @@ public final class SemanticCatalogStore implements AutoCloseable {
    * semantic_catalog} schema.
    *
    * @param parser the Query Engine's parser, with which expression values are parsed at acceptance
+   * @param languages the languages each domain declares, which come from the workspace
+   *     configuration (see {@code docs/semantic-catalog/languages.md}, "Declared languages")
    * @throws SemanticCatalogException when the store cannot be reached or is not PostgreSQL; the
    *     message names the product found
    */
-  public static SemanticCatalogStore open(StoreSettings settings, SqlParser parser) {
+  public static SemanticCatalogStore open(
+      StoreSettings settings, SqlParser parser, Function<String, Languages> languages) {
     Objects.requireNonNull(parser, "parser");
     return new SemanticCatalogStore(
         JdbcStore.open(
@@ -84,7 +104,12 @@ public final class SemanticCatalogStore implements AutoCloseable {
             settings.username(),
             settings.password(),
             settings.maximumPoolSize()),
-        parser);
+        parser,
+        languages);
+  }
+
+  private Languages languages(String domain) {
+    return languages.apply(domain);
   }
 
   /**
@@ -108,7 +133,7 @@ public final class SemanticCatalogStore implements AutoCloseable {
             transaction.insertDomain(domain);
             var initial = CommitRequest.builder("create-domain", "semantic-catalog");
             initial.add(LogRecord.PolicyVersion.DEFAULT);
-            commit(transaction, expressions, domain, initial.build(), true);
+            commit(transaction, expressions, domain, languages(domain), initial.build(), true);
             return Boolean.TRUE;
           });
     } catch (DuplicateKeyException e) {
@@ -139,7 +164,8 @@ public final class SemanticCatalogStore implements AutoCloseable {
    *     validation; nothing is written then
    */
   public CommitResult commit(String domain, CommitRequest request) {
-    return store.write(transaction -> commit(transaction, expressions, domain, request, true));
+    return store.write(
+        transaction -> commit(transaction, expressions, domain, languages(domain), request, true));
   }
 
   /**
@@ -147,7 +173,8 @@ public final class SemanticCatalogStore implements AutoCloseable {
    * they cause, for tests of the log that write judgements by hand.
    */
   CommitResult commitAsWritten(String domain, CommitRequest request) {
-    return store.write(transaction -> commit(transaction, expressions, domain, request, false));
+    return store.write(
+        transaction -> commit(transaction, expressions, domain, languages(domain), request, false));
   }
 
   /**
@@ -167,6 +194,7 @@ public final class SemanticCatalogStore implements AutoCloseable {
       StoreTransaction transaction,
       ExpressionValues expressions,
       String domain,
+      Languages languages,
       CommitRequest request,
       boolean transitions) {
     requireDomain(transaction, domain);
@@ -185,7 +213,7 @@ public final class SemanticCatalogStore implements AutoCloseable {
     }
     // Inserted first, so a concurrent writer of the same number collides as early as possible.
     transaction.insertCommit(domain, commit, request.operation(), request.author());
-    var projector = Projector.validating(projection);
+    var projector = Projector.validating(projection, languages);
     projector.begin(commit);
     resolution.records().forEach(projector::apply);
     var records = new ArrayList<>(resolution.records());
@@ -278,6 +306,7 @@ public final class SemanticCatalogStore implements AutoCloseable {
   static CommitResult commitResolved(
       StoreTransaction transaction,
       String domain,
+      Languages languages,
       String operation,
       String author,
       String triggerWithoutCommit,
@@ -287,7 +316,7 @@ public final class SemanticCatalogStore implements AutoCloseable {
     // does its work; removed again if the resolution records nothing.
     transaction.insertCommit(domain, commit, operation, author);
     var projection = new Projection(domain, transaction.projectionSource(domain));
-    var projector = Projector.validating(projection);
+    var projector = Projector.validating(projection, languages);
     projector.begin(commit);
     var outcome = resolution.resolve(projection, projector, commit);
     projector.end();
@@ -368,7 +397,8 @@ public final class SemanticCatalogStore implements AutoCloseable {
                       .objectNode()
                       .put("tableIdentifier", table)
                       .put("tableMetadataVersion", version)));
-          var written = commit(transaction, expressions, domain, request.build(), true);
+          var written =
+              commit(transaction, expressions, domain, languages(domain), request.build(), true);
           var resource = written.urn(resourceRef);
           recordVersion(transaction, domain, resource, observation);
           return new TableMetadataRegistration.Observed(
@@ -428,7 +458,8 @@ public final class SemanticCatalogStore implements AutoCloseable {
               new LogRecord.ObservationEvent(
                   observed,
                   JsonNodeFactory.instance.objectNode().put("document", document.name())));
-          var written = commit(transaction, expressions, domain, request.build(), true);
+          var written =
+              commit(transaction, expressions, domain, languages(domain), request.build(), true);
           return new DocumentRegistration.Observed(
               inputResource == null ? written.urn(resourceRef) : inputResource,
               written.urn(observed),
@@ -549,7 +580,8 @@ public final class SemanticCatalogStore implements AutoCloseable {
                             ? null
                             : answer.reviewPresentation().toString())));
           }
-          var result = commit(transaction, expressions, domain, request.build(), true);
+          var result =
+              commit(transaction, expressions, domain, languages(domain), request.build(), true);
           var commit = result.commit().orElseThrow();
           var outcomes = new ArrayList<Answers.Outcome>();
           var answered = new HashSet<String>();
@@ -768,7 +800,7 @@ public final class SemanticCatalogStore implements AutoCloseable {
                   resolution.reviewPresentation() == null
                       ? null
                       : resolution.reviewPresentation().toString()));
-          return commit(transaction, expressions, domain, request.build(), true);
+          return commit(transaction, expressions, domain, languages(domain), request.build(), true);
         });
   }
 
@@ -786,7 +818,9 @@ public final class SemanticCatalogStore implements AutoCloseable {
           requireDomain(transaction, domain);
           var request = CommitRequest.builder("set-policy-version", version.setBy());
           var ref = request.add(version);
-          var urn = commit(transaction, expressions, domain, request.build(), true).urn(ref);
+          var urn =
+              commit(transaction, expressions, domain, languages(domain), request.build(), true)
+                  .urn(ref);
           var task =
               BuildTasks.trigger(transaction, domain, new BuildTask.Work.PolicyReEvaluation(), urn);
           return new PolicyVersionSet(urn, task);
@@ -863,7 +897,8 @@ public final class SemanticCatalogStore implements AutoCloseable {
     if (!domainExists(domain)) {
       throw new SemanticCatalogException("Unknown domain " + domain);
     }
-    return new BuildRunner(store, expressions, domain, environment).run(mode, listener);
+    return new BuildRunner(store, expressions, domain, languages(domain), environment)
+        .run(mode, listener);
   }
 
   /**
@@ -964,7 +999,7 @@ public final class SemanticCatalogStore implements AutoCloseable {
                   yield at.commit();
                 }
               };
-          return reader.apply(new CatalogSnapshot(transaction, domain, commit));
+          return reader.apply(new CatalogSnapshot(transaction, domain, languages(domain), commit));
         });
   }
 

@@ -97,6 +97,10 @@ public sealed interface LogRecord {
    * @param element the element the statement is about
    * @param predicate the predicate, from the closed core, a Generator's declaration, or a
    *     free-description predicate
+   * @param language the language of a {@linkplain Vocabulary#languageQualified language-qualified}
+   *     predicate's value, a declared language of the domain, which is part of the Fact Address's
+   *     identity; absent for other predicates (see {@code docs/semantic-catalog/languages.md},
+   *     "Names: one Fact per language")
    * @param scope the applicability scope within which values are compared
    * @param predicateDefinition the natural-language definition of a free-description predicate,
    *     which has no identity of its own; absent for other predicates
@@ -105,19 +109,30 @@ public sealed interface LogRecord {
       @Nullable String urn,
       Ref element,
       String predicate,
+      @Nullable String language,
       Scope scope,
       @Nullable String predicateDefinition)
       implements Named {
-    /** A proposed Fact Address, for a commit request. */
+    /** A proposed Fact Address of a predicate that is not language-qualified. */
     public FactAddress(
         Ref element, String predicate, Scope scope, @Nullable String predicateDefinition) {
-      this(null, element, predicate, scope, predicateDefinition);
+      this(null, element, predicate, null, scope, predicateDefinition);
+    }
+
+    /** A proposed Fact Address, for a commit request. */
+    public FactAddress(
+        Ref element,
+        String predicate,
+        @Nullable String language,
+        Scope scope,
+        @Nullable String predicateDefinition) {
+      this(null, element, predicate, language, scope, predicateDefinition);
     }
 
     /**
-     * Whether the Fact Address is found by its element and predicate: its scope is empty and its
-     * predicate is not free-description. Any other Fact Address is the same as another only when
-     * the proposer points to it.
+     * Whether the Fact Address is found by its element, predicate, and language: its scope is empty
+     * and its predicate is not free-description. Any other Fact Address is the same as another only
+     * when the proposer points to it.
      */
     @JsonIgnore
     public boolean foundByPredicate() {

@@ -90,7 +90,9 @@ public final class BuildTaskRun {
     var domain = workspace.semanticCatalogDomain();
     try (var semanticCatalog =
         SemanticCatalogStore.open(
-            workspace.semanticCatalogSettings(), QueryEngineSqlParser.INSTANCE)) {
+            workspace.semanticCatalogSettings(),
+            QueryEngineSqlParser.INSTANCE,
+            ignored -> workspace.semanticCatalogLanguages())) {
       SemanticCatalogDomains.ensure(semanticCatalog, domain);
       return semanticCatalog.runBuildTasks(
           domain,

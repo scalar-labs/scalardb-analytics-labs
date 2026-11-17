@@ -196,7 +196,9 @@ public final class SemanticCommand implements Runnable {
         DocumentRegistration registration;
         try (var semanticCatalog =
             SemanticCatalogStore.open(
-                workspace.semanticCatalogSettings(), QueryEngineSqlParser.INSTANCE)) {
+                workspace.semanticCatalogSettings(),
+                QueryEngineSqlParser.INSTANCE,
+                ignored -> workspace.semanticCatalogLanguages())) {
           SemanticCatalogDomains.ensure(semanticCatalog, domain);
           registration =
               semanticCatalog.registerDocument(

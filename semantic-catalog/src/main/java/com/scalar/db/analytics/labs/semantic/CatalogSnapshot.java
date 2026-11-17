@@ -12,6 +12,7 @@ import com.scalar.db.analytics.labs.semantic.model.FactRevision;
 import com.scalar.db.analytics.labs.semantic.model.Hierarchy;
 import com.scalar.db.analytics.labs.semantic.model.Knowledge;
 import com.scalar.db.analytics.labs.semantic.model.KnowledgeRequest;
+import com.scalar.db.analytics.labs.semantic.model.Languages;
 import com.scalar.db.analytics.labs.semantic.model.LogPosition;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.LogRecordJson;
@@ -72,12 +73,18 @@ import org.jspecify.annotations.Nullable;
 public final class CatalogSnapshot {
   private final StoreTransaction transaction;
   private final String domain;
+  private final Languages languages;
   private final long commit;
   private @Nullable String policyInForce;
 
-  CatalogSnapshot(StoreTransaction transaction, String domain, long commit) {
+  /**
+   * @param languages the languages the domain declares, for which a language-qualified predicate
+   *     can be missing knowledge
+   */
+  CatalogSnapshot(StoreTransaction transaction, String domain, Languages languages, long commit) {
     this.transaction = transaction;
     this.domain = domain;
+    this.languages = languages;
     this.commit = commit;
   }
 
@@ -127,15 +134,15 @@ public final class CatalogSnapshot {
               .map(ElementRow::element)
               .toList();
       var named =
-          selectedValues(terms, Vocabulary.WRITTEN_FORM).entrySet().stream()
-              .filter(entry -> entry.getValue().isTextual())
-              .filter(entry -> entry.getValue().asText().equals(writtenForm))
-              .map(Map.Entry::getKey)
+          selectedValues(terms, Vocabulary.WRITTEN_FORM).stream()
+              .filter(selected -> selected.value().isTextual())
+              .filter(selected -> selected.value().asText().equals(writtenForm))
+              .map(Selected::element)
+              .distinct()
               .toList();
       var referenced = new HashSet<String>();
       selectedValues(named, Vocabulary.REFERENCED_ELEMENT)
-          .values()
-          .forEach(value -> referenced.add(value.asText()));
+          .forEach(selected -> referenced.add(selected.value().asText()));
       elements = elements.filter(row -> referenced.contains(row.element()));
     }
     return elements
@@ -143,14 +150,19 @@ public final class CatalogSnapshot {
         .toList();
   }
 
+  /** The value of the selected Fact at one Fact Address of an element. */
+  private record Selected(String element, JsonNode value) {}
+
   /**
-   * The value of the selected Fact at the empty-scope Fact Address of a predicate on each of some
-   * elements, for the predicates whose value names a record or a written form.
+   * The values of the selected Facts at the empty-scope Fact Addresses of a predicate on some
+   * elements, for the predicates whose value names a record or a written form. A language-qualified
+   * predicate has one such Fact Address per language, so an element can have several values, one
+   * per language.
    *
-   * @return the values by element, leaving out elements with no selected Fact for the predicate
+   * @return the values, leaving out elements with no selected Fact for the predicate
    */
-  private Map<String, JsonNode> selectedValues(Collection<String> elements, String predicate) {
-    var values = new LinkedHashMap<String, JsonNode>();
+  private List<Selected> selectedValues(Collection<String> elements, String predicate) {
+    var values = new ArrayList<Selected>();
     var addresses =
         transaction.addressesOf(domain, elements, commit).stream()
             .filter(address -> address.matchable() && address.predicate().equals(predicate))
@@ -160,7 +172,7 @@ public final class CatalogSnapshot {
     }
     var elementOf = new HashMap<String, String>();
     addresses.forEach(address -> elementOf.put(address.factAddress(), address.element()));
-    var selected = new HashMap<String, String>();
+    var selected = new LinkedHashMap<String, String>();
     for (var selection : transaction.selectionsAt(domain, elementOf.keySet(), commit)) {
       if (selection.selectedFact() != null) {
         selected.put(selection.selectedFact(), elementOf.get(selection.factAddress()));
@@ -172,7 +184,9 @@ public final class CatalogSnapshot {
         (fact, element) -> {
           var record = reader.records.get(fact);
           if (record != null) {
-            record.revision().ifPresent(revision -> values.put(element, revision.value()));
+            record
+                .revision()
+                .ifPresent(revision -> values.add(new Selected(element, revision.value())));
           }
         });
     return values;
@@ -229,7 +243,13 @@ public final class CatalogSnapshot {
           }
         }
         for (var name : asked) {
-          missing.add(new Knowledge.Missing(element.element(), name));
+          if (Vocabulary.languageQualified(name)) {
+            for (var language : languages.declared()) {
+              missing.add(new Knowledge.Missing(element.element(), name, language));
+            }
+          } else {
+            missing.add(new Knowledge.Missing(element.element(), name));
+          }
         }
       }
       for (var address : atAddresses) {
@@ -247,7 +267,8 @@ public final class CatalogSnapshot {
     for (var i = 0; i < requests.size(); i++) {
       var atAddresses = perRequest.get(i).stream().map(reader::atAddress).toList();
       // A requested predicate has missing knowledge when it has no Fact Address of its own, or
-      // every one it has offers missing knowledge.
+      // every one it has offers missing knowledge; a language-qualified one, per declared
+      // language.
       var missing =
           missingPerRequest.get(i).stream()
               .filter(
@@ -257,6 +278,7 @@ public final class CatalogSnapshot {
                               at ->
                                   at.element().equals(asked.element())
                                       && at.predicate().equals(asked.predicate())
+                                      && Objects.equals(at.language(), asked.language())
                                       && at.predicateDefinition() == null)
                           .allMatch(at -> at.knowledge() instanceof Knowledge.MissingKnowledge))
               .toList();
@@ -271,6 +293,7 @@ public final class CatalogSnapshot {
                             at.factAddress(),
                             at.element(),
                             at.predicate(),
+                            at.language(),
                             at.predicateDefinition(),
                             at.scopeDescription(),
                             at.scopeEntities(),
@@ -418,7 +441,12 @@ public final class CatalogSnapshot {
         }
       }
       for (var missingPredicate : answer.missing()) {
-        missing.add(missingPredicate.element() + " " + missingPredicate.predicate());
+        missing.add(
+            missingPredicate.element()
+                + " "
+                + missingPredicate.predicate()
+                + " "
+                + missingPredicate.language());
       }
     }
 
@@ -913,10 +941,10 @@ public final class CatalogSnapshot {
       }
       selectedValues(measures, Vocabulary.BASE_DATASET)
           .forEach(
-              (measure, value) -> {
-                if (value.isTextual()) {
-                  baseDatasets.put(measure, value.asText());
-                  more.add(value.asText());
+              selected -> {
+                if (selected.value().isTextual()) {
+                  baseDatasets.put(selected.element(), selected.value().asText());
+                  more.add(selected.value().asText());
                 }
               });
       load(more);
@@ -1253,6 +1281,7 @@ public final class CatalogSnapshot {
           address.factAddress(),
           address.element(),
           address.predicate(),
+          address.language(),
           address.predicateDefinition(),
           address.scopeDescription(),
           address.scopeEntities(),

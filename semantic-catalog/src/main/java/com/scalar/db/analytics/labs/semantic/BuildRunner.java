@@ -18,6 +18,7 @@ import com.scalar.db.analytics.labs.semantic.generator.StoreGenerator;
 import com.scalar.db.analytics.labs.semantic.llm.LanguageModelException;
 import com.scalar.db.analytics.labs.semantic.model.BuildRunInProgressException;
 import com.scalar.db.analytics.labs.semantic.model.BuildTask;
+import com.scalar.db.analytics.labs.semantic.model.Languages;
 import com.scalar.db.analytics.labs.semantic.model.LogPosition;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
@@ -57,16 +58,19 @@ final class BuildRunner {
   private final JdbcStore store;
   private final ExpressionValues expressions;
   private final String domain;
+  private final Languages languages;
   private final BuildRun.Environment environment;
 
   BuildRunner(
       JdbcStore store,
       ExpressionValues expressions,
       String domain,
+      Languages languages,
       BuildRun.Environment environment) {
     this.store = store;
     this.expressions = expressions;
     this.domain = domain;
+    this.languages = languages;
     this.environment = environment;
   }
 
@@ -193,7 +197,8 @@ final class BuildRunner {
                 return new Prepared(null, null);
               }
               var snapshot =
-                  new CatalogSnapshot(transaction, domain, transaction.lastCommit(domain));
+                  new CatalogSnapshot(
+                      transaction, domain, languages, transaction.lastCommit(domain));
               var basis = basis(projection, fact);
               return new Prepared(basis, snapshot.policyEvaluationSubject(fact).orElseThrow());
             });
@@ -220,6 +225,7 @@ final class BuildRunner {
                   SemanticCatalogStore.commitResolved(
                       transaction,
                       domain,
+                      languages,
                       "evaluate-policy",
                       TransitionResolver.INLINE_EVALUATION,
                       task.triggers().getLast(),
@@ -280,7 +286,8 @@ final class BuildRunner {
     var request = CommitRequest.builder("evaluate-policy", POLICY_EVALUATION_MODEL);
     request.add(evaluation);
     var result =
-        SemanticCatalogStore.commit(transaction, expressions, domain, request.build(), true);
+        SemanticCatalogStore.commit(
+            transaction, expressions, domain, languages, request.build(), true);
     return finish(
         transaction,
         task,
@@ -334,6 +341,7 @@ final class BuildRunner {
               SemanticCatalogStore.commitResolved(
                   transaction,
                   domain,
+                  languages,
                   "re-evaluate-policy",
                   TransitionResolver.INLINE_EVALUATION,
                   task.triggers().getLast(),
@@ -522,7 +530,7 @@ final class BuildRunner {
             .put("version", version)
             .put("buildTask", task.number());
     return new GeneratorContext(
-        transaction, domain, projection, task.triggers(), provenance, expressions);
+        transaction, domain, projection, task.triggers(), provenance, expressions, languages);
   }
 
   private BuildTask recordRun(
@@ -538,6 +546,7 @@ final class BuildRunner {
               transaction,
               expressions,
               domain,
+              languages,
               output.request("generator-run", generator.name()),
               true);
       commit = result.commit().isPresent() ? result.commit().getAsLong() : null;

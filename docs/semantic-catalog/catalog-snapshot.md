@@ -121,7 +121,7 @@ each Fact Address whether the applicability scope overlaps them, does not overla
 unrestricted, and the Query Agent decides which to use in light of the question's intent, asking the
 user when unsure.
 
-**[Planned]** The names of one business term in different languages are likewise separate Fact
+The names of one business term in different languages are likewise separate Fact
 Addresses (see [`languages.md`](languages.md#names-one-fact-per-language)): each language has its own selected
 name, and only two names in one language conflict.
 

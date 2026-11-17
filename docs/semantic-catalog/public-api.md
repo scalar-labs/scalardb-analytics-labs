@@ -233,9 +233,10 @@ Finding elements returns the URN and kind of elements whose existence Fact is se
 optionally filtered by element kind, by parent element (the Fields of a Dataset), or by the written
 form of a business term, which returns the elements its selected referenced-element Facts point to.
 It does not interpret question wording; finding elements from a question is the Query Agent's work.
-**[Planned]** A written form matches the names of every declared language unless the call names
-one, because a reader may use a name from a language other than the one they read in. Each result
-says which language's name matched and carries the term's names in the other languages.
+A written form matches the names of every language, because a reader may use a name from a
+language other than the one they read in. **[Planned]** A call can name one language to match only
+its names, and each result says which language's name matched and carries the term's names in the
+other languages.
 
 ### Requesting knowledge
 
@@ -259,8 +260,8 @@ undirected), each end as the URNs of all its elements in any order, without its 
    them, does not overlap, or is unrestricted. Non-overlapping Fact Addresses are still returned.
 
 Requesting all predicates of an element judges every closed-core predicate of its kind as above.
-**[Planned]** A language-qualified predicate is judged once per declared language, so a business
-term without an English name reports its written form as missing knowledge for `en`.
+A language-qualified predicate is judged once per declared language, so a business term without
+an English name reports its written form as missing knowledge for `en`.
 It also returns every other Fact Address of the element, such as those of free-description and
 Generator-declared predicates, which cannot be listed in advance.
 
