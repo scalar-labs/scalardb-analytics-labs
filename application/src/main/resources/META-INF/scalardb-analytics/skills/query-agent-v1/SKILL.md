@@ -170,9 +170,9 @@ scalardb-analytics semantic document register --workspace <dir> <file>
    Keep the returned `catalogSnapshot` and pass `--snapshot <urn>` to every later read for this
    question. While the catalog is small, the recursive read from the root returns every table unit
    (the Dataset, its Fields, the Measures based on it, and the correspondences it is an end of,
-   each with all its knowledge) and the domain-wide elements (concepts, business terms, Measures
-   with no base Dataset). As it grows, read a data source, namespace, or table with `--source`,
-   `--namespace`, and `--table` instead.
+   each with all its knowledge) and the domain-wide elements (concepts, business terms,
+   Dimensions, and Measures with no base Dataset). As it grows, read a data source, namespace, or
+   table with `--source`, `--namespace`, and `--table` instead.
 
 2. **Find the elements the question names.** For each business word, look it up as a business
    term, by its exact written form in any declared language:
@@ -182,6 +182,11 @@ scalardb-analytics semantic document register --workspace <dir> <file>
    ```
 
    `--kind` (such as `measure` or `dataset`) and `--parent <urn>` narrow the list.
+
+   When the question breaks a figure down by classes, such as age bands, regions, price ranges,
+   or member ranks, look for a classification Dimension the same way, or list the Dimensions with
+   `--kind dimension` and read their `meaning` and `dimension-kind`. Dimensions belong to the
+   domain root, not to a table.
 
 3. **Request the knowledge the SQL depends on.**
 
@@ -208,6 +213,9 @@ scalardb-analytics semantic document register --workspace <dir> <file>
      `default-time-granularity`, which names a calendar Dimension and one of its levels;
    - a calendar Dimension (`--kind dimension`; a Measure's granularity names it): `meaning`,
      `dimension-kind`, `hierarchy`, and `calendar-rule`;
+   - a classification Dimension (the classes a question breaks a figure down by): `meaning`,
+     `dimension-kind`, `hierarchy`, `classification-rule`, and `classified-field`, which names the
+     Field whose values get the classes;
    - a Dataset: `row-kind`, `row-inclusion`, `key`;
    - a Field you filter or group on: `meaning`, `value-kind`, `unit`, `null-meaning`;
    - a correspondence across sources: `set-relationship`, `business-definition`, and its matching
@@ -232,6 +240,10 @@ scalardb-analytics semantic document register --workspace <dir> <file>
      Add `--related-fact` when the feedback is about a Fact you read, such as one the user says is
      wrong. Feedback with related Facts creates build tasks, which the watching build runs.
 
+     A classification's `classified-field` is optional and never listed under `missing`: a
+     document does not always say which column a classification is of. Its absence alone is not
+     something to register.
+
 5. **Compose the SQL from confirmed knowledge only**: the `selected` entries, and candidates only
    when the user explicitly asked to proceed with them. Name tables and columns by the
    `physicalCatalogReference` of their Dataset and Fields. Apply a Measure's aggregation rule and
@@ -244,6 +256,16 @@ scalardb-analytics semantic document register --workspace <dir> <file>
    get the level's period key. A level without an expression is defined only by the
    `calendar-rule` wording; apply that wording, and say in your answer how you did. When no
    calendar applies, use calendar periods and say so.
+
+   To break a figure down by a classification, take its `hierarchy` level the question asks for. A
+   level's `expression` is written over the columns of the classified Field's table and gives each
+   row's class; use it as written, qualifying its columns by that table when the query joins
+   others, and group by it. A level without an expression, or a classification without a
+   `classified-field`, is defined only by the `classification-rule` wording, which may need other
+   tables or periods, such as an area master or last year's purchases; apply that wording, and say
+   in your answer how you did. The classes and their order are stated in the wording, not in a
+   list; keep the boundaries as worded. An axis that is a column's own values, such as a member
+   rank column, is not a classification: group by that Field as its `meaning` describes.
 
 6. **Run it.**
 
