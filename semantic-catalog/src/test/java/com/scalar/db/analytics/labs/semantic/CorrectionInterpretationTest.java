@@ -818,4 +818,124 @@ class CorrectionInterpretationTest extends StoreScenarioTest {
     assertThat(generated(summary).missingInputs())
         .anySatisfy(missing -> assertThat(missing).contains("its Dimension's kind does not stand"));
   }
+
+  // Classifications
+
+  /** A classification of the orders' status with a candidate kind and classified Field. */
+  private record Classification(Node node, Dependency.OnFact kind, Dependency.OnFact classified) {}
+
+  private static Classification classification(Scenario s, Scenario.Commit c, String slug) {
+    var node = node(c, ElementKind.DIMENSION, slug);
+    var kind =
+        candidate(
+            c,
+            c.address(node.element(), Vocabulary.DIMENSION_KIND),
+            JSON.textNode("classification"),
+            IdentityKey.choice("classification"),
+            node.existence());
+    var status = field(s, "orders", "status");
+    var classified =
+        candidate(
+            c,
+            c.address(node.element(), Vocabulary.CLASSIFIED_FIELD),
+            JSON.textNode(status),
+            IdentityKey.of(new IdentityKey.Part.Reference(Ref.urn(status))),
+            node.existence(),
+            kind);
+    return new Classification(node, kind, classified);
+  }
+
+  private static final String ORDER_STATE =
+      "CASE WHEN status IN ('shipped', 'delivered') THEN 'fulfilled' ELSE 'open' END";
+
+  @Test
+  void aCorrectedClassifiedFieldIsChosenAmongTheColumnsAndRestsOnItsExistence() {
+    var s = shopScenario();
+    var c = s.begin();
+    var states = classification(s, c, "order-state");
+    var written = s.write(c);
+    drain(s, new ScriptedModel());
+    var dimension = written.urn(states.node().element());
+
+    correct(s, written.urn(states.classified().fact()), Transition.CONFIRM, "It groups the amount");
+    var model =
+        new ScriptedModel()
+            .answering(CORRECTION, revising(JSON.textNode("shop.public.orders.amount")));
+    drain(s, model);
+
+    var input = inputOf(model).path("facts").get(0);
+    assertThat(input.path("value").asText()).isEqualTo("shop.public.orders.status");
+    assertThat(input.path("choices").path("tables").findValuesAsText("ref"))
+        .contains("shop.public.orders", "shop.public.shipments");
+    var revised = revised(s, dimension, Vocabulary.CLASSIFIED_FIELD);
+    assertThat(revised.value().asText()).isEqualTo(field(s, "orders", "amount"));
+    // It rests on the kind and on the Field it names now, not on the one it named before.
+    assertThat(factsDependedOn(revised))
+        .contains(written.urn(states.kind().fact()), existence(field(s, "orders", "amount")))
+        .doesNotContain(existence(field(s, "orders", "status")));
+  }
+
+  @Test
+  void aCorrectedClassificationLevelIsParsedOverItsClassifiedFieldsTable() {
+    var s = shopScenario();
+    var c = s.begin();
+    var states = classification(s, c, "order-state");
+    var hierarchy =
+        described(
+            c,
+            c.address(states.node().element(), Vocabulary.HIERARCHY),
+            levels("order state", ORDER_STATE),
+            states.node().existence(),
+            states.kind(),
+            states.classified());
+    var written = s.write(c);
+    drain(s, new ScriptedModel());
+    var dimension = written.urn(states.node().element());
+
+    // A level reading a column of another table is dropped without failing the task.
+    correct(s, written.urn(hierarchy.fact()), Transition.CONFIRM, "By the order a shipment has");
+    var summary =
+        drain(
+            s,
+            new ScriptedModel()
+                .answering(
+                    CORRECTION,
+                    revising(
+                        levels(
+                            "order state",
+                            "CASE WHEN order_id IS NULL THEN 'open' ELSE 'fulfilled' END"))));
+    assertThat(facts(s, dimension, Vocabulary.HIERARCHY, null)).hasSize(1);
+    assertThat(generated(summary).missingInputs())
+        .anySatisfy(missing -> assertThat(missing).contains("has no Field for"));
+  }
+
+  @Test
+  void aCorrectedClassificationLevelRestsOnTheClassifiedFieldAndTheFieldsItReads() {
+    var s = shopScenario();
+    var c = s.begin();
+    var states = classification(s, c, "order-state");
+    var hierarchy =
+        described(
+            c,
+            c.address(states.node().element(), Vocabulary.HIERARCHY),
+            levels("order state", ""),
+            states.node().existence(),
+            states.kind());
+    var written = s.write(c);
+    drain(s, new ScriptedModel());
+    var dimension = written.urn(states.node().element());
+
+    correct(s, written.urn(hierarchy.fact()), Transition.CONFIRM, "Shipped orders are fulfilled");
+    drain(
+        s, new ScriptedModel().answering(CORRECTION, revising(levels("order state", ORDER_STATE))));
+
+    var revised = revised(s, dimension, Vocabulary.HIERARCHY);
+    assertThat(revised.value().path("levels").get(0).path("expression").asText())
+        .isEqualTo(ORDER_STATE);
+    assertThat(factsDependedOn(revised))
+        .contains(
+            written.urn(states.kind().fact()),
+            written.urn(states.classified().fact()),
+            existence(field(s, "orders", "status")));
+  }
 }

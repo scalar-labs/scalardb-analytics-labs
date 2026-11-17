@@ -14,8 +14,8 @@ counts that are expected to be tuned from use of the product.
 The schema-interpretation and data-check Generators, row and Field meaning inference, concept
 inference, analytical semantics inference for Measures and business terms, identifier
 correspondence inference, and correction interpretation are implemented. Analytical semantics
-inference also proposes calendar Dimensions and a Measure's default time granularity. **[Planned]**
-Other kinds of Dimension are not defined yet.
+inference also proposes calendar and classification Dimensions and a Measure's default time
+granularity. **[Planned]** Other kinds of Dimension are not defined yet.
 
 Each interpretation or check rule is its own Generator. The rule that derives a key from a primary
 key and the rule that derives an identifier correspondence from a foreign key are separate
@@ -116,8 +116,8 @@ A deciding party's wording is never support for a new candidate. Correction inte
 correction through the usage feedback it registers: the feedback's observation is an input read and
 a dependency, but never a check reference. A candidate made from a correction is therefore never
 adopted inline, and the original correction can be traced and shown from its inputs read.
-Analytical semantics inference proposes new nodes: Measures, calendar Dimensions, and business
-terms. **[Planned]** No
+Analytical semantics inference proposes new nodes: Measures, calendar and classification
+Dimensions, and business terms. **[Planned]** No
 implemented Generator reads answers yet. An answer is an
 input read, referenced by its log record. It is neither a dependency, because it never changes, nor
 a check reference.
@@ -314,9 +314,9 @@ Row and Field meaning inference, with documents as input and `document` checks, 
 and identifier correspondence inference, with the trigger of documents, analytical semantics
 inference for Measures and business terms, triggered by documents and confirmed Field meaning and,
 for a missing name, by a confirmed business term, and correction interpretation are implemented.
-Analytical semantics inference proposes calendar Dimensions with Measures, and a Measure's default
-time granularity may refer to a calendar it proposes in the same run. **[Planned]** Other kinds of
-Dimension, and the trigger of feedback without related Facts, are not.
+Analytical semantics inference proposes calendar and classification Dimensions with Measures, and
+a Measure's default time granularity may refer to a calendar it proposes in the same run.
+**[Planned]** Other kinds of Dimension, and the trigger of feedback without related Facts, are not.
 
 Meaning inference uses a model for predicates that declarations and data cannot decide. For a target
 element it passes names and types, the table's source metadata with the source metadata schema it
@@ -374,8 +374,9 @@ interpretation read values through the same rule, so a corrected value is read e
 proposed one. A key, uniqueness, and a set relationship, which schema interpretation and data
 checks build without a model, have rules in the same form for correction interpretation. Each
 caller still decides which elements a value may name, since only it knows what its call passed or
-created. A calendar's kind, rule, and hierarchy and a Measure's default time granularity have
-rules too, since analytical semantics inference proposes them. Predicates no Generator proposes
+created. A calendar's kind, rule, and hierarchy, a classification's rule, classified Field, and
+hierarchy, and a Measure's default time granularity have rules too, since analytical semantics
+inference proposes them. Predicates no Generator proposes
 yet, such as those of a Dimension kind not defined yet, get their rule with the Generator that
 proposes them; until then no Fact of them exists to correct.
 
@@ -416,17 +417,26 @@ Addresses, or proposes a new one under a slug not in use; an answer whose new sl
 the task. A Measure's aggregation rule and filter conditions are parsed as acceptance parses them
 and run once through the application's SQL execution on a sample of the base table before anything
 is recorded. A new Measure is proposed only with a base Dataset and an aggregation rule that passed
-both; otherwise the build task records it as missing. A new Dimension is proposed only as a calendar
-with its rule's wording and a hierarchy; anything else is recorded as missing. A calendar level's
-expression is parsed as acceptance parses it and run on a sample of a column whose value kind is
-confirmed as time or date; one that fails is dropped and recorded as missing, and its level stays.
-With no such column, expressions are only parsed. A default time granularity names a calendar that
-stands or is proposed in the same answer, which is why calendars are recorded before Measures.
-Each candidate depends on the documents the call read and on the existence of its element; a
-Measure's expression values, reference time Field, and default time granularity, a calendar's rule
-and hierarchy, and a business term's referenced element also depend on what they refer to: a
-granularity and a calendar's rule and hierarchy on the calendar's kind. The existence and the aggregation
-rule of a new Measure therefore reach the deciding party together. A confirmed business term that
+both; otherwise the build task records it as missing. A new Dimension is proposed only with a
+defined kind, its rule's wording, and a hierarchy; anything else is recorded as missing. A calendar
+level's expression is parsed as acceptance parses it and run on a sample of a column whose value
+kind is confirmed as time or date; one that fails is dropped and recorded as missing, and its level
+stays. With no such column, expressions are only parsed. A classification names its classified
+Field as `<table ref>.<column>` of a confirmed column of the input. Its level expressions are
+parsed as acceptance parses them over that column's table and run grouped by the class they give
+on a sample of it; one that fails, or one given without a classified Field, is dropped and
+recorded as missing, and its level stays, as does a level whose expression only references a
+column, such as prefectures below regions. A classification whose every level expression only
+references a column groups by that column's own values and is not proposed; the model is also
+told not to propose one. A default time granularity names a calendar that stands or is proposed
+in the same answer, which is why calendars are recorded before Measures. Each candidate depends on
+the documents the call read and on the existence of its element; a Measure's expression values,
+reference time Field, and default time granularity, a Dimension's rule, classified Field, and
+hierarchy, and a business term's referenced element also depend on what they refer to: a
+granularity and a Dimension's rule, classified Field, and hierarchy on the Dimension's kind, a
+classified Field on its Field's existence, and a classification hierarchy with expressions on the
+classified Field. The existence and the aggregation rule of a new Measure therefore reach the
+deciding party together. A confirmed business term that
 has no selected name and no pending candidate in some declared language gets a separate call that
 asks only for those names and needs neither a document nor a confirmed Dataset (see
 [`languages.md`](languages.md#names-one-fact-per-language)).
@@ -451,8 +461,11 @@ Field is confirmed, or the confirmed Datasets. The revision depends on the exist
 names instead of what the corrected value named; a name not listed, such as a new Concept, creates
 nothing and is recorded as missing input. A default time granularity is shown with its calendar's
 name and chooses among the calendars that stand, with their levels; it depends on the chosen
-calendar's kind rather than its existence, as acceptance requires. A revised hierarchy's level
-expressions are parsed as acceptance parses them; a revision with one that would be refused is
+calendar's kind rather than its existence, as acceptance requires. A classified Field is shown as
+`<table ref>.<column>` and chooses among the confirmed columns of the confirmed Datasets. A revised
+hierarchy's level expressions are parsed as acceptance parses them in the form of the Dimension's
+kind; a classification's rest on its classified Field that stands and read only the confirmed
+Fields of its table. A revision with one that would be refused is
 not proposed and is recorded as missing input, unlike analytical semantics inference, which keeps
 the level without the expression, because a revision states the whole hierarchy the wording asks
 for. A revised aggregation rule or filter condition is parsed

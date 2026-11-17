@@ -1,18 +1,20 @@
 # How are expression values in the Semantic Catalog represented?
 
 Acceptance and analytical semantics inference implement this decision for a Measure's aggregation
-rule and filter conditions and for a calendar level's expression, which reads only the time value.
-**[Planned]** A Dimension's classification expression is not
-implemented yet.
+rule and filter conditions, for a classification level's expression, and for a calendar level's
+expression, which reads only the time value.
 
 ## Current answer
 
 The value expression of a Measure's aggregation rule, a Measure's filter conditions, and a
-Dimension's classification expression are SQL expression strings in the Query Engine's dialect,
-over the column names of the base Dataset's table. The string is the reference representation of
-the definition. At acceptance the Semantic Catalog parses it with the Query Engine's parser, records
-the Fields it references as premise dependencies, and refuses an expression that does not parse or
-names a missing column.
+classification level's expression are SQL expression strings in the Query Engine's dialect, over
+the column names of one table: the base Dataset's table for a Measure, and the classified Field's
+table for a classification. The string is the reference representation of the definition. At
+acceptance the Semantic Catalog parses it with the Query Engine's parser, records the Fields it
+references as premise dependencies, and refuses an expression that does not parse or names a
+missing column. Names the parser reads as columns but the Query Engine resolves to values of the
+session, such as `current_date`, are not columns unless the table has a column of that name, as the
+Query Engine binds them.
 
 A calendar level's expression is the same kind of string over one column, `time_value`, the time a
 Measure's reference time Field records. It is parsed the same way and refused when it reads any

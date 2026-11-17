@@ -410,9 +410,11 @@ public final class CorrectionInterpretation implements ModelGenerator {
           }
           columns(base.dataset(), choices.putArray("columns"));
         }
-        case ELEMENT -> {
-          var measures = choices.putArray("measures");
-          measures().forEach(measure -> measures.add(name(measure.element())));
+        case ELEMENT, FIELD -> {
+          if (names == PredicateValues.Names.ELEMENT) {
+            var measures = choices.putArray("measures");
+            measures().forEach(measure -> measures.add(name(measure.element())));
+          }
           var tables = choices.putArray("tables");
           for (var dataset : datasets()) {
             var node = tables.addObject().put("ref", name(dataset.element()));
@@ -518,6 +520,20 @@ public final class CorrectionInterpretation implements ModelGenerator {
       return found;
     }
 
+    /**
+     * The names of the columns with confirmed Fields of the table of a Field, when the Field is a
+     * confirmed column of a confirmed Dataset.
+     */
+    Optional<Set<String>> tableFields(String field) {
+      for (var dataset : datasets()) {
+        var columns = fields(dataset.element());
+        if (columns.values().stream().anyMatch(named -> named.element().equals(field))) {
+          return Optional.of(columns.keySet());
+        }
+      }
+      return Optional.empty();
+    }
+
     /** A standing value of an element at a predicate, a confirmed one first. */
     Optional<JsonNode> standing(String element, String predicate) {
       return standingFact(element, predicate)
@@ -528,7 +544,7 @@ public final class CorrectionInterpretation implements ModelGenerator {
               });
     }
 
-    private Optional<Fact> standingFact(String element, String predicate) {
+    Optional<Fact> standingFact(String element, String predicate) {
       var facts = context.factsAt(element, predicate);
       return facts.stream()
           .filter(found -> found.state() == FactState.CONFIRMED)
@@ -631,6 +647,13 @@ public final class CorrectionInterpretation implements ModelGenerator {
               switch (names) {
                 case CONCEPT -> concepts();
                 case DATASET -> datasets();
+                case FIELD -> {
+                  var all = new ArrayList<Named>();
+                  for (var dataset : datasets()) {
+                    all.addAll(fields(dataset.element()).values());
+                  }
+                  yield all;
+                }
                 default -> {
                   var all = new ArrayList<>(measures());
                   for (var dataset : datasets()) {
@@ -652,9 +675,12 @@ public final class CorrectionInterpretation implements ModelGenerator {
       }
     }
 
-    /** How a choice of a kind of names is written, a Field in full as a business term's choice. */
+    /**
+     * How a choice of a kind of names is written, a Field in full as a business term's or a
+     * classified Field's choice.
+     */
     private String elementName(PredicateValues.Names names, String element) {
-      if (names == PredicateValues.Names.ELEMENT
+      if ((names == PredicateValues.Names.ELEMENT || names == PredicateValues.Names.FIELD)
           && context.elementKind(element).orElse(null) == ElementKind.FIELD) {
         return context
             .column(element)
@@ -913,14 +939,22 @@ public final class CorrectionInterpretation implements ModelGenerator {
             case Valued.Value valid -> value = valid;
           }
           if (predicate.equals(Vocabulary.HIERARCHY)) {
-            // Acceptance parses a calendar level's expressions; one it would refuse is dropped
-            // here rather than failing the task.
-            try {
-              DimensionValues.checkLevels(
-                  DimensionValues.Hierarchy.of(value.value()), context.expressions());
-            } catch (IllegalArgumentException e) {
-              dropped(String.valueOf(e.getMessage()));
+            // Acceptance parses a level's expressions in the form of the Dimension's kind; one it
+            // would refuse is dropped here rather than failing the task.
+            var why = uncheckedLevels(DimensionValues.Hierarchy.of(value.value()), names, named);
+            if (why != null) {
+              dropped(why);
               return;
+            }
+            if (!named.isEmpty()) {
+              // The expressions rest on the classified Field that stands now; acceptance adds the
+              // Fields they reference, so the ones the corrected levels read stay behind.
+              for (var premise : premises()) {
+                if (premise.predicate().equals(Vocabulary.CLASSIFIED_FIELD)
+                    || context.elementKind(premise.element()).orElse(null) == ElementKind.FIELD) {
+                  replaced.add(premise.urn());
+                }
+              }
             }
           }
         }
@@ -1100,6 +1134,60 @@ public final class CorrectionInterpretation implements ModelGenerator {
     }
 
     /**
+     * Why a revised hierarchy's level expressions cannot be recorded, read in the form of the kind
+     * of the Dimension that stands: a calendar's may read only the time value; a classification's
+     * read the confirmed Fields of its standing classified Field's table and are more than a
+     * column. That classified-field Fact is added to {@code named}, which a classification's
+     * expressions rest on.
+     *
+     * @return null when they can be recorded
+     */
+    private @Nullable String uncheckedLevels(
+        DimensionValues.Hierarchy hierarchy, Elements names, List<Fact> named) {
+      if (!DimensionValues.expressed(hierarchy)) {
+        return null;
+      }
+      var kind =
+          premises().stream()
+              .filter(
+                  premise ->
+                      premise.element().equals(corrected.element())
+                          && premise.predicate().equals(Vocabulary.DIMENSION_KIND)
+                          && premise.value().isTextual())
+              .map(premise -> Vocabulary.DimensionKind.of(premise.value().asText()))
+              .flatMap(Optional::stream)
+              .findFirst();
+      if (kind.isEmpty()) {
+        // Dropped below, as any kind-specific value whose kind does not stand.
+        return null;
+      }
+      try {
+        switch (kind.get()) {
+          case CALENDAR -> DimensionValues.checkLevels(hierarchy, context.expressions());
+          case CLASSIFICATION -> {
+            var classified = names.standingFact(corrected.element(), Vocabulary.CLASSIFIED_FIELD);
+            var columns = classified.flatMap(fact -> names.tableFields(fact.value().asText()));
+            if (classified.isEmpty() || columns.isEmpty()) {
+              return "its level expressions need a classified Field that stands";
+            }
+            for (var column :
+                DimensionValues.classificationColumns(hierarchy, context.expressions())) {
+              if (!columns.get().contains(column) && !ExpressionValues.sessionValue(column)) {
+                return "it names column "
+                    + column
+                    + ", which the classified Field's table has no Field for";
+              }
+            }
+            named.add(classified.get());
+          }
+        }
+      } catch (IllegalArgumentException e) {
+        return String.valueOf(e.getMessage());
+      }
+      return null;
+    }
+
+    /**
      * Why an expression value cannot be recorded: it names a column its base Dataset has no
      * confirmed Field for, does not parse, or did not run through the Query Engine.
      */
@@ -1114,7 +1202,7 @@ public final class CorrectionInterpretation implements ModelGenerator {
       try {
         for (var expression : ExpressionValues.of(predicate, value)) {
           for (var column : context.expressions().columns(expression)) {
-            if (!fields.contains(column)) {
+            if (!fields.contains(column) && !ExpressionValues.sessionValue(column)) {
               return "it names column "
                   + column
                   + ", which "

@@ -151,8 +151,8 @@ pass the `inputResource` it printed to register a changed version of the same do
 text records nothing and prints `recorded: false`. A `--resource` that names no document fails with
 `DOCUMENT_REGISTRATION_FAILED`. A new observation creates a concept-inference and an
 identifier-correspondence-inference build task for the tables the document names and an
-analytical-semantics-inference build task, which proposes the Measures, calendars, and business
-terms the document defines; the next build tasks of meaning inference also read it.
+analytical-semantics-inference build task, which proposes the Measures, calendars,
+classifications, and business terms the document defines; the next build tasks of meaning inference also read it.
 
 The other `semantic` commands make one Semantic Catalog read or operation each (see
 [`../docs/semantic-catalog/public-api.md`](../docs/semantic-catalog/public-api.md)) and print one

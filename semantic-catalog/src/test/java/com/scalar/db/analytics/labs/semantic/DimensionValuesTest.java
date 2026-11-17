@@ -172,8 +172,210 @@ class DimensionValuesTest extends StoreScenarioTest {
     var c = s.begin();
     var dimension = c.add(dimension("age-band"));
     c.closedRangeCandidate(c.address(dimension, Vocabulary.EXISTENCE), "exists");
-    c.closedRangeCandidate(c.address(dimension, Vocabulary.DIMENSION_KIND), "classification");
-    assertRejected(s, c, "No kind of Dimension is classification");
+    c.closedRangeCandidate(c.address(dimension, Vocabulary.DIMENSION_KIND), "attribute");
+    assertRejected(s, c, "No kind of Dimension is attribute");
+  }
+
+  // Classifications
+
+  private static final String AGE_BANDS =
+      "Members are grouped by their age today into ten-year bands, from under 20 to 60 and over.";
+
+  private static final String AGE_BAND =
+      "CASE WHEN date_diff('year', birth_date, current_date) < 20 THEN 'under 20'"
+          + " WHEN date_diff('year', birth_date, current_date) >= 60 THEN '60 and over'"
+          + " ELSE CAST(date_diff('year', birth_date, current_date) // 10 * 10 AS VARCHAR) || 's'"
+          + " END";
+
+  /**
+   * A classification with its kind written, over a members Dataset whose birth date and prefecture
+   * are Fields, and an orders Dataset with an amount Field.
+   */
+  private record Classification(
+      Scenario s, String dimension, String kind, String birthDate, String amount) {}
+
+  private Classification classification() {
+    var s = scenario();
+    var c = s.begin();
+    var members = c.dataset("crm.public.members");
+    var birthDate = c.field(members, "crm.public.members.birth_date");
+    c.field(members, "crm.public.members.prefecture");
+    var orders = c.dataset("shop.public.orders");
+    var amount = c.field(orders, "shop.public.orders.amount");
+    var dimension = c.add(dimension("age-band"));
+    c.closedRangeCandidate(c.address(dimension, Vocabulary.EXISTENCE), "exists");
+    var kind =
+        c.closedRangeCandidate(c.address(dimension, Vocabulary.DIMENSION_KIND), "classification");
+    var written = s.write(c);
+    return new Classification(
+        s, written.urn(dimension), written.urn(kind), written.urn(birthDate), written.urn(amount));
+  }
+
+  private static String existenceOf(String element) {
+    return com.scalar.db.analytics.labs.semantic.model.Urns.fact(
+        com.scalar.db.analytics.labs.semantic.model.Urns.factAddress(element, Vocabulary.EXISTENCE),
+        1);
+  }
+
+  private static List<String> factDependencies(Scenario s, String fact) {
+    return s.revision(fact).dependencies().stream()
+        .filter(Dependency.OnFact.class::isInstance)
+        .map(dependency -> ((Dependency.OnFact) dependency).fact().urnValue())
+        .toList();
+  }
+
+  /** The classification's classified Field accepted as the birth date, written. */
+  private static String classifiedBirthDate(Classification sample) {
+    var s = sample.s();
+    var c = s.begin();
+    var field =
+        fact(
+            c,
+            sample.dimension(),
+            Vocabulary.CLASSIFIED_FIELD,
+            JSON.textNode(sample.birthDate()),
+            s.on(sample.kind()));
+    return s.write(c).urn(field);
+  }
+
+  @Test
+  void aClassificationsValuesRestOnItsKindAndTheFieldsTheyRead() {
+    var sample = classification();
+    var s = sample.s();
+    var classified = classifiedBirthDate(sample);
+    var c = s.begin();
+    var rule =
+        fact(
+            c,
+            sample.dimension(),
+            Vocabulary.CLASSIFICATION_RULE,
+            JSON.textNode(AGE_BANDS),
+            s.on(sample.kind()));
+    var hierarchy =
+        fact(
+            c,
+            sample.dimension(),
+            Vocabulary.HIERARCHY,
+            levels("age band", AGE_BAND, "age", "date_diff('year', birth_date, current_date)"),
+            s.on(sample.kind()),
+            s.on(classified));
+    var written = s.write(c);
+
+    assertThat(s.revision(written.urn(rule)).value().asText()).isEqualTo(AGE_BANDS);
+    // The classified Field and the Fields the level expressions read become premise dependencies,
+    // so a column that disappears cascades to the classification.
+    assertThat(factDependencies(s, classified))
+        .containsExactlyInAnyOrder(sample.kind(), existenceOf(sample.birthDate()));
+    assertThat(factDependencies(s, written.urn(hierarchy)))
+        .containsExactlyInAnyOrder(sample.kind(), classified, existenceOf(sample.birthDate()));
+  }
+
+  @Test
+  void aClassificationsLevelsWithoutExpressionsNeedNoClassifiedField() {
+    var sample = classification();
+    var s = sample.s();
+    var c = s.begin();
+    var hierarchy =
+        fact(
+            c,
+            sample.dimension(),
+            Vocabulary.HIERARCHY,
+            levels("sales area", ""),
+            s.on(sample.kind()));
+    var written = s.write(c);
+
+    assertThat(factDependencies(s, written.urn(hierarchy))).containsExactly(sample.kind());
+  }
+
+  @Test
+  void aClassificationsLevelExpressionOutsideItsTableOrFormIsNotAccepted() {
+    var cases =
+        java.util.Map.of(
+            "amount * 2", "has no Field for",
+            "date_diff('year', birth_date,", "does not parse",
+            "(SELECT 1)", "subquery",
+            "prefecture", "only references a column");
+    cases.forEach(
+        (expression, reason) -> {
+          var sample = classification();
+          var s = sample.s();
+          var classified = classifiedBirthDate(sample);
+          var c = s.begin();
+          fact(
+              c,
+              sample.dimension(),
+              Vocabulary.HIERARCHY,
+              levels("band", expression),
+              s.on(sample.kind()),
+              s.on(classified));
+          assertRejected(s, c, reason);
+        });
+  }
+
+  @Test
+  void aClassificationsLevelExpressionWithoutItsClassifiedFieldIsNotAccepted() {
+    var sample = classification();
+    var c = sample.s().begin();
+    fact(
+        c,
+        sample.dimension(),
+        Vocabulary.HIERARCHY,
+        levels("age band", AGE_BAND),
+        sample.s().on(sample.kind()));
+    assertRejected(sample.s(), c, "exactly one classified Field");
+  }
+
+  @Test
+  void aClassificationsValuesOutsideTheirFormsAreNotAccepted() {
+    var sample = classification();
+    var c = sample.s().begin();
+    fact(
+        c,
+        sample.dimension(),
+        Vocabulary.CLASSIFICATION_RULE,
+        JSON.textNode(" "),
+        sample.s().on(sample.kind()));
+    assertRejected(sample.s(), c, "wording");
+
+    sample = classification();
+    c = sample.s().begin();
+    fact(c, sample.dimension(), Vocabulary.CLASSIFICATION_RULE, JSON.textNode(AGE_BANDS));
+    assertRejected(sample.s(), c, "exactly one kind");
+
+    // A classified Field names a Field, not another element.
+    sample = classification();
+    c = sample.s().begin();
+    fact(
+        c,
+        sample.dimension(),
+        Vocabulary.CLASSIFIED_FIELD,
+        JSON.textNode(sample.dimension()),
+        sample.s().on(sample.kind()));
+    assertRejected(sample.s(), c, "is no Field");
+
+    // A classification has no calendar rule.
+    sample = classification();
+    c = sample.s().begin();
+    fact(
+        c,
+        sample.dimension(),
+        Vocabulary.CALENDAR_RULE,
+        JSON.textNode(CLOSING_ON_THE_20TH),
+        sample.s().on(sample.kind()));
+    assertRejected(sample.s(), c, "has no predicate calendar-rule");
+  }
+
+  @Test
+  void aClassificationsMissingKnowledgeIsItsRuleBesidesThatOfEveryDimension() {
+    var sample = classification();
+    var s = sample.s();
+    var confirm = s.begin();
+    confirm.confirmByMachine(Ref.urn(sample.kind()));
+    s.write(confirm);
+
+    // The classified Field is written only when an input states it, so it is not reported.
+    assertThat(missing(s, sample.dimension()))
+        .containsExactly(Vocabulary.MEANING, Vocabulary.HIERARCHY, Vocabulary.CLASSIFICATION_RULE);
   }
 
   @Test

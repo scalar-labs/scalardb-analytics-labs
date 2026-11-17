@@ -90,11 +90,14 @@ public final class Vocabulary {
   /** A Dimension's kind, one of {@link DimensionKind}, which decides its other predicates. */
   public static final String DIMENSION_KIND = "dimension-kind";
 
+  /** A classification Dimension's rule: the wording that defines how it assigns classes. */
+  public static final String CLASSIFICATION_RULE = "classification-rule";
+
   /**
-   * A Dimension's source Field and classification expression, a predicate of the classification
-   * kind, which is not defined yet.
+   * A classification Dimension's classified Field: the URN of the Field whose values its classes
+   * are assigned to. Optional, because a document does not always say what a classification is of.
    */
-  public static final String CLASSIFICATION = "classification";
+  public static final String CLASSIFIED_FIELD = "classified-field";
 
   /** A Dimension's source time Field, a predicate of a kind that is not defined yet. */
   public static final String SOURCE_TIME_FIELD = "source-time-field";
@@ -154,7 +157,7 @@ public final class Vocabulary {
    * The closed-core predicates of an element kind, existence first: what construction aims at for
    * every element of the kind, so a request for all predicates reports each one without a Fact
    * Address as missing knowledge. For a Dimension these are the predicates of every Dimension;
-   * {@link #closedCore(DimensionKind)} adds those of its kind.
+   * {@link #closedCore(DimensionKind)} adds the core predicates of its kind.
    */
   public static List<String> closedCore(ElementKind kind) {
     return switch (kind) {
@@ -200,7 +203,7 @@ public final class Vocabulary {
    */
   public static List<String> closedCore(DimensionKind kind) {
     var predicates = new ArrayList<>(closedCore(ElementKind.DIMENSION));
-    predicates.addAll(kind.predicates());
+    predicates.addAll(kind.core());
     return List.copyOf(predicates);
   }
 
@@ -216,14 +219,22 @@ public final class Vocabulary {
      * A calendar computed from a time value by a rule, such as a fiscal year starting in April. It
      * is bound to no time Field: a Measure's reference time Field decides which time it divides.
      */
-    CALENDAR("calendar", List.of(CALENDAR_RULE));
+    CALENDAR("calendar", List.of(CALENDAR_RULE), List.of()),
+
+    /**
+     * A classification that assigns classes to the values of one table, such as age bands from a
+     * birth date or regions from a prefecture, defined by the wording of its rule.
+     */
+    CLASSIFICATION("classification", List.of(CLASSIFICATION_RULE), List.of(CLASSIFIED_FIELD));
 
     private final String value;
-    private final List<String> predicates;
+    private final List<String> core;
+    private final List<String> optional;
 
-    DimensionKind(String value, List<String> predicates) {
+    DimensionKind(String value, List<String> core, List<String> optional) {
       this.value = value;
-      this.predicates = predicates;
+      this.core = core;
+      this.optional = optional;
     }
 
     /** The value of a dimension-kind Fact that states this kind. */
@@ -233,7 +244,17 @@ public final class Vocabulary {
 
     /** The predicates of a Dimension of this kind besides those of every Dimension. */
     public List<String> predicates() {
-      return predicates;
+      var predicates = new ArrayList<>(core);
+      predicates.addAll(optional);
+      return List.copyOf(predicates);
+    }
+
+    /**
+     * The predicates of this kind that belong to its closed core, which missing knowledge reports;
+     * the others are written only when an input states them.
+     */
+    public List<String> core() {
+      return core;
     }
 
     /** The kind a dimension-kind value states, if it states one. */

@@ -47,7 +47,7 @@ the field is aggregated.
 | Field | Physical Catalog reference, meaning, value kind, unit, meaning of null, represented concept, time meaning and time zone |
 | Concept | Meaning |
 | Measure | Meaning, base Dataset, aggregation rule, filter conditions, reference time Field, default time granularity |
-| Dimension | Meaning, Dimension kind, hierarchy, and the predicates of its kind: a calendar's calendar rule |
+| Dimension | Meaning, Dimension kind, hierarchy, and the predicates of its kind: a calendar's calendar rule; a classification's classification rule and classified Field |
 | Business term | Written form in each declared language (see [`languages.md`](languages.md)), referenced element |
 
 | Edge element | Ends and direction | Identifying part | Predicates |
@@ -68,7 +68,7 @@ Each predicate is named in records by an identifier:
 | Field | `physical-catalog-reference`, `meaning`, `value-kind`, `unit`, `null-meaning`, `represented-concept`, `time-meaning` (with the time zone) |
 | Concept | `meaning` |
 | Measure | `meaning`, `base-dataset`, `aggregation-rule`, `filter`, `reference-time-field`, `default-time-granularity` |
-| Dimension | `meaning`, `dimension-kind`, `hierarchy`, and those of its kind: `calendar-rule` for a calendar |
+| Dimension | `meaning`, `dimension-kind`, `hierarchy`, and those of its kind: `calendar-rule` for a calendar; `classification-rule` and `classified-field` for a classification |
 | Business term | `written-form`, `referenced-element` |
 | Identifier correspondence | `set-relationship`, `business-definition` |
 | Concept relationship | `multiplicity` |
@@ -77,8 +77,10 @@ A uniqueness predicate names its Field set, so it cannot be listed before a Fiel
 Every other identifier above is a **closed-core predicate** of its kind: a request for all
 predicates of an element reports each one without a Fact Address as missing knowledge (see
 [`public-api.md`](public-api.md#requesting-knowledge)). A Dimension's closed core is that of every
-Dimension and, once a dimension-kind Fact is selected, the predicates of the kind it states, so a
-calendar never reports a predicate of another kind as missing.
+Dimension and, once a dimension-kind Fact is selected, the core predicates of the kind it states, so
+a calendar never reports a predicate of another kind as missing. A classification's classified
+Field is not in its closed core, because a document does not always say which column a
+classification is of, such as one kept in a master table.
 
 There is no separate join element. Joining two Datasets correctly rests on knowing that values on
 both sides denote the same object, which is what an identifier correspondence states, from an order
@@ -141,8 +143,8 @@ Some values deserve note:
   hierarchy.
 - A Dimension's **kind** decides its other predicates and the forms of their values, and its
   hierarchy and the predicates of its kind are accepted depending on its dimension-kind Fact. The
-  only kind defined is `calendar`: a calendar computed from a time value by a rule, with no
-  calendar table joined. A calendar is bound to no time Field; a Measure's reference time Field
+  kinds defined are `calendar` and `classification`. A calendar is computed from a time value by a
+  rule, with no calendar table joined. A calendar is bound to no time Field; a Measure's reference time Field
   decides which time it divides, and that Field's time meaning gives the time zone, so one fiscal
   calendar serves every Measure. Its **calendar rule** is the wording that defines it, in text, as
   a document states it, because real calendars do not fit one closed structure: months closing on
@@ -155,24 +157,44 @@ Some values deserve note:
   the 20th. It is written only when the rule fits one such expression; a rule that needs other
   data, such as a holiday table, has levels without expressions, and a Query Agent reads the
   rule's wording. One calendar holds all its levels, because they follow from one rule.
-  **[Planned]** Other kinds, such as derived
-  classifications (age bands, regional groupings) with their `classification` (source Field and
-  classification expression), attribute Dimensions, calendars joined from a calendar table, and
-  Dimensions over several tables, are not defined yet. `source-time-field` is reserved for a kind
-  that needs it; a calendar does not.
+- A **classification** assigns classes to values by a rule, such as age bands from a birth date,
+  price ranges, regions grouping prefectures, status codes grouped into states, or member ranks by
+  last year's purchases. Its **classification rule** is the wording that defines it, in text, as a
+  document states it, because many classifications need more than one table's values: an area
+  master table kept elsewhere, purchases over a period, or whether a purchase is a member's first.
+  Its **classified Field** is the URN of the Field whose values get the classes, such as the birth
+  date for age bands or the member ID for member ranks; it is written only when a document tells
+  which column it is, and its acceptance depends on that Field's existence. A classification is
+  bound to its Field, unlike a calendar, because codes and ranks belong to one column, and a Query
+  Agent need not guess which column to classify. Its **hierarchy** has the calendar's form, its
+  levels coarse to fine, such as a block above a region. A level's optional `expression` is an
+  expression value over the columns of the classified Field's table that gives the level's class,
+  such as `CASE WHEN price < 1000 THEN 'under 1,000' ELSE '1,000 and over' END`. It is written
+  only when the classified Field is and the rule fits one such expression; its acceptance then
+  depends on the classified-field Fact, which names the table it is read over. A classification
+  that needs other tables has levels without expressions, and a Query Agent reads the rule's
+  wording. Its classes and their order are not structured: the wording states them, and a fixed
+  structure would refuse the ways documents word their boundaries.
+- An axis that is a Field's own values is not a classification: an expression that only
+  references a column is refused, because grouping by a member rank column is that column's
+  meaning.
+- **[Planned]** Other kinds, such as attribute Dimensions, calendars joined from a calendar table,
+  and Dimensions over several tables, are not defined yet, and a classification's expression
+  cannot read another table. `source-time-field` is reserved for a kind that needs it; a calendar
+  does not.
 - **Expression values**, the value expression of an aggregation rule, a Measure's filter
-  conditions, and a Dimension's classification expression, are SQL expression strings in the Query
-  Engine's dialect over the column names of the base Dataset's table, such as
-  `status <> 'cancelled'`. The string is the reference representation of the definition: the
+  conditions, and a classification level's expression, are SQL expression strings in the Query
+  Engine's dialect over the column names of one table, the base Dataset's table for a Measure and
+  the classified Field's table for a classification, such as `status <> 'cancelled'`. The string is the reference representation of the definition: the
   product's Query Engine runs it as written, and running it on another engine means translating
   it. At acceptance the Semantic Catalog parses it with the Query Engine's parser and adds the
   Fields it references as premise dependencies, so a column that disappears cascades to the
   definitions that use it. An expression that does not parse or names a missing column is not
   accepted, and neither is text that is more than one expression over that table, such as one
-  with a subquery, another table, or a further clause. **[Planned]** A Dimension's classification
-  expression is not parsed yet, because the classification kind is not defined. A calendar level's
-  expression is an expression value over the single column `time_value` instead: it is parsed the
-  same way, refused when it reads any other column, and adds no premise dependency, because its
+  with a subquery, another table, or a further clause. Names the Query Engine reads as values of
+  the session, such as `current_date`, are columns only when the table has one of that name. A
+  calendar level's expression is an expression value over the single column `time_value` instead:
+  it is parsed the same way, refused when it reads any other column, and adds no premise dependency, because its
   column is the time a Measure's reference time Field records, not a Field of its own.
   [`../design/semantic-catalog-expression-values.md`](../design/semantic-catalog-expression-values.md)
   records why.
@@ -198,8 +220,8 @@ Some values deserve note:
   multiplicity records the rule.
 
 Dimensions are extended by kind. A kind is added when an axis needs knowledge no other element
-holds, as a calendar's rule does. An axis that is a Field's own value is already that Field's
-meaning, and aggregation per business object rests on keys and identifier correspondences, so a
+holds, as a calendar's rule and a classification's rule do. An axis that is a Field's own value is
+already that Field's meaning, and aggregation per business object rests on keys and identifier correspondences, so a
 kind for such axes must say what it adds beyond them: otherwise one meaning would be split across
 two Fact Addresses that the deciding party would judge twice.
 

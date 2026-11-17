@@ -12,6 +12,7 @@ import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.DimensionKind;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 
@@ -25,6 +26,11 @@ import java.util.Optional;
  * SQL expression that computes the level's period from a time value, written only when the rule
  * fits one expression. A Measure's default time granularity refers to a calendar by URN, which is
  * what cascade follows, and names the level in words.
+ *
+ * <p>A classification's rule is likewise the wording that defines it, because many classifications,
+ * such as ranks by last year's purchases or areas kept in a master table, need more than one
+ * table's values. It may name the Field whose values it classifies, and its levels may each have an
+ * expression over the columns of that Field's table, written only when the rule fits one.
  */
 public final class DimensionValues {
   private static final JsonNodeFactory JSON = JsonNodeFactory.instance;
@@ -43,9 +49,33 @@ public final class DimensionValues {
    * @throws IllegalArgumentException when the value is not a non-empty text
    */
   public static String calendarRule(JsonNode value) {
+    return wording(value, "A calendar rule");
+  }
+
+  /**
+   * Reads a classification rule's value: the wording that defines the classification.
+   *
+   * @throws IllegalArgumentException when the value is not a non-empty text
+   */
+  public static String classificationRule(JsonNode value) {
+    return wording(value, "A classification rule");
+  }
+
+  private static String wording(JsonNode value, String what) {
     if (!value.isTextual() || value.asText().isBlank()) {
-      throw new IllegalArgumentException(
-          "A calendar rule is the non-empty wording that defines it");
+      throw new IllegalArgumentException(what + " is the non-empty wording that defines it");
+    }
+    return value.asText();
+  }
+
+  /**
+   * Reads a classified Field's value: the URN of a Field.
+   *
+   * @throws IllegalArgumentException when the value is not a non-empty text
+   */
+  public static String classifiedField(JsonNode value) {
+    if (!value.isTextual() || value.asText().isBlank()) {
+      throw new IllegalArgumentException("A classified Field is the URN of a Field");
     }
     return value.asText();
   }
@@ -193,7 +223,8 @@ public final class DimensionValues {
   /**
    * Checks the value of a predicate of a Dimension of a kind, one the kind defines or the hierarchy
    * every Dimension has. A calendar's level expressions are parsed, and may read only {@link
-   * #TIME_VALUE}.
+   * #TIME_VALUE}. A classification's level expressions read the columns of its classified Field's
+   * table, which only the caller knows, so it parses them with {@link #classificationColumns}.
    *
    * @throws IllegalArgumentException when the predicate is not one of the kind's or the value is
    *     not in the kind's form
@@ -207,12 +238,56 @@ public final class DimensionValues {
               switch (predicate) {
                 case Vocabulary.CALENDAR_RULE -> () -> calendarRule(value);
                 case Vocabulary.HIERARCHY -> () -> checkLevels(Hierarchy.of(value), expressions);
-                default ->
-                    throw new IllegalArgumentException(
-                        "A " + kind.value() + " Dimension has no predicate " + predicate);
+                default -> throw noPredicate(kind, predicate);
+              };
+          case CLASSIFICATION ->
+              switch (predicate) {
+                case Vocabulary.CLASSIFICATION_RULE -> () -> classificationRule(value);
+                case Vocabulary.CLASSIFIED_FIELD -> () -> classifiedField(value);
+                case Vocabulary.HIERARCHY -> () -> Hierarchy.of(value);
+                default -> throw noPredicate(kind, predicate);
               };
         };
     checked.run();
+  }
+
+  private static IllegalArgumentException noPredicate(DimensionKind kind, String predicate) {
+    return new IllegalArgumentException(
+        "A " + kind.value() + " Dimension has no predicate " + predicate);
+  }
+
+  /**
+   * Parses each level expression of a classification's hierarchy over the columns of its classified
+   * Field's table and returns the columns they read, each once. An expression that only references
+   * a column is refused: grouping by a Field's own values is that Field's meaning, not a
+   * classification.
+   *
+   * @throws IllegalArgumentException when an expression does not parse, is not one expression, or
+   *     only references a column
+   */
+  public static List<String> classificationColumns(
+      Hierarchy hierarchy, ExpressionValues expressions) {
+    var columns = new LinkedHashSet<String>();
+    for (var level : hierarchy.levels()) {
+      var parsed = level.parsed();
+      if (parsed.isEmpty()) {
+        continue;
+      }
+      if (expressions.onlyColumn(parsed.get())) {
+        throw new IllegalArgumentException(
+            "The expression of level "
+                + level.name()
+                + " only references a column; grouping by a Field's own values is no"
+                + " classification");
+      }
+      columns.addAll(expressions.columns(parsed.get()));
+    }
+    return List.copyOf(columns);
+  }
+
+  /** Whether some level of a hierarchy has an expression. */
+  public static boolean expressed(Hierarchy hierarchy) {
+    return hierarchy.levels().stream().anyMatch(level -> level.expression().isPresent());
   }
 
   /**
@@ -229,7 +304,8 @@ public final class DimensionValues {
         continue;
       }
       for (var column : expressions.columns(parsed.get())) {
-        if (!column.equals(TIME_VALUE)) {
+        // A calendar reads no table, so a name such as current_date is the session's value.
+        if (!column.equals(TIME_VALUE) && !ExpressionValues.sessionValue(column)) {
           throw new IllegalArgumentException(
               "The expression of level "
                   + level.name()

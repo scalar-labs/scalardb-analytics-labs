@@ -9,7 +9,9 @@ import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 
 /**
@@ -35,6 +37,23 @@ public final class ExpressionValues {
 
   /** The stand-in table an expression is parsed over. */
   private static final String TABLE = "expression_values_table";
+
+  /**
+   * The names the Query Engine's parser reads as a column but its binder resolves to a value of the
+   * session, such as {@code current_date}, when the table has no column of that name.
+   */
+  private static final Set<String> SESSION_VALUES =
+      Set.of("current_date", "current_time", "current_timestamp", "localtime", "localtimestamp");
+
+  /**
+   * Whether a column an expression references may be a value of the session instead, such as {@code
+   * current_date}: it is one when the table has no column of that name, as the Query Engine binds
+   * it. Callers that know the table's Fields read such a name as a column only when one of them has
+   * it.
+   */
+  public static boolean sessionValue(String column) {
+    return SESSION_VALUES.contains(column.toLowerCase(Locale.ROOT));
+  }
 
   private final Function<String, JsonNode> parser;
 
@@ -140,12 +159,34 @@ public final class ExpressionValues {
   }
 
   /**
-   * The columns an expression references, each once, in the order first referenced.
+   * The columns an expression references, each once, in the order first referenced. A name that may
+   * be a value of the session instead is among them (see {@link #sessionValue}).
    *
    * @throws IllegalArgumentException when it does not parse, is not one whole expression over its
    *     table, holds a subquery or a star, or names a column with a qualifier
    */
   public List<String> columns(Expression expression) {
+    var columns = new LinkedHashSet<String>();
+    collect(expression, held(expression), columns);
+    return List.copyOf(columns);
+  }
+
+  /**
+   * Whether an expression is only a reference to one column, such as {@code prefecture}, which
+   * computes nothing from it.
+   *
+   * @throws IllegalArgumentException when it is not one expression, as {@link #columns} refuses
+   */
+  public boolean onlyColumn(Expression expression) {
+    var held = held(expression);
+    var columns = new LinkedHashSet<String>();
+    collect(expression, held, columns);
+    return held.path("class").asText("").equals("COLUMN_REF")
+        && columns.stream().noneMatch(ExpressionValues::sessionValue);
+  }
+
+  /** The node of the parse tree that holds the expression whole. */
+  private JsonNode held(Expression expression) {
     var tree =
         parser.apply(
             switch (expression.form()) {
@@ -182,24 +223,20 @@ public final class ExpressionValues {
       throw notOneExpression(expression);
     }
     var where = node.path("where_clause");
-    var held =
-        switch (expression.form()) {
-          case VALUE -> {
-            if (!absent(where)) {
-              throw notOneExpression(expression);
-            }
-            yield selectList.get(0);
-          }
-          case CONDITION -> {
-            if (absent(where) || !selectList.get(0).path("class").asText().equals("CONSTANT")) {
-              throw notOneExpression(expression);
-            }
-            yield where;
-          }
-        };
-    var columns = new LinkedHashSet<String>();
-    collect(expression, held, columns);
-    return List.copyOf(columns);
+    return switch (expression.form()) {
+      case VALUE -> {
+        if (!absent(where)) {
+          throw notOneExpression(expression);
+        }
+        yield selectList.get(0);
+      }
+      case CONDITION -> {
+        if (absent(where) || !selectList.get(0).path("class").asText().equals("CONSTANT")) {
+          throw notOneExpression(expression);
+        }
+        yield where;
+      }
+    };
   }
 
   private static void collect(Expression expression, JsonNode node, LinkedHashSet<String> columns) {

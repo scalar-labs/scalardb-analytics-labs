@@ -210,7 +210,9 @@ point and a position: the domain root, a data source, a namespace, or a table.
   selected base-dataset Fact names, so a candidate never moves it, and an identifier
   correspondence to the tables at its ends. Concepts, business terms, concept relationships, and
   Dimensions belong to the domain root, as does a Measure with no selected base Dataset. A
-  Dimension has no base-Dataset predicate, and a calendar is bound to no table.
+  Dimension has no base-Dataset predicate, and a calendar is bound to no table. A classification
+  names the Field it classifies in a Fact that may be a candidate or absent, so that Field does not
+  place it under its table either.
 - A table is read as one unit: the Dataset, every Field, the Measures based on it, and the
   correspondences it is an end of, each element with the result of requesting all its predicates
   (see [Requesting knowledge](#requesting-knowledge)), confirmed knowledge by default or with
@@ -263,7 +265,8 @@ undirected), each end as the URNs of all its elements in any order, without its 
 
 Requesting all predicates of an element judges every closed-core predicate of its kind as above.
 For a Dimension these are the predicates of every Dimension and, when a dimension-kind Fact is
-selected, those of the kind it states. A language-qualified predicate is judged once per declared language, so a business term without
+selected, the core predicates of the kind it states; a classification's classified Field is not
+one (see [`record-model.md`](record-model.md#elements-and-predicates)). A language-qualified predicate is judged once per declared language, so a business term without
 an English name reports its written form as missing knowledge for `en`.
 It also returns every other Fact Address of the element, such as those of free-description and
 Generator-declared predicates, which cannot be listed in advance.

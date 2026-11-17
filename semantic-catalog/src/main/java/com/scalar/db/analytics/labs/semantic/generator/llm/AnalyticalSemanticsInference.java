@@ -80,14 +80,19 @@ import org.jspecify.annotations.Nullable;
  * Field for, is not proposed. Each value whose quotation is found in the document it cites is
  * {@code document}; any other is {@code inference}. Neither is adopted inline.
  *
- * <p>The same call proposes calendar Dimensions, the only kind of Dimension defined, with their
- * rule as the documents word it and their levels, and a Measure's default time granularity, a
- * calendar and a level named in words. A level's expression is parsed as acceptance parses it and
- * run on a sample of a time column; one that fails is dropped and the level kept. Calendars are
- * recorded before Measures, so a granularity can refer to a calendar of the same answer; it rests
- * on the calendar's kind, and is proposed without a value so that the commit writes the calendar's
- * issued URN into it. A new Dimension that is not a calendar with its rule and hierarchy is not
- * proposed.
+ * <p>The same call proposes calendar Dimensions with their rule as the documents word it and their
+ * levels, and a Measure's default time granularity, a calendar and a level named in words. A
+ * level's expression is parsed as acceptance parses it and run on a sample of a time column; one
+ * that fails is dropped and the level kept. Calendars are recorded before Measures, so a
+ * granularity can refer to a calendar of the same answer; it rests on the calendar's kind, and is
+ * proposed without a value so that the commit writes the calendar's issued URN into it.
+ *
+ * <p>It also proposes classification Dimensions with their rule as the documents word it, the
+ * column whose values they classify when the documents tell it, and their levels. A level's
+ * expression reads the classified column's table and is run grouped over a sample of it; one that
+ * fails is dropped and the level kept. A classification whose level expression only references a
+ * column groups by that column's own values, which its meaning already states, and is not proposed.
+ * A new Dimension without a kind, its rule, and its hierarchy is not proposed.
  */
 public final class AnalyticalSemanticsInference implements ModelGenerator {
   static final String NAME = "analytical-semantics-inference";
@@ -97,6 +102,12 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
 
   /** The check name of the query that runs a calendar level's expression on sample times. */
   static final String LEVEL_CHECK = "calendar-level-check";
+
+  /**
+   * The check name of the query that runs a classification level's expression grouped over a sample
+   * of its classified Field's table.
+   */
+  static final String CLASS_LEVEL_CHECK = "classification-level-check";
 
   private static final JsonNodeFactory JSON = JsonNodeFactory.instance;
   private static final String EXISTS = "exists";
@@ -120,6 +131,8 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
           Vocabulary.MEANING,
           Vocabulary.DIMENSION_KIND,
           Vocabulary.CALENDAR_RULE,
+          Vocabulary.CLASSIFICATION_RULE,
+          Vocabulary.CLASSIFIED_FIELD,
           Vocabulary.HIERARCHY);
 
   /** The predicates of a business term the model is asked for, besides existence. */
@@ -129,7 +142,7 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
   static final String INSTRUCTIONS =
       """
       You are the analytical semantics inference generator of a semantic catalog. Read the \
-      documents the semantics owner registered and state the Measures, calendars, and business \
+      documents the semantics owner registered and state the Measures, calendars, classifications, and business \
       terms they define, so that people and agents compute business figures the way the business defines \
       them. Do not use tools.
 
@@ -187,6 +200,25 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
       Propose a calendar only when a document defines one or a Measure's default time \
       granularity needs one, such as the ordinary calendar for "monthly" when the documents \
       mean calendar months.
+      A classification is a Dimension that assigns classes to values by a rule the documents \
+      define, such as age bands from a birth date, price ranges, regions grouping prefectures, \
+      status codes grouped into states, or customer ranks by their purchases:
+      - "meaning": what the classification is, as a short description.
+      - "dimension-kind": "classification".
+      - "classification-rule": the rule as the document words it, complete enough to tell \
+      which class any value falls in, quoted when the document states it.
+      - "classified-field": "<table ref>.<column>" for the column whose values get the \
+      classes, such as the birth date for age bands or the member ID for member ranks. Give it \
+      only when the documents tell which column it is.
+      - "hierarchy": {"levels": [{"name": <the level's name as the documents call it>, \
+      "expression": <optional>}, ...]}, from coarse to fine, such as a region above a block. \
+      An "expression" is a DuckDB SQL expression over the columns of the classified column's \
+      table that gives the level's class, such as "CASE WHEN price < 1000 THEN 'under 1,000' \
+      ELSE '1,000 and over' END". Give one only when "classified-field" is given and the rule \
+      fits one expression over that table alone; omit it when the rule needs other tables, \
+      such as an area master table or the purchases of the last year.
+      Do not propose a Dimension for grouping by a column's own values, such as a member rank \
+      column: that is the column's meaning, not a classification.
       A business term is a word or phrase people use for an element:
       - "written-form": a list of its names, at most one per language, each \
       {"value": <the word or phrase as people write it, such as "EC売上">, "language": <the \
@@ -568,7 +600,7 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
         }
         for (var fact : context.factsAt(element, predicate)) {
           read.add(fact.revision());
-          var value = asModelWrites(predicate, fact.value());
+          var value = asModelWrites(context, predicate, fact.value());
           if (standing(fact)) {
             values
                 .putObject(predicate)
@@ -584,9 +616,18 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
 
   /**
    * A stored value as the model writes it: a default time granularity names its calendar by the
-   * calendar's {@code dimension:<slug>} ref, not by its URN; any other value as it is.
+   * calendar's {@code dimension:<slug>} ref, and a classified Field is {@code <table
+   * ref>.<column>}, not a URN; any other value as it is.
    */
-  private static JsonNode asModelWrites(String predicate, JsonNode value) {
+  private static JsonNode asModelWrites(
+      GeneratorContext context, String predicate, JsonNode value) {
+    if (predicate.equals(Vocabulary.CLASSIFIED_FIELD) && value.isTextual()) {
+      return context
+          .column(value.asText())
+          .<JsonNode>map(
+              column -> JSON.textNode(column.reference().canonical() + "." + column.name()))
+          .orElse(value);
+    }
     if (!predicate.equals(Vocabulary.DEFAULT_TIME_GRANULARITY)
         || !value.path("dimension").isTextual()) {
       return value;
@@ -886,6 +927,22 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
     } catch (IllegalArgumentException e) {
       return List.of();
     }
+    var kind = answeredKind(input, element);
+    if (kind == null) {
+      return List.of();
+    }
+    return switch (kind) {
+      case CALENDAR -> calendarLevelChecks(input, element, hierarchy);
+      case CLASSIFICATION -> classLevelChecks(input, element, hierarchy);
+    };
+  }
+
+  /**
+   * One query per level expression of a calendar's hierarchy in the answer, over the times of a
+   * sample of a column whose value kind is confirmed as time or date.
+   */
+  private static List<DataGenerator.Query> calendarLevelChecks(
+      JsonNode input, Answered element, Hierarchy hierarchy) {
     var times = timeColumn(input);
     if (times == null) {
       return List.of();
@@ -932,6 +989,101 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
     return queries;
   }
 
+  /**
+   * One query per level expression of a classification's hierarchy in the answer: the expression
+   * over a sample of its classified column's table, grouped by the class it gives. Without a
+   * classified column, no expression is kept, so none is run.
+   */
+  private static List<DataGenerator.Query> classLevelChecks(
+      JsonNode input, Answered element, Hierarchy hierarchy) {
+    var classified = classifiedColumn(input, element);
+    if (classified == null) {
+      return List.of();
+    }
+    var reference = tableReference(classified.table());
+    var queries = new ArrayList<DataGenerator.Query>();
+    for (var level : hierarchy.levels()) {
+      if (level.expression().isEmpty()) {
+        continue;
+      }
+      var sql =
+          "SELECT "
+              + level.expression().get()
+              + " AS \"class\", count(*) AS \"rows\"\nFROM "
+              + quoted(reference)
+              + "\nGROUP BY 1\n";
+      queries.add(
+          new DataGenerator.Query(
+              CLASS_LEVEL_CHECK,
+              JSON.objectNode()
+                  .put("dimension", element.reference())
+                  .put("level", level.name())
+                  .put("table", reference.canonical()),
+              classLevelCheckKey(element.reference(), level.name(), reference.canonical()),
+              List.of(classified.table().path("_observation").asText()),
+              List.of(
+                  new ConstructionSql.Request(
+                      sql,
+                      List.of(
+                          new ConstructionSql.Input(
+                              reference, ConstructionSql.Reading.SAMPLED))))));
+    }
+    return queries;
+  }
+
+  /**
+   * The kind a Dimension in the answer is read in: the one the answer gives, else the one the input
+   * lists for it.
+   */
+  private static @Nullable DimensionKind answeredKind(JsonNode input, Answered element) {
+    var given = element.values().get(Vocabulary.DIMENSION_KIND);
+    var value =
+        given != null
+            ? given.value()
+            : existingValue(input, element.reference(), Vocabulary.DIMENSION_KIND).orElse(null);
+    return value != null && value.isTextual()
+        ? DimensionKind.of(value.asText()).orElse(null)
+        : null;
+  }
+
+  /** A column of the input named {@code <table ref>.<column>}, with its table's node. */
+  private record TableColumn(JsonNode table, JsonNode column) {}
+
+  /**
+   * The classified column of a classification in the answer: the one the answer gives, else the one
+   * the input lists for it.
+   */
+  private static @Nullable TableColumn classifiedColumn(JsonNode input, Answered element) {
+    var given = element.values().get(Vocabulary.CLASSIFIED_FIELD);
+    var value =
+        given != null
+            ? given.value()
+            : existingValue(input, element.reference(), Vocabulary.CLASSIFIED_FIELD).orElse(null);
+    return value != null && value.isTextual() ? tableColumn(input, value.asText()) : null;
+  }
+
+  private static @Nullable TableColumn tableColumn(JsonNode input, String text) {
+    for (var table : input.path("tables")) {
+      var prefix = table.path("ref").asText() + ".";
+      if (!text.startsWith(prefix)) {
+        continue;
+      }
+      for (var column : table.path("columns")) {
+        if (column.path("name").asText().equals(text.substring(prefix.length()))) {
+          return new TableColumn(table, column);
+        }
+      }
+    }
+    return null;
+  }
+
+  private static PhysicalCatalogReference.Table tableReference(JsonNode table) {
+    return new PhysicalCatalogReference.Table(
+        table.path("_registration").asText(),
+        table.path("_namespace").asText(),
+        table.path("_table").asText());
+  }
+
   /** A column of the input whose value kind is confirmed as time or date, with its table. */
   private record TimeColumn(JsonNode table, String column) {}
 
@@ -952,6 +1104,22 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
   /** The target key of the query that runs a level expression of a calendar in the answer. */
   static String levelCheckKey(String dimension, String level) {
     return dimension + " " + level;
+  }
+
+  /**
+   * The target key of the query that runs a level expression of a classification in the answer over
+   * a table, so an outcome is found only for the table the expression is recorded over.
+   */
+  static String classLevelCheckKey(String dimension, String level, String table) {
+    return dimension + " " + level + " " + table;
+  }
+
+  /** The predicate that holds the rule of a kind of Dimension. */
+  private static String rulePredicate(DimensionKind kind) {
+    return switch (kind) {
+      case CALENDAR -> Vocabulary.CALENDAR_RULE;
+      case CLASSIFICATION -> Vocabulary.CLASSIFICATION_RULE;
+    };
   }
 
   /**
@@ -1471,7 +1639,7 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
         }
         for (var expression : expressions) {
           for (var column : context.expressions().columns(expression)) {
-            if (field(base, column) == null) {
+            if (field(base, column) == null && !ExpressionValues.sessionValue(column)) {
               throw new IllegalArgumentException(
                   "it names column "
                       + column
@@ -1526,17 +1694,52 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
       var isNew = !context.elements(ElementKind.DIMENSION).contains(urn);
       var kindGiven = values.get(Vocabulary.DIMENSION_KIND);
       var kindValue = ruled(answered, Vocabulary.DIMENSION_KIND);
-      var kind = kindValue == null ? null : DimensionKind.of(kindValue.asText()).orElse(null);
-      var ruleValue = ruled(answered, Vocabulary.CALENDAR_RULE);
+      var givenKind = kindValue == null ? null : DimensionKind.of(kindValue.asText()).orElse(null);
+      // The kind the other values are read in: the one the answer proposes, else the one that
+      // stands.
+      var proposesKind =
+          givenKind != null
+              && (isNew
+                  || MeaningInference.open(
+                      context, context.factsAt(urn, Vocabulary.DIMENSION_KIND)));
+      var standing = proposesKind ? null : standingKind(urn);
+      var kind =
+          proposesKind
+              ? givenKind
+              : standing == null ? null : DimensionKind.of(standing.value().asText()).orElse(null);
+      var ruleValue = kind == null ? null : ruled(answered, rulePredicate(kind));
       var rule = ruleValue == null ? null : ruleValue.asText();
+      var classified =
+          kind == DimensionKind.CLASSIFICATION ? classified(answered, urn, isNew) : null;
       var hierarchyValue = ruled(answered, Vocabulary.HIERARCHY);
-      var hierarchy =
-          hierarchyValue == null ? null : checkedLevels(answered, Hierarchy.of(hierarchyValue));
-      if (isNew && (kind != DimensionKind.CALENDAR || rule == null || hierarchy == null)) {
+      Hierarchy hierarchy = null;
+      if (hierarchyValue != null && kind != null) {
+        hierarchy =
+            switch (kind) {
+              case CALENDAR -> checkedLevels(answered, Hierarchy.of(hierarchyValue));
+              case CLASSIFICATION ->
+                  checkedClassLevels(answered, Hierarchy.of(hierarchyValue), classified);
+            };
+      }
+      if (kind == DimensionKind.CLASSIFICATION && hierarchyValue != null && hierarchy == null) {
+        // Its levels group by a column's own values, which that column's meaning states.
+        if (isNew) {
+          output.missing(
+              answered.reference()
+                  + ", a classification not proposed because its levels group by a column's own"
+                  + " values, which is that column's meaning");
+          return;
+        }
+        invalid(
+            answered,
+            Vocabulary.HIERARCHY,
+            "its levels group by a column's own values, which is that column's meaning, not a"
+                + " classification");
+      }
+      if (isNew && (kind == null || rule == null || hierarchy == null)) {
         output.missing(
             answered.reference()
-                + ", a new Dimension proposed without being a calendar with its rule and"
-                + " hierarchy");
+                + ", a new Dimension proposed without a kind with its rule and hierarchy");
         return;
       }
       var element = element(answered, taken);
@@ -1559,53 +1762,243 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
                         JSON.textNode(Vocabulary.VALUE_ITEM)),
                 () -> invalid(answered, Vocabulary.MEANING, "it is not a non-empty text"));
       }
-      Dependency kindFact;
-      if (kind != null && open(dimension, Vocabulary.DIMENSION_KIND)) {
+      Dependency kindFact = null;
+      if (proposesKind) {
         kindFact =
             propose(
                 dimension.elementRef(),
                 Vocabulary.DIMENSION_KIND,
-                JSON.textNode(kind.value()),
+                JSON.textNode(Objects.requireNonNull(kind).value()),
                 IdentityKey.choice(kind.value()),
                 premises,
                 Objects.requireNonNull(kindGiven),
                 JSON.textNode(Vocabulary.VALUE_ITEM));
-      } else {
-        var standing = standingKind(urn);
-        kind = standing == null ? null : DimensionKind.of(standing.value().asText()).orElse(null);
-        kindFact = standing == null ? null : Proposals.on(standing);
+      } else if (standing != null) {
+        kindFact = Proposals.on(standing);
       }
-      if (kindFact == null || kind != DimensionKind.CALENDAR) {
-        for (var predicate : List.of(Vocabulary.CALENDAR_RULE, Vocabulary.HIERARCHY)) {
-          if (values.containsKey(predicate)) {
-            invalid(answered, predicate, "the Dimension is not a calendar");
-          }
+      // A value of a kind the Dimension is not of is dropped, as is every kind-specific value
+      // when no kind stands.
+      for (var predicate : values.keySet()) {
+        if (DimensionValues.kindSpecific(predicate)
+            && (kindFact == null
+                || kind == null
+                || !(predicate.equals(Vocabulary.HIERARCHY)
+                    || kind.predicates().contains(predicate)))) {
+          invalid(
+              answered,
+              predicate,
+              kind == null
+                  ? "the Dimension's kind does not stand"
+                  : "the Dimension is not of a kind that has it");
         }
+      }
+      if (kindFact == null || kind == null) {
         return;
       }
       var onKind = new ArrayList<>(premises);
       onKind.add(kindFact);
-      if (rule != null && open(dimension, Vocabulary.CALENDAR_RULE)) {
+      var rulePredicate = rulePredicate(kind);
+      if (rule != null && open(dimension, rulePredicate)) {
         propose(
             dimension.elementRef(),
-            Vocabulary.CALENDAR_RULE,
+            rulePredicate,
             JSON.textNode(rule),
             null,
             onKind,
-            Objects.requireNonNull(values.get(Vocabulary.CALENDAR_RULE)),
+            Objects.requireNonNull(values.get(rulePredicate)),
             JSON.textNode(Vocabulary.VALUE_ITEM));
       }
+      Dependency classifiedFact = null;
+      if (classified != null) {
+        classifiedFact = classified.fact();
+        var given = values.get(Vocabulary.CLASSIFIED_FIELD);
+        if (classifiedFact == null && given != null) {
+          var dependencies = new ArrayList<>(onKind);
+          dependencies.add(Proposals.on(classified.existence()));
+          var value =
+              PredicateValues.naming(Vocabulary.CLASSIFIED_FIELD, Ref.urn(classified.field()));
+          classifiedFact =
+              propose(
+                  dimension.elementRef(),
+                  Vocabulary.CLASSIFIED_FIELD,
+                  value.value(),
+                  value.key(),
+                  dependencies,
+                  given,
+                  JSON.textNode(Vocabulary.VALUE_ITEM));
+        }
+      }
       if (hierarchy != null && open(dimension, Vocabulary.HIERARCHY)) {
+        var dependencies = new ArrayList<>(onKind);
+        if (kind == DimensionKind.CLASSIFICATION
+            && DimensionValues.expressed(hierarchy)
+            && classifiedFact != null) {
+          // Acceptance parses the expressions over the classified Field's table.
+          dependencies.add(classifiedFact);
+        }
         propose(
             dimension.elementRef(),
             Vocabulary.HIERARCHY,
             hierarchy.value(),
             null,
-            onKind,
+            dependencies,
             Objects.requireNonNull(values.get(Vocabulary.HIERARCHY)),
             JSON.textNode(Vocabulary.VALUE_ITEM));
       }
-      calendars.put(answered.reference(), new Calendar(dimension.elementRef(), kindFact));
+      if (kind == DimensionKind.CALENDAR) {
+        calendars.put(answered.reference(), new Calendar(dimension.elementRef(), kindFact));
+      }
+    }
+
+    /**
+     * The Field a classification classifies, which its level expressions read the table of.
+     *
+     * @param table the node of the Field's table in the input
+     * @param fact the classified-field Fact that stands for an existing classification; null when
+     *     the answer gives the Field
+     */
+    private record Classified(
+        String field, Fact existence, JsonNode table, @Nullable Dependency fact) {}
+
+    /**
+     * The classified Field of a classification in the answer: the confirmed column the answer
+     * gives, when its Fact Address is open, else the one a standing classified-field Fact names.
+     */
+    private @Nullable Classified classified(Answered answered, String urn, boolean isNew) {
+      var given = answered.values().get(Vocabulary.CLASSIFIED_FIELD);
+      var open =
+          isNew
+              || MeaningInference.open(context, context.factsAt(urn, Vocabulary.CLASSIFIED_FIELD));
+      if (!open) {
+        for (var fact : context.factsAt(urn, Vocabulary.CLASSIFIED_FIELD)) {
+          if (standing(fact) && fact.value().isTextual()) {
+            var column = field(fact.value().asText());
+            if (column != null) {
+              return new Classified(
+                  column.field(), column.existence(), column.table(), Proposals.on(fact));
+            }
+          }
+        }
+        return null;
+      }
+      if (given == null) {
+        return null;
+      }
+      var column = given.value().isTextual() ? tableColumn(input, given.value().asText()) : null;
+      var field = column == null ? null : field(column.column().path("_field").asText());
+      if (field == null) {
+        invalid(
+            answered,
+            Vocabulary.CLASSIFIED_FIELD,
+            "it is not \"<table ref>.<column>\" of a column in the input");
+        return null;
+      }
+      return new Classified(field.field(), field.existence(), field.table(), null);
+    }
+
+    /** A confirmed column of the input by its Field, with that Field's existence and table. */
+    private record InputField(String field, Fact existence, JsonNode table) {}
+
+    private @Nullable InputField field(String field) {
+      for (var table : input.path("tables")) {
+        for (var column : table.path("columns")) {
+          if (column.path("_field").asText().equals(field)) {
+            var found = context.column(field);
+            return found.isEmpty() || found.get().existence().state() != FactState.CONFIRMED
+                ? null
+                : new InputField(field, found.get().existence(), table);
+          }
+        }
+      }
+      return null;
+    }
+
+    /**
+     * A classification's hierarchy with each level expression that acceptance would refuse, or that
+     * the Query Engine did not run on a sample of the classified Field's table, dropped and
+     * recorded as missing; the level itself stays. Without a classified Field, every expression is
+     * dropped.
+     *
+     * <p>A level whose expression only references a column, such as a prefecture level below
+     * regions, keeps its name without the expression, as acceptance refuses it.
+     *
+     * @return null when every level expression only references a column: the axis is then that
+     *     column's own values, which its meaning states, so no classification of it is proposed
+     */
+    private @Nullable Hierarchy checkedClassLevels(
+        Answered answered, Hierarchy hierarchy, @Nullable Classified classified) {
+      var expressed = 0;
+      var onlyColumns = 0;
+      for (var level : hierarchy.levels()) {
+        if (level.parsed().isEmpty()) {
+          continue;
+        }
+        expressed++;
+        try {
+          if (context.expressions().onlyColumn(level.parsed().get())) {
+            onlyColumns++;
+          }
+        } catch (IllegalArgumentException e) {
+          // Dropped below as an expression acceptance would refuse.
+        }
+      }
+      if (expressed > 0 && onlyColumns == expressed) {
+        return null;
+      }
+      var levels = new ArrayList<DimensionValues.Level>();
+      var columns = new HashSet<String>();
+      if (classified != null) {
+        for (var column : classified.table().path("columns")) {
+          columns.add(column.path("name").asText());
+        }
+      }
+      for (var level : hierarchy.levels()) {
+        if (level.expression().isEmpty()) {
+          levels.add(level);
+          continue;
+        }
+        String dropped = null;
+        if (classified == null) {
+          dropped = "the classification names no classified Field whose table it reads";
+        } else {
+          try {
+            for (var column :
+                DimensionValues.classificationColumns(
+                    new Hierarchy(List.of(level)), context.expressions())) {
+              if (!columns.contains(column) && !ExpressionValues.sessionValue(column)) {
+                throw new IllegalArgumentException(
+                    "it names column "
+                        + column
+                        + ", which the classified Field's table has no Field for");
+              }
+            }
+          } catch (IllegalArgumentException e) {
+            dropped = String.valueOf(e.getMessage());
+          }
+          // Only a query over the classified Field's table counts: the answer may name another
+          // column than the classified Field that stands.
+          var outcome =
+              ran.get(
+                  classLevelCheckKey(
+                      answered.reference(), level.name(), classified.table().path("ref").asText()));
+          if (dropped == null && !(outcome instanceof ConstructionSql.Outcome.Read)) {
+            dropped = "the Query Engine did not run it on a sample of the classified table";
+          }
+        }
+        if (dropped == null) {
+          levels.add(level);
+        } else {
+          output.missing(
+              "the expression of level "
+                  + level.name()
+                  + " of "
+                  + answered.reference()
+                  + ", which was dropped because "
+                  + dropped);
+          levels.add(new DimensionValues.Level(level.name(), Optional.empty()));
+        }
+      }
+      return new Hierarchy(levels);
     }
 
     /**

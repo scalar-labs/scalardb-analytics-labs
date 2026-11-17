@@ -526,8 +526,7 @@ class AnalyticalSemanticsInferenceTest extends StoreScenarioTest {
   /**
    * The fiscal glossary's answer: a fiscal calendar whose months close on the 20th, with one level
    * expression that reads another column; a 4-4-5 retail calendar with no expressions; EC sales by
-   * fiscal month and store sales by retail week; and an age band, a kind of Dimension not defined
-   * yet.
+   * fiscal month and store sales by retail week; and an age band with its kind alone.
    */
   private static String fiscalAnswer(JsonNode input) {
     var document = input.path("documents").get(0).path("document").asText();
@@ -675,7 +674,7 @@ class AnalyticalSemanticsInferenceTest extends StoreScenarioTest {
     assertThat(only(s, storeSales, Vocabulary.DEFAULT_TIME_GRANULARITY).value())
         .isEqualTo(JSON.objectNode().put("dimension", retail).put("level", "retail week"));
 
-    // A classification is not a kind defined yet.
+    // A new Dimension with its kind alone, without its rule and hierarchy, is not proposed.
     assertThat(first(s, element(s, ElementKind.DIMENSION, "age-band"), Vocabulary.EXISTENCE))
         .isEmpty();
     assertThat(generated(summary).missingInputs())
@@ -715,6 +714,277 @@ class AnalyticalSemanticsInferenceTest extends StoreScenarioTest {
                 .path("dimension")
                 .asText())
         .isEqualTo("dimension:fiscal-calendar");
+  }
+
+  // Classifications
+
+  private static final Document MEMBER_GLOSSARY =
+      new Document(
+          "member-glossary.md",
+          """
+          # Member glossary
+
+          ## Age bands
+
+          Members are grouped by their age today into ten-year bands: under 20, the 20s, the \
+          30s, the 40s, the 50s, and 60 and over. Each band is split into five-year halves.
+
+          ## Regions
+
+          Prefectures are grouped into regions: Tokyo and Kanagawa are Kanto, Osaka and Kyoto \
+          are Kansai. Regions are grouped into East Japan (Kanto) and West Japan (Kansai).
+
+          ## Sales areas
+
+          A member's sales area follows the area master table kept by the sales department.
+
+          ## Member ranks
+
+          A member is Gold when their purchases over the last year total 100,000 yen or more, \
+          Silver from 30,000 yen, and Regular otherwise.
+
+          ## Member status
+
+          Members are also counted by their member status column.
+          """);
+
+  private static final String AGE_RULE =
+      "Members are grouped by their age today into ten-year bands: under 20, the 20s, the 30s, the"
+          + " 40s, the 50s, and 60 and over.";
+
+  private static final String AGE_BAND =
+      "CASE WHEN date_diff('year', birth_date, current_date) < 20 THEN 'under 20'"
+          + " WHEN date_diff('year', birth_date, current_date) >= 60 THEN '60 and over'"
+          + " ELSE CAST(date_diff('year', birth_date, current_date) // 10 * 10 AS VARCHAR) || 's'"
+          + " END";
+
+  private static final String BLOCK =
+      "CASE WHEN prefecture IN ('Tokyo', 'Kanagawa') THEN 'East Japan'"
+          + " WHEN prefecture IN ('Osaka', 'Kyoto') THEN 'West Japan' END";
+
+  private static final String REGION =
+      "CASE WHEN prefecture IN ('Tokyo', 'Kanagawa') THEN 'Kanto'"
+          + " WHEN prefecture IN ('Osaka', 'Kyoto') THEN 'Kansai' END";
+
+  /** The EC orders and the POS sales, with the members. */
+  private DuckDbConstructionSql memberData() {
+    return data()
+        .run(
+            "ATTACH ':memory:' AS crm",
+            "CREATE SCHEMA crm.public",
+            "CREATE TABLE crm.public.members"
+                + " (member_id INT, birth_date DATE, prefecture VARCHAR, status VARCHAR)",
+            "INSERT INTO crm.public.members VALUES"
+                + " (1, DATE '1990-05-01', 'Tokyo', 'active'),"
+                + " (2, DATE '2010-01-01', 'Osaka', 'inactive')");
+  }
+
+  /** A classification in the member answer with its rule, classified column, and levels. */
+  private static void classification(
+      com.fasterxml.jackson.databind.node.ArrayNode dimensions,
+      String ref,
+      String meaning,
+      String rule,
+      @Nullable String column,
+      String document,
+      String... namesAndExpressions) {
+    var classification = dimensions.addObject().put("ref", ref);
+    classification.putObject("existence").put("basis", "the glossary defines it");
+    var values = classification.putObject("values");
+    values.set(Vocabulary.MEANING, value(meaning, "the glossary", document, null));
+    values.set(
+        Vocabulary.DIMENSION_KIND, value("classification", "a classification", document, null));
+    values.set(Vocabulary.CLASSIFICATION_RULE, value(rule, "the glossary's rule", document, rule));
+    if (column != null) {
+      values.set(
+          Vocabulary.CLASSIFIED_FIELD, value(column, "the column it groups", document, null));
+    }
+    var levels = JSON.objectNode();
+    var list = levels.putArray("levels");
+    for (var i = 0; i < namesAndExpressions.length; i += 2) {
+      var level = list.addObject().put("name", namesAndExpressions[i]);
+      if (!namesAndExpressions[i + 1].isEmpty()) {
+        level.put("expression", namesAndExpressions[i + 1]);
+      }
+    }
+    values.set(Vocabulary.HIERARCHY, value(levels, "the glossary's levels", document, null));
+  }
+
+  /**
+   * The member glossary's answer: age bands with an expression that runs and a five-year level
+   * whose expression fails when it runs; regions in two levels; sales areas and member ranks by
+   * their wording alone; and member status, which groups by a column's own values.
+   */
+  private static String memberAnswer(JsonNode input) {
+    var document = input.path("documents").get(0).path("document").asText();
+    var answer = JSON.objectNode();
+    var dimensions = answer.putArray("dimensions");
+    classification(
+        dimensions,
+        "dimension:age-band",
+        "Members' ten-year age bands",
+        AGE_RULE,
+        "crm.public.members.birth_date",
+        document,
+        "age band",
+        AGE_BAND,
+        "five-year band",
+        "date_diff('year', birth_date, current_date) // 5 * 5 + 'years'");
+    classification(
+        dimensions,
+        "dimension:region",
+        "Regions of prefectures",
+        "Prefectures are grouped into regions: Tokyo and Kanagawa are Kanto, Osaka and Kyoto are"
+            + " Kansai.",
+        "crm.public.members.prefecture",
+        document,
+        "block",
+        BLOCK,
+        "region",
+        REGION,
+        "prefecture",
+        "prefecture");
+    classification(
+        dimensions,
+        "dimension:sales-area",
+        "Members' sales areas",
+        "A member's sales area follows the area master table kept by the sales department.",
+        "crm.public.members.prefecture",
+        document,
+        "sales area",
+        "");
+    classification(
+        dimensions,
+        "dimension:member-rank",
+        "Members' ranks by their purchases",
+        "A member is Gold when their purchases over the last year total 100,000 yen or more,"
+            + " Silver from 30,000 yen, and Regular otherwise.",
+        "crm.public.members.member_id",
+        document,
+        "rank",
+        "");
+    classification(
+        dimensions,
+        "dimension:member-status",
+        "Members by status",
+        "Members are also counted by their member status column.",
+        "crm.public.members.status",
+        document,
+        "status",
+        "status");
+    return answer.toString();
+  }
+
+  @Test
+  void classificationsAreProposedWithTheirWordingAndTheExpressionsThatRun() {
+    var s = scenario();
+    var sql = memberData();
+    registerTables(s);
+    register(
+        s,
+        "crm.public.members",
+        "member_id",
+        "int",
+        "birth_date",
+        "date",
+        "prefecture",
+        "text",
+        "status",
+        "text");
+    var policy = new AdoptingDataSemantics();
+    var model = model(AnalyticalSemanticsInferenceTest::memberAnswer);
+    drain(s, policy, sql, model);
+    store.registerDocument(s.domain, "owner", null, MEMBER_GLOSSARY);
+    var summary = drain(s, policy, sql, model);
+
+    var birthDate = element(s, ElementKind.FIELD, "crm.public.members.birth_date");
+
+    // The age bands keep the document's wording and name the birth date as the Field they
+    // classify; the expression that ran on sample members stays, and the one that failed is
+    // dropped while its level stays.
+    var age = element(s, ElementKind.DIMENSION, "age-band");
+    var kindFact = Urns.fact(Urns.factAddress(age, Vocabulary.DIMENSION_KIND), 1);
+    assertThat(only(s, age, Vocabulary.DIMENSION_KIND).value().asText())
+        .isEqualTo("classification");
+    var rule = only(s, age, Vocabulary.CLASSIFICATION_RULE);
+    assertThat(rule.value().asText()).isEqualTo(AGE_RULE);
+    assertThat(rule.checks())
+        .singleElement()
+        .satisfies(check -> assertThat(check.method()).isEqualTo(ValidationMethod.DOCUMENT));
+    var classified = only(s, age, Vocabulary.CLASSIFIED_FIELD);
+    assertThat(classified.value().asText()).isEqualTo(birthDate);
+    assertThat(factDependencies(classified)).contains(kindFact, existence(birthDate));
+    var hierarchy = only(s, age, Vocabulary.HIERARCHY);
+    assertThat(level(hierarchy, "age band").path("expression").asText()).isEqualTo(AGE_BAND);
+    assertThat(level(hierarchy, "five-year band").has("expression")).isFalse();
+    assertThat(generated(summary).missingInputs())
+        .anyMatch(missing -> missing.contains("five-year band") && missing.contains("did not run"))
+        // The failed sample query is recorded under the classification's own check name.
+        .anyMatch(
+            missing ->
+                missing.contains("classification-level-check")
+                    && missing.contains("five-year band"))
+        .noneMatch(missing -> missing.contains("calendar-level-check dimension:age-band"));
+    var classifiedFact = Urns.fact(Urns.factAddress(age, Vocabulary.CLASSIFIED_FIELD), 1);
+    assertThat(factDependencies(hierarchy))
+        .contains(kindFact, classifiedFact, existence(birthDate));
+    assertThat(sql.requests)
+        .anyMatch(
+            request ->
+                request.sql().contains(AGE_BAND)
+                    && request.sql().contains("\"crm\".\"public\".\"members\"")
+                    && request.sql().contains("GROUP BY 1"));
+
+    // Regions keep their levels coarse to fine; the finest is the prefecture itself, whose bare
+    // column expression is dropped while the level and the classification stay.
+    var region = only(s, element(s, ElementKind.DIMENSION, "region"), Vocabulary.HIERARCHY);
+    assertThat(region.value().path("levels"))
+        .extracting(level -> level.path("name").asText())
+        .containsExactly("block", "region", "prefecture");
+    assertThat(region.value().path("levels"))
+        .extracting(level -> level.path("expression").asText())
+        .containsExactly(BLOCK, REGION, "");
+    assertThat(generated(summary).missingInputs())
+        .anyMatch(
+            missing -> missing.contains("level prefecture") && missing.contains("only references"));
+
+    // Sales areas and member ranks need other tables and are recorded by their wording alone.
+    for (var slug : List.of("sales-area", "member-rank")) {
+      var dimension = element(s, ElementKind.DIMENSION, slug);
+      assertThat(only(s, dimension, Vocabulary.CLASSIFICATION_RULE).value().asText()).isNotBlank();
+      assertThat(only(s, dimension, Vocabulary.HIERARCHY).value().path("levels"))
+          .allSatisfy(level -> assertThat(level.has("expression")).isFalse());
+    }
+
+    // Member status groups by a column's own values, its meaning, and is not proposed.
+    assertThat(first(s, element(s, ElementKind.DIMENSION, "member-status"), Vocabulary.EXISTENCE))
+        .isEmpty();
+    assertThat(generated(summary).missingInputs())
+        .filteredOn(missing -> missing.contains("dimension:member-status"))
+        .singleElement()
+        .satisfies(missing -> assertThat(missing).contains("a column's own values"));
+
+    // A changed document runs it again: the input names each classified Field by its table's ref
+    // and its column, as the model writes it.
+    store.registerDocument(
+        s.domain,
+        "owner",
+        null,
+        new Document("member-glossary-2.md", MEMBER_GLOSSARY.text() + "\nAges are in years.\n"));
+    drain(s, policy, sql, model);
+    var again =
+        model.calls.stream()
+            .filter(each -> each.generator().equals(ANALYTICAL))
+            .toList()
+            .getLast()
+            .input();
+    var ageNode =
+        java.util.stream.StreamSupport.stream(again.path("dimensions").spliterator(), false)
+            .filter(dimension -> dimension.path("ref").asText().equals("dimension:age-band"))
+            .findFirst()
+            .orElseThrow();
+    assertThat(ageNode.path("values").path(Vocabulary.CLASSIFIED_FIELD).path("value").asText())
+        .isEqualTo("crm.public.members.birth_date");
   }
 
   @Test

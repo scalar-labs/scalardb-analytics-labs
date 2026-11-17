@@ -68,7 +68,11 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>An acceptance of a Dimension's hierarchy or of a predicate of its kind must depend on
  * dimension-kind Facts of the Dimension that state exactly one kind, and its value must be in that
- * kind's form; a calendar's level expressions are parsed and read only the time value. An
+ * kind's form; a calendar's level expressions are parsed and read only the time value. A
+ * classification's classified Field gets a premise dependency on that Field's existence, and its
+ * level expressions must rest on the classified-field Facts naming one Field, are parsed over the
+ * columns of that Field's table, and get a premise dependency on the existence of each Field they
+ * reference, as a Measure's expressions do; one that only references a column is refused. An
  * acceptance of a Measure's default time granularity must depend on its Dimension's dimension-kind
  * Fact stating a calendar. A value not in its form rejects the commit (see {@link
  * DimensionValues}).
@@ -331,10 +335,89 @@ public final class CommitResolver {
                 + " depends on exactly one kind of it, not "
                 + kinds.size());
       }
-      DimensionValues.check(
-          kinds.iterator().next(), predicate, value(accept, about.get()), expressions);
+      var dimensionKind = kinds.iterator().next();
+      var value = value(accept, about.get());
+      DimensionValues.check(dimensionKind, predicate, value, expressions);
+      if (dimensionKind == DimensionKind.CLASSIFICATION) {
+        return withClassificationPremises(accept, dimension, predicate, value);
+      }
     }
     return accept;
+  }
+
+  /**
+   * A classification's value with the premise dependencies it reads added: a classified Field's
+   * acceptance gets a premise dependency on that Field's existence, and a hierarchy whose levels
+   * have expressions must depend on the Dimension's classified-field Facts naming one Field, and
+   * gets a premise dependency on the existence of each Field of that Field's table its expressions
+   * reference.
+   */
+  private LogRecord.Accept withClassificationPremises(
+      LogRecord.Accept accept, String dimension, String predicate, JsonNode value) {
+    var premises = new ArrayList<Dependency.OnFact>();
+    if (predicate.equals(Vocabulary.CLASSIFIED_FIELD)) {
+      var field = DimensionValues.classifiedField(value);
+      classifiedTable(field);
+      premises.add(fieldExistence(field));
+    } else if (predicate.equals(Vocabulary.HIERARCHY)) {
+      var hierarchy = DimensionValues.Hierarchy.of(value);
+      if (!DimensionValues.expressed(hierarchy)) {
+        return accept;
+      }
+      var fields = new HashSet<String>();
+      for (var depended : dependedFacts(accept)) {
+        if (depended.element().equals(dimension)
+            && depended.predicate().equals(Vocabulary.CLASSIFIED_FIELD)
+            && depended.value() != null) {
+          fields.add(DimensionValues.classifiedField(depended.value()));
+        }
+      }
+      if (fields.size() != 1) {
+        throw new IllegalArgumentException(
+            "The level expressions of classification "
+                + dimension
+                + " depend on exactly one classified Field of it, not "
+                + fields.size());
+      }
+      var table = classifiedTable(fields.iterator().next());
+      for (var column : DimensionValues.classificationColumns(hierarchy, expressions)) {
+        columnPremise(table, column).ifPresent(premises::add);
+      }
+    }
+    var dependencies = new ArrayList<>(accept.dependencies());
+    var depended = new HashSet<String>();
+    for (var dependency : dependencies) {
+      if (dependency instanceof Dependency.OnFact onFact) {
+        depended.add(onFact.fact().urnValue());
+      }
+    }
+    for (var premise : premises) {
+      if (depended.add(premise.fact().urnValue())) {
+        dependencies.add(premise);
+      }
+    }
+    return new LogRecord.Accept(
+        accept.fact(), dependencies, accept.checks(), accept.inputsRead(), accept.provenance());
+  }
+
+  /**
+   * The canonical Physical Catalog reference of the table of a classified Field: that of the
+   * Dataset the Field belongs to.
+   */
+  private String classifiedTable(String field) {
+    var table =
+        projection
+            .element(field)
+            .filter(row -> row.kind() == ElementKind.FIELD)
+            .map(ElementRow::parent)
+            .flatMap(projection::element)
+            .filter(row -> row.kind() == ElementKind.DATASET)
+            .map(ElementRow::physicalCatalogReference);
+    if (table.isEmpty()) {
+      throw new IllegalArgumentException(
+          "The classified Field " + field + " is no Field of a Dataset with a table");
+    }
+    return table.get();
   }
 
   private static JsonNode value(LogRecord.Accept accept, About about) {
@@ -400,9 +483,9 @@ public final class CommitResolver {
     }
     for (var expression : ExpressionValues.of(predicate, value)) {
       for (var column : expressions.columns(expression)) {
-        var existence = fieldExistence(table, column);
-        if (depended.add(existence.fact().urnValue())) {
-          dependencies.add(existence);
+        var existence = columnPremise(table, column);
+        if (existence.isPresent() && depended.add(existence.get().fact().urnValue())) {
+          dependencies.add(existence.get());
         }
       }
     }
@@ -450,22 +533,31 @@ public final class CommitResolver {
   }
 
   /**
-   * A dependency on the existence Fact of the Field of a column of a table, a Fact that is neither
-   * rejected nor retired.
+   * A dependency on the existence Fact of the Field of a column an expression references, a Fact
+   * that is neither rejected nor retired; empty for a name such as {@code current_date} the table
+   * has no Field for, which the Query Engine reads as a value of the session.
    */
-  private Dependency.OnFact fieldExistence(String table, String column) {
+  private Optional<Dependency.OnFact> columnPremise(String table, String column) {
     // A Field's Physical Catalog reference is its table's canonical form and the encoded column,
     // as PhysicalCatalogReference.Column#canonical() writes it.
     var field =
         lookup.physicalCatalogElement(
             ElementKind.FIELD, IdentityKey.choice(table + "." + Urns.encode(column)).canonical());
     if (field.isEmpty()) {
+      if (ExpressionValues.sessionValue(column)) {
+        return Optional.empty();
+      }
       throw new IllegalArgumentException(
           "An expression names column " + column + ", which " + table + " has no Field for");
     }
+    return Optional.of(fieldExistence(field.get()));
+  }
+
+  /** A dependency on the existence Fact of a Field, a Fact that is neither rejected nor retired. */
+  private Dependency.OnFact fieldExistence(String field) {
     var record =
         lookup
-            .emptyScopeAddress(field.get(), Vocabulary.EXISTENCE, null)
+            .emptyScopeAddress(field, Vocabulary.EXISTENCE, null)
             .flatMap(address -> lookup.closedRangeFact(address, EXISTS_KEY))
             .flatMap(projection::fact)
             .map(Projection.FactSlice::record);
@@ -473,8 +565,7 @@ public final class CommitResolver {
         || record.get().is(FactState.REJECTED)
         || record.get().is(FactState.RETIRED)
         || record.get().latestAcceptance().isEmpty()) {
-      throw new IllegalArgumentException(
-          "An expression names column " + column + ", whose Field " + field.get() + " is gone");
+      throw new IllegalArgumentException("The Field " + field + " is gone");
     }
     var urn = record.get().fact();
     return new Dependency.OnFact(

@@ -79,6 +79,52 @@ class ExpressionValuesTest extends StoreScenarioTest {
   }
 
   @Test
+  void aSessionValueIsAColumnOnlyWhenTheTableHasOneOfThatName() {
+    // The orders have no column named current_date, so the Query Engine reads the session's date.
+    var sample = sample();
+    var s = sample.s();
+    var c = s.begin();
+    var filter =
+        c.add(
+            new LogRecord.Fact(
+                c.address(Ref.urn(sample.measure()), Vocabulary.FILTER),
+                JSON.textNode("ordered_at <= current_date AND amount > 0"),
+                null));
+    c.accept(filter, sample.baseDataset());
+    var written = s.write(c);
+    assertThat(factDependencies(s, written.urn(filter)))
+        .containsExactlyInAnyOrder(
+            sample.baseDataset().fact().urnValue(),
+            existenceOf(
+                Urns.element(
+                    s.domain, Vocabulary.ElementKind.FIELD, "shop.public.orders.ordered_at")),
+            sample.amountExistence());
+
+    // A table with a column of that name binds it as the column, which becomes a premise.
+    var other = scenario();
+    var d = other.begin();
+    var ledger = d.dataset("shop.public.ledger");
+    var day = d.field(ledger, "shop.public.ledger.current_date");
+    var measure = d.measure("ledger-days");
+    var setUp = other.write(d);
+    d = other.begin();
+    var base =
+        d.closedRangeCandidate(
+            d.address(setUp.ref(measure), Vocabulary.BASE_DATASET), setUp.urn(ledger));
+    var baseFact = other.write(d).urn(base);
+    d = other.begin();
+    var rule =
+        d.aggregationRule(
+            d.address(Ref.urn(setUp.urn(measure)), Vocabulary.AGGREGATION_RULE),
+            "count-distinct",
+            "current_date",
+            other.on(baseFact));
+    var ruleWritten = other.write(d);
+    assertThat(factDependencies(other, ruleWritten.urn(rule)))
+        .containsExactlyInAnyOrder(baseFact, existenceOf(setUp.urn(day)));
+  }
+
+  @Test
   void theFieldsAnExpressionReferencesBecomePremiseDependencies() {
     var sample = sample();
     var s = sample.s();

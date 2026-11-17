@@ -112,6 +112,8 @@ final class PredicateValues {
     BASE_FIELD,
     /** One Measure, Dataset, or Field. */
     ELEMENT,
+    /** One Field of any Dataset, named by its table's ref and its column. */
+    FIELD,
     /**
      * One calendar Dimension, with a level named in words: a Measure's default time granularity,
      * which depends on the calendar's kind rather than its existence.
@@ -182,7 +184,13 @@ final class PredicateValues {
               };
           case DIMENSION ->
               switch (predicate) {
-                case Vocabulary.MEANING, Vocabulary.CALENDAR_RULE -> TEXT;
+                case Vocabulary.MEANING, Vocabulary.CALENDAR_RULE, Vocabulary.CLASSIFICATION_RULE ->
+                    TEXT;
+                case Vocabulary.CLASSIFIED_FIELD ->
+                    new Naming(
+                        "\"<table ref>.<column>\" for the column whose values the classification"
+                            + " assigns classes to, from \"tables\" of the choices",
+                        Names.FIELD);
                 case Vocabulary.DIMENSION_KIND ->
                     choices(
                         java.util.Arrays.stream(Vocabulary.DimensionKind.values())
@@ -191,10 +199,11 @@ final class PredicateValues {
                 case Vocabulary.HIERARCHY ->
                     new Plain(
                         "an object {\"levels\": [{\"name\": <text>, \"expression\": <optional"
-                            + " DuckDB SQL expression over the TIMESTAMP column \""
+                            + " DuckDB SQL expression: for a calendar, over the TIMESTAMP column \""
                             + DimensionValues.TIME_VALUE
-                            + "\" giving the key of the level's period>}, ...]}, from coarse to"
-                            + " fine",
+                            + "\" giving the key of the level's period; for a classification, over"
+                            + " the columns of its classified column's table giving the level's"
+                            + " class>}, ...]}, from coarse to fine",
                         PredicateValues::hierarchy);
                 default -> null;
               };
@@ -379,12 +388,13 @@ final class PredicateValues {
    * The value of a predicate that names one element, compared as that reference. The Concept a row
    * or a Field represents and a business term's referenced element take no value of their own: the
    * commit writes the URN the reference resolves to, so they can name an element proposed in the
-   * same request. A Measure's base Dataset and reference time Field hold the element's URN.
+   * same request. A Measure's base Dataset and reference time Field and a classification's
+   * classified Field hold the element's URN.
    */
   static Valued.Value naming(String predicate, Ref element) {
     var key = IdentityKey.of(new IdentityKey.Part.Reference(element));
     return switch (predicate) {
-      case Vocabulary.BASE_DATASET, Vocabulary.REFERENCE_TIME_FIELD ->
+      case Vocabulary.BASE_DATASET, Vocabulary.REFERENCE_TIME_FIELD, Vocabulary.CLASSIFIED_FIELD ->
           new Valued.Value(JSON.textNode(((Ref.Urn) element).value()), key);
       default -> new Valued.Value(JSON.nullNode(), key);
     };

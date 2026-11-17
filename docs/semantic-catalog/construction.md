@@ -144,7 +144,11 @@ depends on exactly one base-dataset Fact of its Measure, over whose table the ex
 It also reads a Dimension's values in the form of the kind its dimension-kind Facts state, which
 must be exactly one defined kind, parses a calendar level's expression, which may read only the
 time value, and requires a Measure's default time granularity to depend on its Dimension's
-dimension-kind Fact stating a calendar.
+dimension-kind Fact stating a calendar. A classification's classified Field gets a premise
+dependency on that Field's existence. A classification hierarchy whose levels have expressions
+must depend on the Dimension's classified-field Facts naming one Field; its expressions are parsed
+over that Field's table, add the Fields they reference as premise dependencies, and are refused
+when one only references a column.
 If any check fails, nothing is written and the task fails with the reason.
 
 ## Choosing the confirmation path
