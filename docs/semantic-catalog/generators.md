@@ -331,7 +331,7 @@ each.
 | --- | --- |
 | Row meaning inference | Confirmed Dataset existence, documents, feedback without related Facts |
 | Field meaning inference | Confirmed Field existence, documents, feedback without related Facts |
-| Concept inference | Confirmed row kind and Field meaning, documents, feedback without related Facts |
+| Concept inference | Confirmed row kind, Field meaning, and `identifier` value kind, documents, feedback without related Facts |
 | Analytical semantics inference | Documents, feedback without related Facts, confirmed Field meaning, confirmed business-term existence and name (for a missing name) |
 | Identifier correspondence inference | Confirmed represented concept of a Field, confirmed concept relationship, documents, feedback without related Facts |
 | Correction interpretation | Feedback with related Facts, including corrections from review |
@@ -348,8 +348,14 @@ multiplicity the business allows, likewise need the confirmed meanings of severa
 model calls come from passing several targets in one call, not from merging rules.
 
 Concept inference targets a Dataset's row concept once its row kind is confirmed, and a Field's
-represented concept once its meaning is confirmed. One call passes the targets of several Datasets
-with their confirmed Facts, the Concepts in use (candidates and confirmed ones) with their meaning,
+represented concept once its meaning is confirmed. Whether a Field identifies an object is judged
+from how the business uses its values, not from whether it is a key: an e-mail address, a phone
+number, or a membership card number identifies the customer even when the table has a surrogate key,
+while a name or a birth date only describes one. Identifier correspondence inference compares only
+Fields with a confirmed represented concept, so this judgement decides which matches it can find. An
+inferred value kind may be confirmed only after the meaning, so the confirmation of an `identifier`
+value kind also triggers a run for the Field's Dataset; another value kind does not. One call
+passes the targets of several Datasets with their confirmed Facts, the Concepts in use (candidates and confirmed ones) with their meaning,
 the relationships between them, every slug taken, and the relevant document parts. The model refers
 to a Concept in use or declares a new one with a slug, so registering the POS database after the
 e-commerce one refers members to the customer concept the customers table already has. A new

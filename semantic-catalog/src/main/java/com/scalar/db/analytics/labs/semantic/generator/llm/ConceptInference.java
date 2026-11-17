@@ -61,6 +61,7 @@ final class ConceptInference implements ModelGenerator {
 
   private static final JsonNodeFactory JSON = JsonNodeFactory.instance;
   private static final String EXISTS = "exists";
+  private static final String IDENTIFIER = "identifier";
   private static final IdentityKey EXISTS_KEY = IdentityKey.choice(EXISTS);
 
   static final String INSTRUCTIONS =
@@ -89,8 +90,13 @@ final class ConceptInference implements ModelGenerator {
       "slug": a short business name of lowercase letters and digits joined by hyphens, at most \
       63 characters, such as "customer" or "store-sale", never one in "slugsInUse", and never a \
       definitional attribute such as a tax treatment. A column that identifies an object, such as \
-      a customer ID, represents that object's concept; omit columns that represent no concept, \
-      such as amounts or free text.
+      a customer ID, represents that object's concept. Judge this from how the business uses the \
+      values, not from whether the column is a key: a value the business uses to tell one object \
+      from another or to find the same object in another system, such as an e-mail address, a \
+      phone number, a membership card number, or an employee number, identifies that object even \
+      when the table has another key, and a column whose confirmed value kind is "identifier" \
+      usually does. Omit columns that represent no concept, such as amounts or free text, and \
+      columns that describe an object without telling it apart, such as a name or a birth date.
 
       Propose a relationship between two concepts when the inputs show how they relate. Its \
       "kind" is "association" for different objects related in the business, such as a customer \
@@ -145,6 +151,7 @@ final class ConceptInference implements ModelGenerator {
     return List.of(
         new Input.Confirmed(ElementKind.DATASET, Vocabulary.ROW_KIND),
         new Input.Confirmed(ElementKind.FIELD, Vocabulary.MEANING),
+        new Input.Confirmed(ElementKind.FIELD, Vocabulary.VALUE_KIND),
         new Input.Document());
   }
 
@@ -167,6 +174,18 @@ final class ConceptInference implements ModelGenerator {
       switch (trigger) {
         case Trigger.Confirmed confirmed when confirmed.kind() == ElementKind.DATASET ->
             datasets.add(confirmed.element());
+        // A value kind confirmed after the meaning asks again only when it tells that the Field
+        // identifies an object; another value kind adds nothing a represented concept rests on.
+        case Trigger.Confirmed confirmed
+            when confirmed.kind() == ElementKind.FIELD
+                && confirmed.predicate().equals(Vocabulary.VALUE_KIND) -> {
+          if (context
+              .fact(confirmed.fact())
+              .filter(fact -> fact.value().asText().equals(IDENTIFIER))
+              .isPresent()) {
+            context.parent(confirmed.element()).ifPresent(datasets::add);
+          }
+        }
         case Trigger.Confirmed confirmed when confirmed.kind() == ElementKind.FIELD ->
             context.parent(confirmed.element()).ifPresent(datasets::add);
         case Trigger.Observed observed

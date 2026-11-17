@@ -14,8 +14,11 @@ import static com.scalar.db.analytics.labs.semantic.EcPosSample.registerPos;
 import static com.scalar.db.analytics.labs.semantic.EcPosSample.registerShop;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.scalar.db.analytics.labs.semantic.model.BuildTask;
 import com.scalar.db.analytics.labs.semantic.model.Dependency;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
@@ -27,6 +30,7 @@ import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Transition;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ValidationMethod;
+import com.scalar.db.analytics.labs.semantic.policy.PolicyEvaluationModel;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -46,6 +50,7 @@ import org.junit.jupiter.api.Test;
  */
 class ConceptInferenceTest extends StoreScenarioTest {
   private static final JsonNodeFactory JSON = JsonNodeFactory.instance;
+  private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final String ROW = "row-meaning-inference";
   private static final String FIELD = "field-meaning-inference";
   private static final String CONCEPT = "concept-inference";
@@ -174,6 +179,14 @@ class ConceptInferenceTest extends StoreScenarioTest {
       }
       return answer.toString();
     };
+  }
+
+  private static ObjectNode readObject(String json) {
+    try {
+      return (ObjectNode) MAPPER.readTree(json);
+    } catch (JsonProcessingException e) {
+      throw new IllegalStateException(e);
+    }
   }
 
   // Reading what was recorded
@@ -399,6 +412,93 @@ class ConceptInferenceTest extends StoreScenarioTest {
     // The first wording is recorded; its mirror in the same run adds no second candidate.
     assertThat(only(s, edge, Vocabulary.MULTIPLICITY).value())
         .isEqualTo(JSON.objectNode().put("from", "exactly-one").put("to", "zero-or-one"));
+  }
+
+  /**
+   * Adopts everything except the value kinds of the e-mail columns, which wait for a person, as an
+   * inferred value kind can.
+   */
+  private static final class HoldingEmailValueKinds implements PolicyEvaluationModel {
+    @Override
+    public JsonNode version() {
+      return JSON.objectNode().put("model", "holding-email-value-kinds");
+    }
+
+    @Override
+    public synchronized Decision evaluate(Subject subject) {
+      var fact = subject.fact().revision().fact();
+      if (fact.contains(".email/" + Vocabulary.VALUE_KIND + "/")) {
+        return new Decision.RequestConsent("an inferred value kind", JSON.objectNode());
+      }
+      return new Decision.Adopt("the inputs support it");
+    }
+  }
+
+  @Test
+  void anEmailConfirmedAsAnIdentifierLaterIsAskedAboutAgainAndGetsItsObjectsConcept() {
+    var s = scenario();
+    var sql = sample();
+    registerShop(s);
+    registerPos(s);
+    // The shop's e-mail is inferred to identify customers, the store's to be plain text.
+    var model =
+        meanings()
+            .answering(
+                FIELD,
+                input -> {
+                  var answer = JSON.objectNode();
+                  var targets = answer.putArray("targets");
+                  for (var target : input.path("targets")) {
+                    var ref = target.path("ref").asText();
+                    var values = targets.addObject().put("ref", ref).putObject("values");
+                    values.putObject("meaning").put("value", "a column").put("basis", "its name");
+                    if (ref.endsWith(".email")) {
+                      var kind = ref.startsWith("shop.") ? "identifier" : "string";
+                      values.putObject("value-kind").put("value", kind).put("basis", "its values");
+                    }
+                  }
+                  return answer.toString();
+                })
+            // The model tells an e-mail identifies customers once its value kind says so.
+            .answering(
+                CONCEPT,
+                input -> {
+                  var answer = readObject(concepts(Set.of()).apply(input));
+                  var identifies = input.path("datasets").toString().contains("\"identifier\"");
+                  for (var target : input.path("targets")) {
+                    if (identifies && target.path("ref").asText().endsWith(".email")) {
+                      answer
+                          .withArray("targets")
+                          .addObject()
+                          .put("ref", target.path("ref").asText())
+                          .putObject("concept")
+                          .put("value", "customer")
+                          .put("basis", "customers are told apart by their e-mail address");
+                    }
+                  }
+                  return answer.toString();
+                });
+    drain(s, new HoldingEmailValueKinds(), sql, model);
+    var shopEmail = element(s, ElementKind.FIELD, "shop.public.customers.email");
+    var posEmail = element(s, ElementKind.FIELD, "pos.public.members.email");
+    assertThat(facts(s, shopEmail, Vocabulary.REPRESENTED_CONCEPT)).isEmpty();
+    var before = calls(model).size();
+
+    // A value kind that does not identify an object asks nothing again.
+    var posKind = only(s, posEmail, Vocabulary.VALUE_KIND);
+    Judgement.submit(s, Judgement.answer(posKind.fact(), AnswerType.CONSENT));
+    drain(s, new HoldingEmailValueKinds(), sql, model);
+    assertThat(calls(model)).hasSize(before);
+
+    var shopKind = only(s, shopEmail, Vocabulary.VALUE_KIND);
+    Judgement.submit(s, Judgement.answer(shopKind.fact(), AnswerType.CONSENT));
+    drain(s, new HoldingEmailValueKinds(), sql, model);
+
+    assertThat(calls(model).subList(before, calls(model).size()))
+        .singleElement()
+        .satisfies(input -> assertThat(targetRefs(input)).contains("shop.public.customers.email"));
+    assertThat(only(s, shopEmail, Vocabulary.REPRESENTED_CONCEPT).value().asText())
+        .isEqualTo(element(s, ElementKind.CONCEPT, "customer"));
   }
 
   @Test
