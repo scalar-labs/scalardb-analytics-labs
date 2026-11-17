@@ -222,7 +222,10 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
       A business term is a word or phrase people use for an element:
       - "written-form": a list of its names, at most one per language, each \
       {"value": <the word or phrase as people write it, such as "EC売上">, "language": <the \
-      language it is written in, one of "languages">, "basis": ..., "citation": ...}. Give only \
+      language it is written in, one of "languages">, "basis": ..., "citation": ...}. Unlike \
+      the other values, the list itself is the value of "written-form", not wrapped in \
+      {"value": ..., "basis": ...}: "written-form": [{"value": "EC売上", "language": "ja", \
+      "basis": ...}]. Give only \
       names the documents use; never translate a name to fill a language unless \
       "missingNames" asks for it. A name is written in its own language, not in the recording \
       language. In "businessTerms" of the input, "written-form" holds the names that exist by \
@@ -774,8 +777,15 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
     return elements;
   }
 
-  /** Reads a business term's names: a list of supported values, each with its language. */
+  /**
+   * Reads a business term's names: a list of supported values, each with its language. Models often
+   * wrap the list the way every other predicate is given, as {"value": [...], "basis": ...}; each
+   * name carries its own support, so the list inside is read and the wrapper's basis is not.
+   */
   private static List<Name> names(JsonNode list) {
+    if (list.isObject() && list.has("value")) {
+      list = list.path("value");
+    }
     if (list.isNull()) {
       return List.of();
     }

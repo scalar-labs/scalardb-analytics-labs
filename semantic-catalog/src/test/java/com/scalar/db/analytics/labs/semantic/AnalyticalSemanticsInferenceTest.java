@@ -1057,6 +1057,34 @@ class AnalyticalSemanticsInferenceTest extends StoreScenarioTest {
         .containsExactly("ja", "en");
   }
 
+  @Test
+  void namesWrappedLikeOtherValuesAreStillRecorded() {
+    var s = scenario();
+    var sql = data();
+    registerTables(s);
+    var policy = new AdoptingDataSemantics();
+    // The shape models give: the list of names wrapped as {"value": [...], "basis": ...}.
+    var model =
+        model(
+            input -> {
+              var answer = glossaryAnswerNode(input);
+              var values = (ObjectNode) answer.path("businessTerms").get(0).path("values");
+              var wrapper = JSON.objectNode().put("basis", "the glossary uses it");
+              wrapper
+                  .putArray("value")
+                  .add(value("EC売上", "the glossary", "", null).put("language", "ja"));
+              values.set(Vocabulary.WRITTEN_FORM, wrapper);
+              return answer.toString();
+            });
+    drain(s, policy, sql, model);
+    store.registerDocument(s.domain, "owner", null, GLOSSARY);
+    var summary = drain(s, policy, sql, model);
+
+    generated(summary);
+    assertThat(name(s, element(s, ElementKind.BUSINESS_TERM, "ec-sales"), "ja"))
+        .hasValueSatisfying(revision -> assertThat(revision.value().asText()).isEqualTo("EC売上"));
+  }
+
   /**
    * A policy evaluation model that also adopts the existence of business terms, so a confirmed term
    * can lack a name, and asks for consent on everything else.
