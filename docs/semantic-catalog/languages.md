@@ -45,7 +45,7 @@ them primary. The declaration lives in the workspace configuration (see
 
 - for which languages a business term's name is missing knowledge;
 - into which languages text can be translated, when a translation is asked for;
-- **[Planned]** which languages a read can ask for;
+- which languages a read can ask for;
 - in which language every description is to be written: the primary one, the domain's
   recording language.
 
@@ -107,7 +107,7 @@ recorded as missing input.
 
 Finding elements by written form matches the names of every language, because a reader may use a
 name from a language other than the one they read in (see
-[`public-api.md`](public-api.md#finding-elements)). **[Planned]** A call can name one language to
+[`public-api.md`](public-api.md#finding-elements)). A call can name one language to
 match only its names, and each result says which language's name matched and carries the term's
 names in the other languages.
 
@@ -185,22 +185,24 @@ granularity, refer to a level by its name. A Fact Revision names the text of the
 produced it, such as an evaluation's reason or an answer's wording; a Fact's value is asked for by
 the Fact.
 
-Translating in a build task rather than on read keeps reads free of model calls. **[Planned]** A
+Translating in a build task rather than on read keeps reads free of model calls. A
 read therefore returns only translations that exist and reports the rest as pending (see
 [Reading in a language](#reading-in-a-language)).
 
-A mistranslation cannot be caught by review. **[Planned]** Every translation a read returns is
+A mistranslation cannot be caught by review. Every translation a read returns is
 therefore marked as one, and the original is always returned with it.
 
 ## Reading in a language
 
-**[Planned]** This section describes design that is not implemented yet.
-
 A read takes, optionally, the language to read in, one of the domain's declared languages. Every
 text a read returns comes as its original, in the recording language. Without a language, or with
-the primary one, that is all it returns. When the language read in is another, each text also comes
-with its translation or a mark that the translation is pending, and the read requests the
-translations that are missing, so a later read returns them once a build run has made them.
+the primary one, that is all it returns. When the language read in is another, the read returns
+its result unchanged and, beside it, each text with its translation or a mark that the translation
+is pending, named by the URN the result names its record by. It then requests the translations
+that are missing, so a later read returns them once a build run has made them. Keeping
+translations beside the result rather than inside it leaves the result exactly what a read in the
+recording language returns, so nothing that composes a query or a Generator's input can take a
+translation for an original.
 Reading the domain's languages returns the declared languages and the primary one. The exact contract is in [`public-api.md`](public-api.md#common-contract).
 
 Review material is written in the recording language like other generated text, so a deciding

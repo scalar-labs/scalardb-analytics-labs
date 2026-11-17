@@ -11,12 +11,18 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.scalar.db.analytics.labs.semantic.model.BuildTask;
 import com.scalar.db.analytics.labs.semantic.model.ElementIdentity;
+import com.scalar.db.analytics.labs.semantic.model.Knowledge;
+import com.scalar.db.analytics.labs.semantic.model.KnowledgeRequest;
 import com.scalar.db.analytics.labs.semantic.model.LogPosition;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
+import com.scalar.db.analytics.labs.semantic.model.Review;
 import com.scalar.db.analytics.labs.semantic.model.SemanticCatalogException;
 import com.scalar.db.analytics.labs.semantic.model.Urns;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.AnswerType;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.PolicyResult;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Transition;
 import com.scalar.db.analytics.labs.semantic.policy.PolicyEvaluationModel;
 import java.util.List;
 import java.util.function.Function;
@@ -119,6 +125,178 @@ class TranslationTest extends StoreScenarioTest {
     var again = store.requestTranslations(s.domain, "en", List.of(fact));
     assertThat(again.task()).isEmpty();
     assertThat(again.pending()).isEmpty();
+  }
+
+  /** A Field whose meaning is confirmed; the Field's URN and the meaning Fact's URN. */
+  private record ConfirmedMeaning(String field, String fact) {}
+
+  private static ConfirmedMeaning confirmedMeaning(Scenario s, String text) {
+    var c = s.begin();
+    var dataset = c.dataset("shop.public.orders");
+    var field = c.field(dataset, "shop.public.orders.ordered_at");
+    var fact = c.candidate(c.address(field, Vocabulary.MEANING), text);
+    c.confirmByMachine(fact);
+    var written = s.write(c);
+    return new ConfirmedMeaning(written.urn(field), written.urn(fact));
+  }
+
+  private static LanguageRead<List<Knowledge.Answer>> meaningIn(
+      Scenario s, String language, String field) {
+    return store.read(
+        s.domain,
+        Point.LATEST,
+        language,
+        snapshot -> snapshot.request(List.of(KnowledgeRequest.of(field, Vocabulary.MEANING))));
+  }
+
+  @Test
+  void aReadInAnotherLanguageReturnsOriginalsWithTheirTranslationsOncePendingOnesAreTranslated() {
+    var s = scenario();
+    var meaning = confirmedMeaning(s, "注文が確定した日時");
+    var commits = s.lastCommit();
+
+    // Before the translation task runs, the original comes with a pending mark, and the read
+    // requests the translation.
+    var before = meaningIn(s, "en", meaning.field());
+    assertThat(before.recordingLanguage()).isEqualTo("ja");
+    assertThat(before.language()).isEqualTo("en");
+    assertThat(before.result())
+        .singleElement()
+        .satisfies(
+            answer ->
+                assertThat(answer.addresses())
+                    .singleElement()
+                    .satisfies(
+                        address ->
+                            assertThat(address.knowledge())
+                                .isInstanceOfSatisfying(
+                                    Knowledge.Selected.class,
+                                    selected ->
+                                        assertThat(selected.fact().revision().value().asText())
+                                            .isEqualTo("注文が確定した日時"))));
+    assertThat(before.texts())
+        .containsOnlyKeys(meaning.fact())
+        .extractingByKey(meaning.fact())
+        .isInstanceOfSatisfying(
+            LanguageRead.Text.Pending.class,
+            pending ->
+                assertThat(pending.originals())
+                    .containsExactly(java.util.Map.entry("value", "注文が確定した日時")));
+    assertThat(before.translationTask()).isPresent();
+    assertThat(translationTasks(s))
+        .singleElement()
+        .satisfies(task -> assertThat(task.triggers()).hasSize(1));
+
+    // After a build run, the same read returns the original beside its translation and requests
+    // nothing; neither reading nor translating wrote to the log.
+    run(s, new ScriptedModel().translating(PREFIXING));
+    var after = meaningIn(s, "en", meaning.field());
+    assertThat(after.texts())
+        .containsOnlyKeys(meaning.fact())
+        .extractingByKey(meaning.fact())
+        .isInstanceOfSatisfying(
+            LanguageRead.Text.Translated.class,
+            translated -> {
+              assertThat(translated.originals())
+                  .containsExactly(java.util.Map.entry("value", "注文が確定した日時"));
+              assertThat(translated.translation().language()).isEqualTo("en");
+              assertThat(translated.translation().texts())
+                  .containsExactly(java.util.Map.entry("value", "EN 注文が確定した日時"));
+            });
+    assertThat(after.translationTask()).isEmpty();
+    assertThat(s.lastCommit()).isEqualTo(commits);
+  }
+
+  @Test
+  void aReadInTheRecordingLanguageReturnsOriginalsOnlyAndAnUndeclaredLanguageIsInvalid() {
+    var s = scenario();
+    var meaning = confirmedMeaning(s, "注文が確定した日時");
+
+    var inJapanese = meaningIn(s, "ja", meaning.field());
+    assertThat(inJapanese.texts()).isEmpty();
+    assertThat(inJapanese.translationTask()).isEmpty();
+    assertThat(inJapanese.result()).singleElement();
+    assertThat(translationTasks(s)).isEmpty();
+
+    assertThatThrownBy(() -> meaningIn(s, "fr", meaning.field()))
+        .isInstanceOf(SemanticCatalogException.class)
+        .hasMessageContaining("does not declare the language fr");
+    assertThat(translationTasks(s)).isEmpty();
+    assertThat(store.languages(s.domain).declared()).containsExactly("ja", "en");
+    assertThat(store.languages(s.domain).primary()).isEqualTo("ja");
+  }
+
+  @Test
+  void aReadInAnotherLanguageCarriesTheTextOfAnswersAndEvaluationsItReturns() {
+    var s = scenario();
+    var c = s.begin();
+    var dataset = c.dataset("shop.public.orders");
+    var field = c.field(dataset, "shop.public.orders.ordered_at");
+    var rejected = c.candidate(c.address(field, Vocabulary.MEANING), "注文した日");
+    var answer = c.answer(rejected, Transition.CONFIRM, AnswerType.REJECTION);
+    c.add(new LogRecord.Reject(rejected, new LogRecord.Basis.Event(answer)));
+    var awaiting = c.candidate(c.address(field, Vocabulary.NULL_MEANING), "未確定");
+    var evaluation = c.evaluate(awaiting, Transition.CONFIRM, PolicyResult.REQUEST_CONSENT);
+    var written = s.write(c);
+    var answerRecord = written.urn(answer);
+    var evaluationRecord = written.urn(evaluation);
+
+    // A rejected Fact's value and the wording of the answer given to it.
+    var knowledge =
+        store.read(
+            s.domain,
+            Point.LATEST,
+            "en",
+            snapshot ->
+                snapshot.request(
+                    List.of(KnowledgeRequest.of(written.urn(field), Vocabulary.MEANING)),
+                    Knowledge.View.WITH_UNCONFIRMED));
+    assertThat(knowledge.texts()).containsKeys(written.urn(rejected), answerRecord);
+    assertThat(knowledge.texts().get(answerRecord))
+        .isInstanceOfSatisfying(
+            LanguageRead.Text.Pending.class,
+            pending -> {
+              assertThat(pending.logRecord()).isEqualTo(answerRecord);
+              assertThat(pending.originals())
+                  .containsExactly(java.util.Map.entry("wording", "wording"));
+            });
+
+    // A review item's evaluation reason.
+    var review =
+        store.read(s.domain, Point.LATEST, "en", snapshot -> snapshot.reviewList(Review.Query.ALL));
+    assertThat(review.texts()).containsKeys(written.urn(awaiting), evaluationRecord);
+    assertThat(review.texts().get(evaluationRecord))
+        .isInstanceOfSatisfying(
+            LanguageRead.Text.Pending.class,
+            pending -> assertThat(pending.originals()).containsEntry("reason", "test"));
+    assertThat(review.translationTask()).isPresent();
+  }
+
+  @Test
+  void aBusinessTermsNamesReadInAnotherLanguageGetNoTranslation() {
+    var s = scenario();
+    var c = s.begin();
+    var term =
+        c.add(
+            new LogRecord.Element(
+                new ElementIdentity.Unique(ElementKind.BUSINESS_TERM, "ec-sales")));
+    c.confirmByMachine(c.closedRangeCandidate(c.address(term, Vocabulary.EXISTENCE), "exists"));
+    c.confirmByMachine(
+        c.closedRangeCandidate(c.address(term, Vocabulary.WRITTEN_FORM, "ja"), "EC売上"));
+    var written = s.write(c);
+
+    var read =
+        store.read(
+            s.domain,
+            Point.LATEST,
+            "en",
+            snapshot ->
+                snapshot.request(
+                    List.of(KnowledgeRequest.of(written.urn(term), Vocabulary.WRITTEN_FORM))));
+    assertThat(read.result().getFirst().addresses()).isNotEmpty();
+    assertThat(read.texts()).isEmpty();
+    assertThat(read.translationTask()).isEmpty();
+    assertThat(translationTasks(s)).isEmpty();
   }
 
   @Test

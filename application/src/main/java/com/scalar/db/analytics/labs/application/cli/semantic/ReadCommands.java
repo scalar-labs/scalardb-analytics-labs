@@ -129,12 +129,12 @@ final class ReadCommands {
 
     @Override
     Map<String, Object> call(SemanticCatalogService service) {
+      var point = service.point(snapshot());
+      var elementKind = kind == null ? null : constant(ElementKind.class, kind, "--kind");
       var read =
-          service.elements(
-              service.point(snapshot()),
-              kind == null ? null : constant(ElementKind.class, kind, "--kind"),
-              parent,
-              term);
+          term == null
+              ? service.elements(point, elementKind, parent)
+              : service.elements(point, elementKind, parent, term);
       return envelope(
           "semantic-elements",
           "catalogSnapshot",

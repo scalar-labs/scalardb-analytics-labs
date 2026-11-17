@@ -5,6 +5,7 @@
 package com.scalar.db.analytics.labs.semantic;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 
 import com.scalar.db.analytics.labs.semantic.model.ElementIdentity;
@@ -12,9 +13,11 @@ import com.scalar.db.analytics.labs.semantic.model.Knowledge;
 import com.scalar.db.analytics.labs.semantic.model.KnowledgeRequest;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
+import com.scalar.db.analytics.labs.semantic.model.SemanticCatalogException;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -58,12 +61,42 @@ class LanguageQualifiedNamesTest extends StoreScenarioTest {
                     + ":fact-address:business-term:ec-sales/written-form;en"));
     assertThat(names).allMatch(name -> name.knowledge() instanceof Knowledge.Selected);
     assertThat(missingNames(s, termUrn)).isEmpty();
-    for (var name : List.of("EC売上", "EC sales")) {
-      List<Knowledge.Element> found = s.latest(snapshot -> snapshot.findElements(null, null, name));
-      assertThat(found)
-          .extracting(Knowledge.Element::element)
-          .containsExactly(written.urn(measure));
-    }
+    // Either name finds the term's element, saying which language matched and what the term is
+    // called in the other.
+    List<Knowledge.NamedElement> byJapanese =
+        s.latest(snapshot -> snapshot.findElements(null, null, "EC売上", null));
+    assertThat(byJapanese)
+        .singleElement()
+        .satisfies(
+            found -> {
+              assertThat(found.element()).isEqualTo(written.urn(measure));
+              assertThat(found.matches())
+                  .containsExactly(
+                      new Knowledge.NameMatch(termUrn, "ja", Map.of("en", "EC sales")));
+            });
+    List<Knowledge.NamedElement> byEnglish =
+        s.latest(snapshot -> snapshot.findElements(null, null, "EC sales", null));
+    assertThat(byEnglish)
+        .singleElement()
+        .satisfies(
+            found -> {
+              assertThat(found.element()).isEqualTo(written.urn(measure));
+              assertThat(found.matches())
+                  .containsExactly(new Knowledge.NameMatch(termUrn, "en", Map.of("ja", "EC売上")));
+            });
+
+    // Naming a language matches only its names.
+    List<Knowledge.NamedElement> inEnglish =
+        s.latest(snapshot -> snapshot.findElements(null, null, "EC sales", "en"));
+    assertThat(inEnglish)
+        .extracting(Knowledge.NamedElement::element)
+        .containsExactly(written.urn(measure));
+    List<Knowledge.NamedElement> japaneseNameInEnglish =
+        s.latest(snapshot -> snapshot.findElements(null, null, "EC売上", "en"));
+    assertThat(japaneseNameInEnglish).isEmpty();
+    assertThatThrownBy(() -> s.latest(snapshot -> snapshot.findElements(null, null, "EC売上", "fr")))
+        .isInstanceOf(SemanticCatalogException.class)
+        .hasMessageContaining("does not declare the language fr");
   }
 
   @Test

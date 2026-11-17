@@ -1027,6 +1027,18 @@ public final class SemanticCatalogStore implements AutoCloseable {
         });
   }
 
+  /**
+   * The languages a domain declares and its primary one, which is its recording language (see
+   * {@code docs/semantic-catalog/public-api.md}, "Common contract"), so a caller can map a reader's
+   * request to a language a read can name.
+   *
+   * @throws SemanticCatalogException when the domain does not exist
+   * @throws RecordingLanguageChangedException when its primary language changed
+   */
+  public Languages languages(String domain) {
+    return store.read(transaction -> languages(transaction, domain));
+  }
+
   // Translations
 
   /**
@@ -1073,16 +1085,16 @@ public final class SemanticCatalogStore implements AutoCloseable {
     return store.read(
         transaction -> {
           Translations.requireDeclared(languages(transaction, domain), language);
-          var projection = new Projection(domain, transaction.projectionSource(domain));
-          var byRecord = new LinkedHashMap<String, String>();
-          for (var urn : records) {
-            byRecord.put(urn, Translations.logRecordOf(transaction, domain, projection, urn));
-          }
-          var found = transaction.translations(domain, language, byRecord.values());
+          var originals = Translations.originalsOf(transaction, domain, records);
+          var found =
+              transaction.translations(
+                  domain,
+                  language,
+                  originals.values().stream().map(Translations.Original::logRecord).toList());
           var result = new LinkedHashMap<String, Translation>();
-          byRecord.forEach(
-              (urn, logRecord) -> {
-                var translation = found.get(logRecord);
+          originals.forEach(
+              (urn, original) -> {
+                var translation = found.get(original.logRecord());
                 if (translation != null) {
                   result.put(urn, translation);
                 }
@@ -1132,23 +1144,67 @@ public final class SemanticCatalogStore implements AutoCloseable {
    */
   public <T> T read(String domain, Point point, Function<CatalogSnapshot, T> reader) {
     return store.read(
-        transaction -> {
-          languages(transaction, domain);
-          var last = transaction.lastCommit(domain);
-          var commit =
-              switch (point) {
-                case Point.Latest ignored -> last;
-                case Point.At at -> {
-                  if (at.commit() > last) {
-                    throw new SemanticCatalogException(
-                        "Domain " + domain + " has no commit " + at.commit() + " yet");
-                  }
-                  yield at.commit();
-                }
-              };
-          return reader.apply(
-              new CatalogSnapshot(transaction, domain, languages(transaction, domain), commit));
-        });
+        transaction -> readAt(transaction, domain, languages(transaction, domain), point, reader));
+  }
+
+  /**
+   * Reads the Catalog Snapshot of a domain at a point in a language (see {@code
+   * docs/semantic-catalog/languages.md}, "Reading in a language"). The reader's result keeps its
+   * original text. When the language is not the recording language, each text the result returns
+   * comes beside it with its translation or a pending mark, and the pending texts are then
+   * requested, which adds triggers to the language's translation task outside the log and calls no
+   * model. In the recording language this is the same as {@link #read(String, Point, Function)}.
+   *
+   * @throws SemanticCatalogException when the domain does not exist, does not declare the language,
+   *     or the point names a commit not written yet
+   */
+  public <T> LanguageRead<T> read(
+      String domain, Point point, String language, Function<CatalogSnapshot, T> reader) {
+    var read =
+        store.read(
+            transaction -> {
+              var languages = languages(transaction, domain);
+              Translations.requireDeclared(languages, language);
+              var result = readAt(transaction, domain, languages, point, reader);
+              var texts =
+                  language.equals(languages.primary())
+                      ? Map.<String, LanguageRead.Text>of()
+                      : Translations.texts(transaction, domain, language, ReadTexts.of(result));
+              return new LanguageRead<>(
+                  result, languages.primary(), language, texts, OptionalLong.empty());
+            });
+    var pending =
+        read.texts().entrySet().stream()
+            .filter(entry -> entry.getValue() instanceof LanguageRead.Text.Pending)
+            .map(Map.Entry::getKey)
+            .toList();
+    if (pending.isEmpty()) {
+      return read;
+    }
+    var requested = requestTranslations(domain, language, pending);
+    return new LanguageRead<>(
+        read.result(), read.recordingLanguage(), language, read.texts(), requested.task());
+  }
+
+  private static <T> T readAt(
+      StoreTransaction transaction,
+      String domain,
+      Languages languages,
+      Point point,
+      Function<CatalogSnapshot, T> reader) {
+    var last = transaction.lastCommit(domain);
+    var commit =
+        switch (point) {
+          case Point.Latest ignored -> last;
+          case Point.At at -> {
+            if (at.commit() > last) {
+              throw new SemanticCatalogException(
+                  "Domain " + domain + " has no commit " + at.commit() + " yet");
+            }
+            yield at.commit();
+          }
+        };
+    return reader.apply(new CatalogSnapshot(transaction, domain, languages, commit));
   }
 
   /**

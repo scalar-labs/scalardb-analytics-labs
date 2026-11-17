@@ -333,12 +333,12 @@ class AgentReadsTest extends StoreScenarioTest {
   void aBusinessTermsWrittenFormFindsTheElementItRefersTo() {
     var sample = sample();
     for (var name : List.of("売上", "revenue")) {
-      List<Knowledge.Element> found =
-          sample.s.latest(snapshot -> snapshot.findElements(null, null, name));
-      assertThat(found).extracting(Knowledge.Element::element).containsExactly(sample.measure);
+      List<Knowledge.NamedElement> found =
+          sample.s.latest(snapshot -> snapshot.findElements(null, null, name, null));
+      assertThat(found).extracting(Knowledge.NamedElement::element).containsExactly(sample.measure);
     }
-    List<Knowledge.Element> none =
-        sample.s.latest(snapshot -> snapshot.findElements(null, null, "sales"));
+    List<Knowledge.NamedElement> none =
+        sample.s.latest(snapshot -> snapshot.findElements(null, null, "sales", null));
     assertThat(none).isEmpty();
   }
 

@@ -11,8 +11,11 @@ import com.scalar.db.analytics.labs.semantic.model.Vocabulary.AnswerType;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Transition;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.TreeMap;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -275,4 +278,31 @@ public sealed interface Knowledge {
    * @param parent the Dataset of a Field; absent for other kinds
    */
   record Element(String element, ElementKind kind, @Nullable String parent) {}
+
+  /**
+   * An element found by a business term's written form (see {@code
+   * docs/semantic-catalog/public-api.md}, "Finding elements").
+   *
+   * @param parent the Dataset of a Field; absent for other kinds
+   * @param matches the business terms that refer to the element and have the written form
+   */
+  record NamedElement(
+      String element, ElementKind kind, @Nullable String parent, List<NameMatch> matches) {
+    public NamedElement {
+      matches = List.copyOf(matches);
+    }
+  }
+
+  /**
+   * A business term whose name matched a written form.
+   *
+   * @param term the business term
+   * @param language the language whose name matched
+   * @param otherNames the term's selected names in the other languages, by language
+   */
+  record NameMatch(String term, String language, Map<String, String> otherNames) {
+    public NameMatch {
+      otherNames = Collections.unmodifiableMap(new TreeMap<>(otherNames));
+    }
+  }
 }

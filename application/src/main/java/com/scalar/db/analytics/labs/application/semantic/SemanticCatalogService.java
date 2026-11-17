@@ -101,11 +101,17 @@ public final class SemanticCatalogService {
 
   /** Finds the elements whose existence is selected at a point. */
   public Read<List<Knowledge.Element>> elements(
-      Point point,
-      @Nullable ElementKind kind,
-      @Nullable String parent,
-      @Nullable String writtenForm) {
-    return snapshot(point, snapshot -> snapshot.findElements(kind, parent, writtenForm));
+      Point point, @Nullable ElementKind kind, @Nullable String parent) {
+    return snapshot(point, snapshot -> snapshot.findElements(kind, parent));
+  }
+
+  /**
+   * Finds the elements that business terms with a written form refer to at a point, matching the
+   * names of every declared language.
+   */
+  public Read<List<Knowledge.NamedElement>> elements(
+      Point point, @Nullable ElementKind kind, @Nullable String parent, String writtenForm) {
+    return snapshot(point, snapshot -> snapshot.findElements(kind, parent, writtenForm, null));
   }
 
   /** Requests knowledge at a point. */
@@ -264,9 +270,7 @@ public final class SemanticCatalogService {
    * them checks the recording language, as every other call does.
    */
   public Languages languages() {
-    return store(
-        store ->
-            store.read(domain(), Point.LATEST, ignored -> workspace.semanticCatalogLanguages()));
+    return store(store -> store.languages(domain()));
   }
 
   private String domain() {

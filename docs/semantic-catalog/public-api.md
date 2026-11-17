@@ -53,15 +53,19 @@ neither their URN nor their content is returned, only the fact that a hidden ref
 Withholding URNs keeps the existence and names of hidden objects from leaking, without making the
 rest of the knowledge unusable.
 
-**[Planned]** **Language.** A read takes, optionally, the language to read in, one of the domain's
+**Language.** A read takes, optionally, the language to read in, one of the domain's
 declared languages (see [`languages.md`](languages.md#reading-in-a-language)); a language the
 domain does not declare is invalid input. Every text a read returns, in Fact values, scopes,
 evaluations, answers, and feedback, comes as its original, in the domain's recording language (see
 [`languages.md`](languages.md#descriptions-one-recording-language)), and a read that names no
-language, or the primary one, returns only that. When the language read in is another, the text
-comes with its translation, marked as a translation, or marked as pending when the translation task
-has not run yet, and the read requests the missing translations (see
-[`languages.md`](languages.md#translations)). A
+language, or the primary one, returns only that. When the language read in is another, the read
+returns, beside its unchanged result, the recording language and, for each URN in the result that
+names a record with text, that record's original texts with their translation, marked as a
+translation, or marked as pending when the translation task has not run yet. The read then
+requests the missing translations and returns the translation task it added them to (see
+[`languages.md`](languages.md#translations)). A Fact's value is named by the Fact, the text of the
+Fact Event a Fact Revision rests on by the Fact Revision, a Fact Address's descriptions by the Fact
+Address, and an answer, an evaluation, or an observation by its own URN. A
 translation never replaces the original, so a caller can always show which wording was judged.
 Business-term names are not translated: each language's name is returned at its own Fact Address.
 Text an operation records, such as an answer's wording or usage feedback, is given in the recording
@@ -256,7 +260,7 @@ optionally filtered by element kind, by parent element (the Fields of a Dataset)
 form of a business term, which returns the elements its selected referenced-element Facts point to.
 It does not interpret question wording; finding elements from a question is the Query Agent's work.
 A written form matches the names of every language, because a reader may use a name from a
-language other than the one they read in. **[Planned]** A call can name one language to match only
+language other than the one they read in. A call can name one language to match only
 its names, and each result says which language's name matched and carries the term's names in the
 other languages.
 

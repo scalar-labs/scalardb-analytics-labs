@@ -111,47 +111,88 @@ public final class CatalogSnapshot {
    *     when absent
    */
   public List<Knowledge.Element> findElements(@Nullable ElementKind kind, @Nullable String parent) {
-    return findElements(kind, parent, null);
-  }
-
-  /**
-   * The elements whose existence Fact is selected at this commit, optionally only those a business
-   * term refers to (see {@code docs/semantic-catalog/public-api.md}, "Finding elements").
-   *
-   * @param writtenForm only the elements that the selected referenced-element Facts of the business
-   *     terms with this selected written form point to; the written form is matched exactly, never
-   *     interpreted. Any element when absent.
-   */
-  public List<Knowledge.Element> findElements(
-      @Nullable ElementKind kind, @Nullable String parent, @Nullable String writtenForm) {
     if (commit == 0) {
       return List.of();
     }
-    var elements = transaction.presentedElements(domain, kind, parent, commit).stream();
-    if (writtenForm != null) {
-      var terms =
-          transaction.presentedElements(domain, ElementKind.BUSINESS_TERM, null, commit).stream()
-              .map(ElementRow::element)
-              .toList();
-      var named =
-          selectedValues(terms, Vocabulary.WRITTEN_FORM).stream()
-              .filter(selected -> selected.value().isTextual())
-              .filter(selected -> selected.value().asText().equals(writtenForm))
-              .map(Selected::element)
-              .distinct()
-              .toList();
-      var referenced = new HashSet<String>();
-      selectedValues(named, Vocabulary.REFERENCED_ELEMENT)
-          .forEach(selected -> referenced.add(selected.value().asText()));
-      elements = elements.filter(row -> referenced.contains(row.element()));
-    }
-    return elements
+    return transaction.presentedElements(domain, kind, parent, commit).stream()
         .map(row -> new Knowledge.Element(row.element(), row.kind(), row.parent()))
         .toList();
   }
 
-  /** The value of the selected Fact at one Fact Address of an element. */
-  private record Selected(String element, JsonNode value) {}
+  /**
+   * The elements that business terms with a written form refer to (see {@code
+   * docs/semantic-catalog/public-api.md}, "Finding elements"): the elements whose existence Fact is
+   * selected at this commit and that a selected referenced-element Fact of such a term points to.
+   * The written form is matched exactly, never interpreted, against the selected names of every
+   * declared language, or of one language when it is named, because a reader may use a name from a
+   * language other than the one they read in.
+   *
+   * @param language only the names in this language; every language when absent
+   * @throws SemanticCatalogException when the domain does not declare the language
+   */
+  public List<Knowledge.NamedElement> findElements(
+      @Nullable ElementKind kind,
+      @Nullable String parent,
+      String writtenForm,
+      @Nullable String language) {
+    if (language != null) {
+      Translations.requireDeclared(languages, language);
+    }
+    if (commit == 0) {
+      return List.of();
+    }
+    var terms =
+        transaction.presentedElements(domain, ElementKind.BUSINESS_TERM, null, commit).stream()
+            .map(ElementRow::element)
+            .toList();
+    var names = new LinkedHashMap<String, SortedMap<String, String>>();
+    for (var selected : selectedValues(terms, Vocabulary.WRITTEN_FORM)) {
+      if (selected.language() != null && selected.value().isTextual()) {
+        names
+            .computeIfAbsent(selected.element(), ignored -> new TreeMap<>())
+            .put(selected.language(), selected.value().asText());
+      }
+    }
+    var matches = new LinkedHashMap<String, Knowledge.NameMatch>();
+    names.forEach(
+        (term, byLanguage) ->
+            byLanguage.forEach(
+                (nameLanguage, name) -> {
+                  if (name.equals(writtenForm)
+                      && (language == null || language.equals(nameLanguage))
+                      && !matches.containsKey(term)) {
+                    var others = new TreeMap<>(byLanguage);
+                    others.remove(nameLanguage);
+                    matches.put(term, new Knowledge.NameMatch(term, nameLanguage, others));
+                  }
+                }));
+    var byElement = new HashMap<String, List<Knowledge.NameMatch>>();
+    for (var selected : selectedValues(matches.keySet(), Vocabulary.REFERENCED_ELEMENT)) {
+      var match = matches.get(selected.element());
+      var found =
+          byElement.computeIfAbsent(selected.value().asText(), ignored -> new ArrayList<>());
+      if (match != null && !found.contains(match)) {
+        found.add(match);
+      }
+    }
+    return transaction.presentedElements(domain, kind, parent, commit).stream()
+        .filter(row -> byElement.containsKey(row.element()))
+        .map(
+            row ->
+                new Knowledge.NamedElement(
+                    row.element(),
+                    row.kind(),
+                    row.parent(),
+                    byElement.getOrDefault(row.element(), List.of())))
+        .toList();
+  }
+
+  /**
+   * The value of the selected Fact at one Fact Address of an element.
+   *
+   * @param language the language of a language-qualified predicate's Fact Address; absent otherwise
+   */
+  private record Selected(String element, @Nullable String language, JsonNode value) {}
 
   /**
    * The values of the selected Facts at the empty-scope Fact Addresses of a predicate on some
@@ -170,23 +211,26 @@ public final class CatalogSnapshot {
     if (addresses.isEmpty()) {
       return values;
     }
-    var elementOf = new HashMap<String, String>();
-    addresses.forEach(address -> elementOf.put(address.factAddress(), address.element()));
-    var selected = new LinkedHashMap<String, String>();
-    for (var selection : transaction.selectionsAt(domain, elementOf.keySet(), commit)) {
+    var addressOf = new HashMap<String, FactAddressRow>();
+    addresses.forEach(address -> addressOf.put(address.factAddress(), address));
+    var selected = new LinkedHashMap<String, FactAddressRow>();
+    for (var selection : transaction.selectionsAt(domain, addressOf.keySet(), commit)) {
       if (selection.selectedFact() != null) {
-        selected.put(selection.selectedFact(), elementOf.get(selection.factAddress()));
+        selected.put(selection.selectedFact(), addressOf.get(selection.factAddress()));
       }
     }
     var reader = new Reader();
     reader.keep(transaction.factRecordsOf(domain, selected.keySet()));
     selected.forEach(
-        (fact, element) -> {
+        (fact, address) -> {
           var record = reader.records.get(fact);
           if (record != null) {
             record
                 .revision()
-                .ifPresent(revision -> values.add(new Selected(element, revision.value())));
+                .ifPresent(
+                    revision ->
+                        values.add(
+                            new Selected(address.element(), address.language(), revision.value())));
           }
         });
     return values;

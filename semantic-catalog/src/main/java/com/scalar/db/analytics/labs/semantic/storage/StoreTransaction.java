@@ -844,6 +844,38 @@ public final class StoreTransaction {
         .optional();
   }
 
+  /**
+   * The positions of the log records that created some Facts and Fact Addresses, by URN, in one
+   * query; a URN that names neither is left out.
+   */
+  public Map<String, LogPosition> creatingPositions(
+      String domain, Collection<String> facts, Collection<String> factAddresses) {
+    var positions = new HashMap<String, LogPosition>();
+    if (facts.isEmpty() && factAddresses.isEmpty()) {
+      return positions;
+    }
+    jdbc.sql(
+            "SELECT created.urn, r.commit_number, r.ordinal FROM ("
+                + "SELECT fact AS urn, created_commit FROM semantic_catalog.facts"
+                + " WHERE domain = :domain AND fact = ANY(CAST(:facts AS text[]))"
+                + " UNION ALL"
+                + " SELECT fact_address, created_commit FROM semantic_catalog.fact_addresses"
+                + " WHERE domain = :domain AND fact_address = ANY(CAST(:addresses AS text[]))"
+                + ") AS created JOIN semantic_catalog.log_records r ON r.domain = :domain"
+                + " AND r.commit_number = created.created_commit"
+                + " AND r.content ->> 'urn' = created.urn")
+        .param("domain", domain)
+        .param("facts", array(facts))
+        .param("addresses", array(factAddresses))
+        .query(
+            (rs, row) ->
+                positions.put(
+                    rs.getString("urn"),
+                    new LogPosition(rs.getLong("commit_number"), rs.getInt("ordinal"))))
+        .list();
+    return positions;
+  }
+
   /** Records a translation; one already recorded for the record and language is kept. */
   public void insertTranslation(String domain, Translation translation) {
     jdbc.sql(
