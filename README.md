@@ -44,7 +44,7 @@ process, with no background service.
 | --- | --- |
 | `bin/scalardb-analytics` | Launcher |
 | `lib/` | Runtime jars, including the packaged DuckDB extensions inside the `duckdb` jar |
-| `skills/query-agent-v0/` | Query Agent Skill v0 |
+| `skills/query-agent-v1/` | Query Agent Skill v1 |
 | `LICENSE` | Product license |
 | `licenses/` | Third-party inventory (`third-party/THIRD-PARTY.md`), the license files embedded in the bundled jars, and the licenses of the DuckDB and upstream catalog builds |
 | `provenance/` | Distribution version, platform, and source revision; DuckDB extension and Physical Catalog provenance |
@@ -91,7 +91,9 @@ The command returns a versioned JSON envelope:
 ```
 
 To try the whole flow against local sample databases, follow the
-[quickstart runbook](examples/quickstart/README.md).
+[quickstart runbook](examples/quickstart/README.md). The
+[agent-loop runbook](examples/agent-loop/README.md) adds the Semantic Catalog: an AI agent builds
+it, has it reviewed, and answers a business question with cited SQL.
 
 See [`application/README.md`](application/README.md) for workspace initialization, source
 registration, metadata discovery, SQL input modes, time limits, and the packaged Query Agent Skill.
@@ -149,7 +151,7 @@ Run the query-path acceptance suite:
 
 It runs the archive in the same restricted environment against a PostgreSQL and a MySQL source
 loaded with business fixtures, both read through their Connectors. Starting from an empty workspace, it registers both sources and
-queries them with the commands of Query Agent Skill v0. It checks type and value fidelity in the
+queries them with the commands of the Query Agent Skill. It checks type and value fidelity in the
 JSON output, a cross-source join, deterministic output and exit codes, pushdown in the SQL each
 source server logs, the time limit, output truncation, SIGINT cancellation, unsafe-SQL rejection,
 and secret redaction. It fails if an invocation leaves a source session or temporary file behind,

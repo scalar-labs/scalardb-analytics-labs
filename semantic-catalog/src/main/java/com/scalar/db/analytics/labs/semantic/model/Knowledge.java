@@ -183,6 +183,12 @@ public sealed interface Knowledge {
   }
 
   /** A record a Fact Revision refers to, with its content at the point. */
+  @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "type")
+  @JsonSubTypes({
+    @JsonSubTypes.Type(value = Referenced.Observation.class, name = "observation"),
+    @JsonSubTypes.Type(value = Referenced.Revision.class, name = "revision"),
+    @JsonSubTypes.Type(value = Referenced.Answer.class, name = "answer")
+  })
   sealed interface Referenced {
     /** The URN referred to. */
     String urn();

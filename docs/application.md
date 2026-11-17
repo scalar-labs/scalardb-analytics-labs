@@ -23,7 +23,7 @@ The application provides:
 - the capabilities the Semantic Catalog needs from outside it: SQL execution for data checks,
   and **[Planned]** name resolution and re-retrieval;
 - the operation that runs Semantic Catalog build tasks and reports their results and failures, and
-  **[Planned]** the operations that expose their state;
+  the operations that expose their state;
 - a versioned Agent Skill that teaches a Query Agent to use the CLI safely;
 - structured errors and diagnostics; and
 - assembly of the executable and distribution.
@@ -91,8 +91,8 @@ what is needed to resume.
 | Explore SQL interactively | Data engineer, analyst | **[Planned]** Embedded SQL shell |
 | Run SQL from existing tools | SQL client, BI, IDE | **[Planned]** Flight SQL |
 | Manage data sources and the Physical Catalog | Administrator, data engineer | CLI; **[Planned]** Web UI |
-| Construct, review, and correct the Semantic Catalog | Semantics owner | **[Planned]** CLI, Web UI |
-| Query with semantic knowledge | Query Agent | CLI and Agent Skill; **[Planned]** semantic knowledge |
+| Construct, review, and correct the Semantic Catalog | Semantics owner | CLI; **[Planned]** Web UI |
+| Query with semantic knowledge | Query Agent | CLI and Agent Skill |
 
 The product runs in one of two launch profiles. Both use the same components, application services,
 and persistence formats.
@@ -125,11 +125,12 @@ standard input.
 cancellation, timing, `EXPLAIN`, result formats, explicit limits and truncation, error positions,
 and a way to trace the Catalog Snapshot and Facts used.
 
-**[Planned]** For the Semantic Catalog, the CLI exposes registration, exploration, build tasks and
-their status, candidate review, decisions, corrections, and feedback as automatable,
-machine-readable operations. The Web UI lets a person compare candidates, validation results,
-conflicts, applicability, and impact before deciding. It owns no state transitions or decision rules
-of its own.
+For the Semantic Catalog, the CLI exposes registration, exploration, build tasks and their status,
+candidate review, decisions, corrections, and feedback as automatable, machine-readable operations,
+one command per read or operation of the Semantic Catalog's public API (see
+[`../application/README.md`](../application/README.md#standalone-cli)). **[Planned]** The Web UI
+lets a person compare candidates, validation results, conflicts, applicability, and impact before
+deciding. It owns no state transitions or decision rules of its own.
 
 Running Semantic Catalog build tasks (`semantic build`, see
 [`../application/README.md`](../application/README.md#standalone-cli)) has two modes:
@@ -154,7 +155,8 @@ sources registered at that point, and keeps it for the rest of the run.
 
 ## Callers and authority
 
-**[Planned]** This section describes design that is not implemented yet.
+**[Planned]** This section describes design that is not implemented yet, except its last
+paragraph, which says what holds today.
 
 The application authenticates every caller and passes the authenticated principal to the components;
 no component accepts a caller's word for who it is. A principal is a person or a Query Agent. Query
@@ -180,6 +182,11 @@ as an agent only because it says so: one that calls without its name is taken fo
 the separation between producing and confirming knowledge rests on the agents an administrator
 permits and is not enforced.
 
+Today no caller is authenticated and no agent has a name of its own: every call is made as the
+person running the CLI, who is recorded as the deciding party of answers and conflict resolutions,
+with `unauthenticated-local-user` as the authority-check reference, and as the registrant of
+feedback. That an agent never answers for the owner rests on the Agent Skill alone.
+
 ## Query Agents
 
 There is no Query-Agent-specific API or protocol. A Query Agent uses the CLI, guided by the Agent
@@ -192,18 +199,17 @@ Machine use of the CLI guarantees:
 - separate stdout and stderr, and meaningful exit codes;
 - no prompt in non-interactive mode;
 - explicit pagination, limits, and truncation;
-- references that identify query executions, and **[Planned]** Fact Revisions and Catalog Snapshots;
-  and
+- references that identify query executions, Fact Revisions, and Catalog Snapshots; and
 - no output of credentials, secrets, or unauthorized information.
 
 The application owns, versions, and distributes the Agent Skill with the CLI. It covers operating
-the CLI and interpreting what it returns. **[Planned]** It also covers the order of knowledge
-discovery, how to read Fact states, how to proceed on missing knowledge or a conflict (resolve it on
-the spot, run with unconfirmed knowledge only when the user explicitly asks, or stop), and how to
-report feedback after use. It does not cover the agent's model, provider, question-specific
-planning, or SQL-generation prompt.
+the CLI and interpreting what it returns. It also covers the order of knowledge discovery, how to
+read Fact states, how to proceed on missing knowledge or a conflict (resolve it on the spot, run
+with unconfirmed knowledge only when the user explicitly asks, or stop), and how to report feedback
+after use. It does not cover the agent's model, provider, question-specific planning, or
+SQL-generation prompt.
 
-**[Planned]** Agent Skill v1 covers two workflows:
+Agent Skill v1 covers two workflows:
 
 - **Building and reviewing with the semantics owner.** The agent starts a watching build in the
   background if none is running and reads the review list as items appear, telling new items from

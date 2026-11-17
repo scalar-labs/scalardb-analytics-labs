@@ -10,6 +10,7 @@ import com.scalar.db.analytics.labs.application.SemanticCatalogDomains;
 import com.scalar.db.analytics.labs.application.cli.CliOutput;
 import com.scalar.db.analytics.labs.application.construction.BuildTaskRun;
 import com.scalar.db.analytics.labs.application.construction.QueryEngineSqlParser;
+import com.scalar.db.analytics.labs.application.semantic.SemanticCatalogService;
 import com.scalar.db.analytics.labs.application.workspace.Workspace;
 import com.scalar.db.analytics.labs.physical.PhysicalCatalogException;
 import com.scalar.db.analytics.labs.semantic.DocumentRegistration;
@@ -19,6 +20,7 @@ import com.scalar.db.analytics.labs.semantic.model.Document;
 import com.scalar.db.analytics.labs.semantic.model.RecordingLanguageChangedException;
 import com.scalar.db.analytics.labs.semantic.model.SemanticCatalogException;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -35,17 +37,36 @@ import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Spec;
 
-@Command(name = "semantic", description = "Constructs the Semantic Catalog.")
+@Command(name = "semantic", description = "Constructs, reviews, and reads the Semantic Catalog.")
 public final class SemanticCommand implements Runnable {
   private SemanticCommand() {}
 
   /**
    * Creates the command with its {@code build} subcommand, which the caller keeps to deliver
-   * interrupts to, and its {@code document} subcommands.
+   * interrupts to, and the subcommands for the other reads and operations.
    */
-  public static CommandLine create(SemanticBuildCommand build, Map<String, String> environment) {
+  public static CommandLine create(
+      SemanticBuildCommand build, InputStream standardInput, Map<String, String> environment) {
     var command = new CommandLine(new SemanticCommand());
     command.addSubcommand("build", build);
+    command.addSubcommand("tasks", new OperationCommands.TasksCommand(environment));
+    command.addSubcommand("resume", new OperationCommands.ResumeCommand(environment));
+    command.addSubcommand("read", new ReadCommands.ReadCommand(environment));
+    command.addSubcommand("elements", new ReadCommands.ElementsCommand(environment));
+    command.addSubcommand(
+        "knowledge", new ReadCommands.KnowledgeCommand(standardInput, environment));
+    command.addSubcommand("fact", new ReadCommands.FactCommand(environment));
+    command.addSubcommand("review", new ReadCommands.ReviewCommand(environment));
+    command.addSubcommand("present", new OperationCommands.PresentCommand(environment));
+    command.addSubcommand(
+        "answer", new OperationCommands.AnswerCommand(standardInput, environment));
+    command.addSubcommand("select", new OperationCommands.SelectCommand(environment));
+    command.addSubcommand("feedback", new OperationCommands.FeedbackCommand(environment));
+    var policy = new CommandLine(new OperationCommands.PolicyCommand());
+    policy.addSubcommand("check", new OperationCommands.PolicyCheckCommand(environment));
+    policy.addSubcommand("set", new OperationCommands.PolicySetCommand(environment));
+    command.addSubcommand("policy", policy);
+    command.addSubcommand("languages", new ReadCommands.LanguagesCommand(environment));
     var document = new CommandLine(new DocumentCommand());
     document.addSubcommand("register", new RegisterDocumentCommand(environment));
     command.addSubcommand("document", document);
@@ -203,7 +224,7 @@ public final class SemanticCommand implements Runnable {
           SemanticCatalogDomains.ensure(semanticCatalog, domain);
           registration =
               semanticCatalog.registerDocument(
-                  domain, System.getProperty("user.name", "unknown"), resource, document);
+                  domain, SemanticCatalogService.localPrincipal(), resource, document);
         } catch (RecordingLanguageChangedException e) {
           throw new ApplicationFailure(
               "RECORDING_LANGUAGE_CHANGED", Objects.requireNonNull(e.getMessage()));

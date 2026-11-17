@@ -145,10 +145,10 @@ output says so.
   equal to the document's latest observation records nothing. The output returns the Input Resource
   and the latest Input Observation URNs, whether anything was recorded, and the build tasks a new
   observation created for the Generators that read documents.
-- **[Planned]** *Usage feedback*. The input is the content with its session purpose and a summary of
-  the session's context, and can carry related Fact URNs; feedback is always a new Input Resource.
-  The output returns the Input Resource and Input Observation URNs. Today feedback is registered
-  only as the wording of a correction when answers are submitted.
+- *Usage feedback*. The input is the content with its session purpose and a summary of the
+  session's context, and can carry related Fact URNs; feedback is always a new Input Resource.
+  The output returns the Input Resource and Input Observation URNs, the Catalog Snapshot written,
+  and the build tasks it created for the Generators that read feedback with related Facts.
 
 ### Submitting answers
 
@@ -318,13 +318,13 @@ evaluated. A commit between this read and setting the version can change the act
 
 ## One question, end to end
 
-1. **[Planned]** **Fix the point.** The Query Agent finds elements at "latest": the sales Measure that the
+1. **Fix the point.** The Query Agent finds elements at "latest": the sales Measure that the
    business term "sales" refers to, and the e-commerce order and POS purchase Datasets. It keeps the
    returned Catalog Snapshot URN for the whole question.
-2. **[Planned]** **Request knowledge.** At that point it requests the Measure's aggregation rule and reference
+2. **Request knowledge.** At that point it requests the Measure's aggregation rule and reference
    time, and the set relationship and business definition of the customer-to-member correspondence,
    given by edge kind and its two Field sets.
-3. **[Planned]** **Receive.** The Measure's predicates come back as selected Facts. The business definition cannot
+3. **Receive.** The Measure's predicates come back as selected Facts. The business definition cannot
    be checked against data, so under `auto` it is not confirmed yet: a confirmed-only read leaves it
    out, and the Query Agent, which requested that predicate and did not receive it, asks for
    unconfirmed knowledge and receives it as awaiting judgement with the candidate awaiting consent.
@@ -333,7 +333,7 @@ evaluated. A commit between this read and setting the version can change the act
    confirm; the Query Agent then rereads at the returned point. Otherwise confirmation waits for the
    semantics owner, and the Query Agent proceeds with unconfirmed knowledge only if the user
    explicitly asks.
-5. **[Planned]** **Cite.** The Query Agent returns the Fact Revision URNs it used and the Catalog Snapshot URN it
+5. **Cite.** The Query Agent returns the Fact Revision URNs it used and the Catalog Snapshot URN it
    read with its answer.
 
 **[Planned]** When requested knowledge is missing, the Query Agent registers usage feedback whose purpose is

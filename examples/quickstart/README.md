@@ -164,9 +164,10 @@ Invalid command usage exits with code `2`.
 
 ## 8. Hand the workspace to a Query Agent
 
-The distribution packages Query Agent Skill v0 at `skills/query-agent-v0/SKILL.md`. Give it to the
-agent together with the workspace path and the environment variables above. It covers workspace
-selection, source and metadata discovery, and query execution.
+The distribution packages Query Agent Skill v1 at `skills/query-agent-v1/SKILL.md`. Give it to the
+agent together with the workspace path and the environment variables above. It covers source
+discovery and query execution, and, once the workspace has a language model, building, reviewing,
+and querying with the Semantic Catalog; [`../agent-loop/`](../agent-loop/README.md) runs that.
 
 ## 9. Clean up
 

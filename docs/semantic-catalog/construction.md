@@ -30,8 +30,9 @@ Construction starts from new or changed input, not from questions:
 - Documents the semantics owner registers or changes. A document observation starts concept
   inference for the Datasets it names and analytical semantics inference; meaning inference also
   reads the domain's documents when its other inputs start it.
-- Usage feedback: corrections given in review. **[Planned]** Missing knowledge and statements from a
-  user's LLM session.
+- Usage feedback: corrections given in review, and what a user's LLM session registers, such as
+  missing knowledge met while composing a query. **[Planned]** Feedback without related Facts
+  starts no Generator yet.
 
 **[Planned]** Generators also aim at predicates that have no Fact yet. Questions are one input among others,
 neither the only trigger nor a gate. Registering the e-commerce order database starts candidates for
@@ -434,8 +435,6 @@ registered.
 
 ## Usage feedback
 
-**[Planned]** This section describes design that is not implemented yet.
-
 Almost everything a user tells the catalog outside review arrives through an LLM session: the Query
 Agent meets missing knowledge while composing a query, the user explains what a column means, or a
 semantics owner says something while reviewing. When the Query Agent meets missing knowledge or a
@@ -444,10 +443,12 @@ conflict:
 1. The application registers what the session found worth keeping as usage feedback. Conflicts are
    derivable from the log and are not registered.
 2. Generators produce candidates on the spot, and the policy confirms what machine judgement can.
+   Feedback with related Facts starts correction interpretation. **[Planned]** Feedback without
+   related Facts starts the Generators that aim at what it says is missing.
 3. If the user is a deciding party, they consent or resolve a conflict on the spot through a review
-   presentation. Corrections from any other user are registered as usage feedback; their consent
-   cannot confirm, because confirmation would then fall outside the user policy and the record of
-   the deciding party.
+   presentation. **[Planned]** Corrections from any other user are registered as usage feedback;
+   their consent cannot confirm, because confirmation would then fall outside the user policy and
+   the record of the deciding party.
 4. Confirmed knowledge appears at a later commit, and the Query Agent reads again at that commit.
 
 **Usage feedback** holds:

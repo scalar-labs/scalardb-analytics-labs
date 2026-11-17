@@ -504,6 +504,35 @@ public final class SemanticCatalogStore implements AutoCloseable {
         });
   }
 
+  /**
+   * Registers usage feedback a session found worth keeping, such as missing knowledge met while
+   * composing a query, as the observation of a new usage-feedback Input Resource (see {@code
+   * docs/semantic-catalog/public-api.md}, "Registering an observation", and {@code
+   * docs/semantic-catalog/construction.md}, "Usage feedback"). Feedback with related Facts creates
+   * or triggers a run of each Generator that reads it, in the same transaction.
+   *
+   * @param author the person or agent behind the call, kept on the commit as the registering
+   *     principal
+   * @throws SemanticCatalogException when the domain or a related Fact does not exist; nothing is
+   *     written then
+   */
+  public FeedbackRegistration registerUsageFeedback(
+      String domain, String author, UsageFeedback feedback) {
+    return store.write(
+        transaction -> {
+          var languages = languages(transaction, domain);
+          var request = CommitRequest.builder("register-observation", author);
+          var resource = request.add(LogRecord.InputResource.usageFeedback());
+          var observed = request.add(LogRecord.InputObservation.of(resource, feedback));
+          var written = commit(transaction, expressions, domain, languages, request.build(), true);
+          return new FeedbackRegistration(
+              written.urn(resource),
+              written.urn(observed),
+              Urns.catalogSnapshot(domain, written.commit().orElseThrow()),
+              written.buildTasks());
+        });
+  }
+
   private static void recordVersion(
       StoreTransaction transaction,
       String domain,

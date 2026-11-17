@@ -4,6 +4,8 @@
  */
 package com.scalar.db.analytics.labs.semantic.model;
 
+import com.fasterxml.jackson.annotation.JsonSubTypes;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.scalar.db.analytics.labs.semantic.model.Knowledge.RevisionContent;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
@@ -90,6 +92,12 @@ public final class Review {
   }
 
   /** One review item. */
+  @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "item")
+  @JsonSubTypes({
+    @JsonSubTypes.Type(value = Candidate.class, name = "candidate"),
+    @JsonSubTypes.Type(value = Retirement.class, name = "retirement"),
+    @JsonSubTypes.Type(value = Conflict.class, name = "conflict")
+  })
   public sealed interface Item {
     Target target();
 

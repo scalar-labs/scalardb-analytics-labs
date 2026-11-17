@@ -154,10 +154,45 @@ identifier-correspondence-inference build task for the tables the document names
 analytical-semantics-inference build task, which proposes the Measures, calendars, and business
 terms the document defines; the next build tasks of meaning inference also read it.
 
+The other `semantic` commands make one Semantic Catalog read or operation each (see
+[`../docs/semantic-catalog/public-api.md`](../docs/semantic-catalog/public-api.md)) and print one
+JSON line. Reads take `--snapshot <catalogSnapshot>` to read at that Catalog Snapshot, the latest
+commit otherwise, and return the `catalogSnapshot` they read; `--unconfirmed` adds unconfirmed
+knowledge to the confirmed knowledge they return by default.
+
+| Command | Schema | Does |
+| --- | --- | --- |
+| `semantic read [--source S [--namespace N [--table T]]] [--recursive]` | `semantic-read` | Reads along the hierarchy: a position with its children and counts, or every table unit below it |
+| `semantic elements [--kind K] [--parent URN] [--term TEXT]` | `semantic-elements` | Finds elements by kind, parent, or a business term's written form |
+| `semantic knowledge --element URN [--predicate P]` or `--file FILE` | `semantic-knowledge` | Requests one predicate or every predicate of an element, or a JSON batch `{"requests": [...]}` that can name edges by kind and ends |
+| `semantic fact URN` | `semantic-fact` | Retrieves a Fact Revision's content, or a Fact's latest revision at the point |
+| `semantic review [position] [--kind K] [--element URN] [--fact-address URN]` | `semantic-review` | Retrieves the review list, grouped per table, with each item's review material |
+| `semantic present --kind K --fact URN... [--to PERSON] --context TEXT` | `review-presentation` | Registers that Facts were presented for a judgement and prints the `presentation` number |
+| `semantic answer --file FILE` | `answer-submission` | Submits answers `{"answers": [{"fact", "type", "wording", "presentation", ...}]}` in one commit |
+| `semantic select --fact-address URN --fact URN --passed-over URN... --wording TEXT` | `conflict-resolution` | Resolves a conflict |
+| `semantic feedback --content TEXT --context TEXT [--purpose P] [--related-fact URN...]` | `usage-feedback` | Registers usage feedback, such as missing knowledge met while composing a query |
+| `semantic tasks [--task N] [--state S]` | `build-tasks` | Lists build tasks with their state, triggers, and results |
+| `semantic resume N` | `build-task` | Returns a failed build task to `created` |
+| `semantic policy check PRESET` / `policy set PRESET --reason TEXT` | `policy-check` / `policy-version` | Checks or sets the user policy version (`full-auto`, `auto`, or `manual`, with `--count-declared-unenforced`) |
+| `semantic languages` | `semantic-languages` | Shows the domain's declared languages and its primary one |
+
+`--file -` reads the JSON input from standard input. Until callers are authenticated, the person
+running the CLI is the principal behind every operation: the deciding party of answers and
+conflict resolutions, whose authority-check reference is `unauthenticated-local-user`, and the
+registrant of feedback (see [`../docs/application.md`](../docs/application.md#callers-and-authority)).
+Failures are classified as `INVALID_REQUEST`; `NOT_FOUND` when `fact`, `present`, or `tasks --task`
+names a Fact, Fact Revision, or task that does not exist at the point; `SEMANTIC_CATALOG_REJECTED`
+when the Semantic Catalog refuses the request, with its reason, including any other unknown URN;
+`SEMANTIC_CATALOG_UNAVAILABLE` when its store cannot be reached; and `RECORDING_LANGUAGE_CHANGED`
+when the primary language differs from the domain's recording language.
+
 `query` accepts exactly one of `--sql`, `--file`, or `--stdin`. Successful commands and classified
 operational failures write versioned JSON to stdout and return exit code `0` or `1`, respectively.
 Invalid command usage returns exit code `2` through picocli. `SIGINT` cancels an active query.
 
-The distribution packages Query Agent Skill v0 at `skills/query-agent-v0/SKILL.md`, and the
-application jar carries the same file at `META-INF/scalardb-analytics/skills/query-agent-v0/SKILL.md`.
-It covers only workspace selection, source and physical metadata discovery, and query execution.
+The distribution packages Query Agent Skill v1 at `skills/query-agent-v1/SKILL.md`, and the
+application jar carries the same file at `META-INF/scalardb-analytics/skills/query-agent-v1/SKILL.md`.
+It covers building and reviewing the Semantic Catalog with its semantics owner and answering a
+question with SQL composed from confirmed knowledge, cited by Catalog Snapshot and Fact Revisions
+(see [`../docs/application.md`](../docs/application.md#query-agents)).
+[`../examples/agent-loop/`](../examples/agent-loop/README.md) runs both workflows on sample data.

@@ -97,7 +97,7 @@ class DistributionSmokeTest {
         .isEqualTo(
             "scalardb-analytics-" + requiredProperty("distribution.version") + "-" + platform);
     assertThat(distribution.resolve("bin/scalardb-analytics")).isExecutable();
-    assertThat(distribution.resolve("skills/query-agent-v0/SKILL.md")).isRegularFile();
+    assertThat(distribution.resolve("skills/query-agent-v1/SKILL.md")).isRegularFile();
     assertThat(distribution.resolve("LICENSE")).isRegularFile();
     assertThat(distribution.resolve("licenses/third-party/THIRD-PARTY.md")).isRegularFile();
     assertThat(distribution.resolve("provenance/physical-catalog.properties")).isRegularFile();

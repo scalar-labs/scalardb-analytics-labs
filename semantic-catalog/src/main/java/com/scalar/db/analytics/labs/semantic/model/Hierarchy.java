@@ -4,6 +4,8 @@
  */
 package com.scalar.db.analytics.labs.semantic.model;
 
+import com.fasterxml.jackson.annotation.JsonSubTypes;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 
@@ -68,6 +70,13 @@ public final class Hierarchy {
   }
 
   /** One level of the hierarchy, with its counts. */
+  @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "level")
+  @JsonSubTypes({
+    @JsonSubTypes.Type(value = Root.class, name = "root"),
+    @JsonSubTypes.Type(value = DataSource.class, name = "data-source"),
+    @JsonSubTypes.Type(value = Namespace.class, name = "namespace"),
+    @JsonSubTypes.Type(value = Table.class, name = "table")
+  })
   public sealed interface Level {
     Counts counts();
   }

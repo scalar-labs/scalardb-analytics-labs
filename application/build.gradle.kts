@@ -234,7 +234,7 @@ val generateDistributionProvenance = tasks.register("generateDistributionProvena
         "sourceChanges" to repositoryGit("status", "--porcelain", "--untracked-files=all")
             .map { if (it.isEmpty()) "none" else "modified" },
         "license" to providers.provider { "Apache-2.0" },
-        "agentSkills" to providers.provider { "query-agent-v0" },
+        "agentSkills" to providers.provider { "query-agent-v1" },
     )
     properties.forEach { (name, value) -> inputs.property(name, value) }
     outputs.file(output)
