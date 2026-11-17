@@ -327,6 +327,8 @@ class CorrectionInterpretationTest extends StoreScenarioTest {
                 revising(JSON.objectNode().put("from", "exactly-one").put("to", "one-or-more")));
     drain(s, model);
 
+    // The call is told to write in the domain's recording language.
+    assertThat(inputOf(model).path("recordingLanguage").asText()).isEqualTo("ja");
     var input = inputOf(model).path("facts").get(0);
     assertThat(input.path("ends").path("from").asText()).isEqualTo("customer");
     assertThat(input.path("ends").path("to").asText()).isEqualTo("order");

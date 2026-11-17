@@ -304,6 +304,7 @@ abstract class MeaningInference implements ModelGenerator {
       Map<String, List<String>> predicatesByElement) {
     var read = new LinkedHashSet<String>();
     var input = JSON.objectNode();
+    RecordingLanguage.put(input, context);
     var targetNodes = input.putArray("targets");
     input.putArray("tables").add(tableNode.deepCopy());
     read.add(schema);

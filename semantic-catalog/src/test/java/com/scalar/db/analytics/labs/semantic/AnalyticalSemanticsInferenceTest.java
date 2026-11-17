@@ -420,6 +420,14 @@ class AnalyticalSemanticsInferenceTest extends StoreScenarioTest {
     assertThat(generated(summary).missingInputs())
         .anyMatch(missing -> missing.contains("measure:status-total"));
 
+    // Every model call was told to write in the domain's recording language, Japanese.
+    assertThat(model.calls)
+        .extracting(ScriptedModel.Call::generator)
+        .contains(ANALYTICAL, FIELD, "row-meaning-inference");
+    assertThat(model.calls)
+        .allSatisfy(
+            call -> assertThat(call.input().path("recordingLanguage").asText()).isEqualTo("ja"));
+
     // The model read the glossary, the tables with their columns, and no internal keys.
     var input = model.calls.stream().filter(call -> call.generator().equals(ANALYTICAL)).toList();
     assertThat(input).hasSize(1);
@@ -777,6 +785,209 @@ class AnalyticalSemanticsInferenceTest extends StoreScenarioTest {
     assertThat(call.input().path("languages"))
         .extracting(JsonNode::asText)
         .containsExactly("ja", "en");
+  }
+
+  /**
+   * A policy evaluation model that also adopts the existence of business terms, so a confirmed term
+   * can lack a name, and asks for consent on everything else.
+   */
+  private static final class AdoptingTermExistence implements PolicyEvaluationModel {
+    private final AdoptingDataSemantics data = new AdoptingDataSemantics();
+
+    @Override
+    public JsonNode version() {
+      return JSON.objectNode().put("model", "adopting-term-existence");
+    }
+
+    @Override
+    public synchronized Decision evaluate(Subject subject) {
+      var fact = subject.fact().revision().fact();
+      if (fact.contains(":fact:business-term:") && fact.contains("/existence")) {
+        return new Decision.Adopt("the glossary uses the term");
+      }
+      return data.evaluate(subject);
+    }
+  }
+
+  private static final Document BILINGUAL_GLOSSARY =
+      new Document("glossary.md", GLOSSARY.text() + "\n英語の資料では EC売上を EC sales と書く。\n");
+
+  /**
+   * Answers the glossary call as {@link #glossaryAnswer} does, and a call that asks only for names
+   * with an English name for each term asked about: for EC売上 the one the glossary states, for any
+   * other an inference. It also gives a Measure and a meaning, which such a call does not ask for.
+   */
+  private static String namingAnswer(JsonNode input) {
+    if (!input.has("missingNames")) {
+      return glossaryAnswer(input);
+    }
+    var document = input.path("documents").get(0).path("document").asText();
+    var answer = JSON.objectNode();
+    var terms = answer.putArray("businessTerms");
+    for (var entry : input.path("missingNames")) {
+      var ref = entry.path("ref").asText();
+      var term = terms.addObject().put("ref", ref);
+      var values = term.putObject("values");
+      var names = values.putArray(Vocabulary.WRITTEN_FORM);
+      for (var language : entry.path("languages")) {
+        var stated = ref.equals("business-term:ec-sales");
+        names.add(
+            value(
+                    stated ? "EC sales" : "sales of " + ref,
+                    stated ? "the glossary states it" : "what English readers would call it",
+                    document,
+                    stated ? "EC売上を EC sales と書く" : null)
+                .put("language", language.asText()));
+      }
+      values.set(Vocabulary.MEANING, value("not asked for", "a guess", document, null));
+    }
+    var measure = answer.putArray("measures").addObject().put("ref", "measure:not-asked");
+    measure.putObject("existence").put("basis", "a guess");
+    return answer.toString();
+  }
+
+  private static Optional<FactRevision> name(Scenario s, String term, String language) {
+    var urn = Urns.fact(Urns.factAddress(term, Vocabulary.WRITTEN_FORM, language), 1);
+    return s.latest(snapshot -> snapshot.latestRevision(urn));
+  }
+
+  @Test
+  void aConfirmedTermNamedOnlyInJapaneseGetsAnEnglishNameCandidate() {
+    var s = scenario();
+    var sql = data();
+    registerTables(s);
+    var policy = new AdoptingTermExistence();
+    var model = model(AnalyticalSemanticsInferenceTest::namingAnswer);
+    drain(s, policy, sql, model);
+    store.registerDocument(s.domain, "owner", null, BILINGUAL_GLOSSARY);
+    drain(s, policy, sql, model);
+
+    var ecSales = element(s, ElementKind.BUSINESS_TERM, "ec-sales");
+    var storeSales = element(s, ElementKind.BUSINESS_TERM, "store-sales");
+    assertThat(s.state(existence(ecSales))).contains(FactState.CONFIRMED);
+
+    // The name a document states is document-checked; one no document states is an inference.
+    // Neither is adopted inline.
+    assertThat(name(s, ecSales, "en"))
+        .hasValueSatisfying(
+            revision -> {
+              assertThat(revision.value().asText()).isEqualTo("EC sales");
+              assertThat(revision.checks())
+                  .singleElement()
+                  .satisfies(
+                      check -> assertThat(check.method()).isEqualTo(ValidationMethod.DOCUMENT));
+              assertThat(factDependencies(revision)).contains(existence(ecSales));
+            });
+    for (var term : List.of(ecSales, storeSales)) {
+      assertThat(s.state(Urns.fact(Urns.factAddress(term, Vocabulary.WRITTEN_FORM, "en"), 1)))
+          .contains(FactState.CANDIDATE);
+    }
+    assertThat(name(s, storeSales, "en"))
+        .hasValueSatisfying(
+            revision ->
+                assertThat(revision.checks())
+                    .singleElement()
+                    .satisfies(
+                        check -> assertThat(check.method()).isEqualTo(ValidationMethod.INFERENCE)));
+
+    // One candidate per name: a later run finds the address taken and asks nothing more.
+    for (var term : List.of(ecSales, storeSales)) {
+      var second = Urns.fact(Urns.factAddress(term, Vocabulary.WRITTEN_FORM, "en"), 2);
+      Optional<FactRevision> recorded = s.latest(snapshot -> snapshot.latestRevision(second));
+      assertThat(recorded).isEmpty();
+    }
+
+    // The calls asked only for the English names, read no tables, and wrote no Measure or meaning.
+    var naming =
+        model.calls.stream()
+            .filter(call -> call.generator().equals(ANALYTICAL) && call.input().has("missingNames"))
+            .toList();
+    assertThat(naming).isNotEmpty();
+    assertThat(naming)
+        .allSatisfy(
+            call -> {
+              var input = call.input();
+              assertThat(input.path("recordingLanguage").asText()).isEqualTo("ja");
+              assertThat(input.has("tables")).isFalse();
+              assertThat(input.path("missingNames"))
+                  .allSatisfy(
+                      entry ->
+                          assertThat(entry.path("languages"))
+                              .extracting(JsonNode::asText)
+                              .containsExactly("en"));
+              assertThat(input.path("businessTerms"))
+                  .allSatisfy(
+                      term ->
+                          assertThat(
+                                  term.path("values")
+                                      .path(Vocabulary.WRITTEN_FORM)
+                                      .path("ja")
+                                      .path("value")
+                                      .asText())
+                              .isNotEmpty());
+              assertThat(input.toString()).doesNotContain("\"_");
+            });
+    assertThat(first(s, element(s, ElementKind.MEASURE, "not-asked"), Vocabulary.EXISTENCE))
+        .isEmpty();
+    assertThat(first(s, ecSales, Vocabulary.MEANING)).isEmpty();
+  }
+
+  @Test
+  void aNameTheModelDoesNotGiveIsRecordedAsMissing() {
+    var s = scenario();
+    var sql = data();
+    registerTables(s);
+    var policy = new AdoptingTermExistence();
+    var model =
+        model(
+            input ->
+                input.has("missingNames")
+                    ? JSON.objectNode().set("businessTerms", JSON.arrayNode()).toString()
+                    : glossaryAnswer(input));
+    drain(s, policy, sql, model);
+    store.registerDocument(s.domain, "owner", null, GLOSSARY);
+    var summary = drain(s, policy, sql, model);
+
+    var ecSales = element(s, ElementKind.BUSINESS_TERM, "ec-sales");
+    assertThat(s.state(existence(ecSales))).contains(FactState.CONFIRMED);
+    assertThat(name(s, ecSales, "en")).isEmpty();
+    assertThat(summary.finished())
+        .filteredOn(
+            task ->
+                task.work() instanceof BuildTask.Work.GeneratorRun run
+                    && run.generator().equals(ANALYTICAL))
+        .flatExtracting(
+            task ->
+                ((BuildTask.Result.Generated) ((BuildTask.Status.Succeeded) task.status()).result())
+                    .missingInputs())
+        .contains("written-form in en of business-term:ec-sales, which the model did not give");
+  }
+
+  @Test
+  void aConfirmedTermWithANameInEveryDeclaredLanguageIsNotAskedAbout() {
+    var s = scenario();
+    var sql = data();
+    registerTables(s);
+    var policy = new AdoptingTermExistence();
+    var model =
+        model(input -> input.has("missingNames") ? namingAnswer(input) : multilingualAnswer(input));
+    drain(s, policy, sql, model);
+    store.registerDocument(s.domain, "owner", null, GLOSSARY);
+    drain(s, policy, sql, model);
+
+    var ecSales = element(s, ElementKind.BUSINESS_TERM, "ec-sales");
+    assertThat(s.state(existence(ecSales))).contains(FactState.CONFIRMED);
+    assertThat(model.calls)
+        .filteredOn(call -> call.input().has("missingNames"))
+        .isNotEmpty()
+        .allSatisfy(
+            call ->
+                assertThat(call.input().path("missingNames"))
+                    .extracting(entry -> entry.path("ref").asText())
+                    .doesNotContain("business-term:ec-sales"));
+    assertThat(name(s, ecSales, "en"))
+        .hasValueSatisfying(
+            revision -> assertThat(revision.value().asText()).isEqualTo("EC sales"));
   }
 
   @Test

@@ -8,6 +8,8 @@ import static com.scalar.db.analytics.labs.semantic.Judgement.declaredDataset;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.scalar.db.analytics.labs.semantic.generator.Generators;
+import com.scalar.db.analytics.labs.semantic.generator.ModelGenerator;
 import com.scalar.db.analytics.labs.semantic.model.Languages;
 import com.scalar.db.analytics.labs.semantic.model.SemanticCatalogException;
 import java.util.List;
@@ -47,6 +49,21 @@ class RecordingLanguageTest extends StoreScenarioTest {
     try (var more = storeDeclaring(new Languages(List.of("ja", "en", "ko"), "ja"))) {
       assertThat(more.commit(s.domain, request).commit()).isPresent();
     }
+  }
+
+  @Test
+  void everyModelBackedGeneratorIsToldToWriteInTheRecordingLanguageItsInputGives() {
+    // The language is part of each call's input, not of the fixed instructions, so a Generator's
+    // version is the same in every domain.
+    assertThat(Generators.all())
+        .filteredOn(ModelGenerator.class::isInstance)
+        .map(generator -> ((ModelGenerator) generator).instructions())
+        .isNotEmpty()
+        .allSatisfy(
+            instructions ->
+                assertThat(instructions)
+                    .contains("\"recordingLanguage\" in the input")
+                    .doesNotContain("or English when"));
   }
 
   @Test

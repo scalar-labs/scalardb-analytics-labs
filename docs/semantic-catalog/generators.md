@@ -312,11 +312,11 @@ coincidental correspondence. For the same reason, keys from candidate key discov
 
 Row and Field meaning inference, with documents as input and `document` checks, concept inference
 and identifier correspondence inference, with the trigger of documents, analytical semantics
-inference for Measures and business terms, triggered by documents and confirmed Field meaning, and
-correction interpretation are implemented. Analytical semantics inference proposes calendar
-Dimensions with Measures, and a Measure's default time granularity may refer to a calendar it
-proposes in the same run. **[Planned]** Other kinds of Dimension, and the trigger of feedback without
-related Facts, are not.
+inference for Measures and business terms, triggered by documents and confirmed Field meaning and,
+for a missing name, by a confirmed business term, and correction interpretation are implemented.
+Analytical semantics inference proposes calendar Dimensions with Measures, and a Measure's default
+time granularity may refer to a calendar it proposes in the same run. **[Planned]** Other kinds of
+Dimension, and the trigger of feedback without related Facts, are not.
 
 Meaning inference uses a model for predicates that declarations and data cannot decide. For a target
 element it passes names and types, the table's source metadata with the source metadata schema it
@@ -332,7 +332,7 @@ each.
 | Row meaning inference | Confirmed Dataset existence, documents, feedback without related Facts |
 | Field meaning inference | Confirmed Field existence, documents, feedback without related Facts |
 | Concept inference | Confirmed row kind and Field meaning, documents, feedback without related Facts |
-| Analytical semantics inference | Documents, feedback without related Facts, confirmed Field meaning |
+| Analytical semantics inference | Documents, feedback without related Facts, confirmed Field meaning, confirmed business-term existence and name (for a missing name) |
 | Identifier correspondence inference | Confirmed represented concept of a Field, confirmed concept relationship, documents, feedback without related Facts |
 | Correction interpretation | Feedback with related Facts, including corrections from review |
 
@@ -426,7 +426,10 @@ Each candidate depends on the documents the call read and on the existence of it
 Measure's expression values, reference time Field, and default time granularity, a calendar's rule
 and hierarchy, and a business term's referenced element also depend on what they refer to: a
 granularity and a calendar's rule and hierarchy on the calendar's kind. The existence and the aggregation
-rule of a new Measure therefore reach the deciding party together.
+rule of a new Measure therefore reach the deciding party together. A confirmed business term that
+has no selected name and no pending candidate in some declared language gets a separate call that
+asks only for those names and needs neither a document nor a confirmed Dataset (see
+[`languages.md`](languages.md#names-one-fact-per-language)).
 
 Correction interpretation gives the model the feedback's content and context and the related Facts'
 content, and asks for a revised value or applicability scope for the same element and predicate. Its
@@ -468,8 +471,9 @@ What concerns deterministic Generators is implemented: order through declared in
 observations and confirmations, and producing for every target. The conditions and bounds for
 non-deterministic Generators are implemented for row and Field meaning inference, concept
 inference, and identifier correspondence inference, which confirmations trigger, for analytical
-semantics inference, which documents and confirmed Field meaning trigger, and for correction
-interpretation, which feedback with related Facts triggers. Concept inference and identifier
+semantics inference, which documents, confirmed Field meaning, and a confirmed business term's
+existence or name trigger, and for correction interpretation, which feedback with related Facts
+triggers. Concept inference and identifier
 correspondence inference also run on a new document observation. **[Planned]** The other triggers
 of non-deterministic Generators are not: feedback without related Facts, a Fact no longer selected,
 an impact judgement, and a rejection, retirement, or cascade.
@@ -542,6 +546,8 @@ Generators are bounded by initial behavior:
 - Analytical semantics inference makes one model call per run over every confirmed Dataset, with
   the documents' sections in document order up to 20,000 characters; the rest is recorded as
   missing, because table and column names do not tell which glossary sections define a Measure.
+  A run that a confirmed business term starts makes at most one further call, for every missing
+  name of the terms its confirmations are about, with the same document sections.
 - After a rejection, as opposed to a correction, at most one further candidate with another value
   until a depended-on input gets a newer observation.
 - One candidate per correction.
@@ -616,8 +622,11 @@ that change away from the Generators.
 
 Analytical semantics inference records each business-term name in the language the model says it
 is written in, among the domain's declared languages (see [`languages.md`](languages.md)).
-**[Planned]** Every caller instructs the model to write in the domain's recording language, its
-primary language (see [`languages.md`](languages.md#descriptions-one-recording-language)).
+Every caller instructs the model to write its descriptions in the domain's recording language, its
+primary language (see [`languages.md`](languages.md#descriptions-one-recording-language)). The
+language travels in each call's input as `recordingLanguage`, and the fixed instructions tell the
+model to write in the language it names, so the instructions, and with them a caller's version, are
+the same in every domain.
 
 An unavailable model fails the build task, which can be resumed. So do a model that gives no answer
 in time and an answer not in the form the caller asked for: the policy evaluation model fails rather

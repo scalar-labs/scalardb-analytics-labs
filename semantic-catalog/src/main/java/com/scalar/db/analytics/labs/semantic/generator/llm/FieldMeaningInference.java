@@ -58,8 +58,9 @@ final class FieldMeaningInference extends MeaningInference {
       a "citation" with the "document" identifier and a "quotation" copied exactly from its text; \
       a quotation not found in that document counts only as your inference. A business definition \
       that only a name suggests, such as whether an amount includes tax, is a weak signal; say so \
-      in the basis. Omit a predicate you cannot infer; do not guess. Write descriptions in the \
-      language of the source's names and comments, or English when they give none.
+      in the basis. Omit a predicate you cannot infer; do not guess.
+
+      %s
 
       Answer with exactly one JSON object and nothing else:
       {"targets": [{"ref": "<target ref>", "values": {"<predicate>": {"value": <value>, \
@@ -67,7 +68,8 @@ final class FieldMeaningInference extends MeaningInference {
       "quotation": "<exact text>"}}}}]}
       Omit "citation" when no document states the value.
       Every value is a JSON string, except "time-meaning", which is the object above.
-      """;
+      """
+          .formatted(RecordingLanguage.INSTRUCTION);
 
   FieldMeaningInference() {
     super(NAME, ElementKind.FIELD);

@@ -104,12 +104,15 @@ public final class CorrectionInterpretation implements ModelGenerator {
       - "basis": what in the feedback states the revision.
       Give a revision only when the feedback states it. When it gives neither a value nor a \
       scope you can read, or the value it calls for is not among the choices, answer with no \
-      targets; do not guess. Write descriptions in the language of the feedback.
+      targets; do not guess.
+
+      %s A revised name is a value, not a description: write it in the statement's "language".
 
       Answer with exactly one JSON object and nothing else:
       {"targets": [{"ref": "<fact ref>", "value": <value or null>, "scope": <text or null>, \
       "basis": "<what states it>"}]}
-      """;
+      """
+          .formatted(RecordingLanguage.INSTRUCTION);
 
   @Override
   public String name() {
@@ -169,6 +172,7 @@ public final class CorrectionInterpretation implements ModelGenerator {
       UsageFeedback feedback,
       LinkedHashSet<String> missing) {
     var input = JSON.objectNode();
+    RecordingLanguage.put(input, context);
     input
         .putObject("feedback")
         .put("content", feedback.content())

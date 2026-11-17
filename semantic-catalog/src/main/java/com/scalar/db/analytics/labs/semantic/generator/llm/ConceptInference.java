@@ -107,9 +107,9 @@ final class ConceptInference implements ModelGenerator {
       Decide only what the confirmed facts, names, or documents support, and state that support \
       as the basis. When a document states it, also give a "citation" with the "document" \
       identifier and a "quotation" copied exactly from its text; a quotation not found in that \
-      document counts only as your inference. Omit what you cannot decide; do not guess. Write \
-      meanings in the language of the source's names and documents, or English when they give \
-      none.
+      document counts only as your inference. Omit what you cannot decide; do not guess.
+
+      %s
 
       Answer with exactly one JSON object and nothing else:
       {"concepts": [{"slug": "<new slug>", "meaning": {"value": "<what the concept is>", \
@@ -122,7 +122,8 @@ final class ConceptInference implements ModelGenerator {
       "to": "<bound>"}, "basis": "<what supports it>", "citation": {...}}}]}
       Omit "citation" when no document states the value. List under "concepts" only concepts \
       not in use.
-      """;
+      """
+          .formatted(RecordingLanguage.INSTRUCTION);
 
   @Override
   public String name() {
@@ -383,6 +384,7 @@ final class ConceptInference implements ModelGenerator {
       Set<String> missing) {
     var read = new LinkedHashSet<String>();
     var input = JSON.objectNode();
+    RecordingLanguage.put(input, context);
     var datasetNodes = input.putArray("datasets");
     var targetNodes = input.putArray("targets");
     var conceptNodes = input.putArray("concepts");

@@ -207,6 +207,10 @@ class ConceptInferenceTest extends StoreScenarioTest {
     var customer = element(s, ElementKind.CONCEPT, "customer");
     assertThat(only(s, customer, Vocabulary.MEANING).value().asText())
         .isEqualTo(MEANINGS.get("customer"));
+    // Every call is told to write in the domain's recording language.
+    assertThat(calls(model))
+        .isNotEmpty()
+        .allSatisfy(input -> assertThat(input.path("recordingLanguage").asText()).isEqualTo("ja"));
     // A row concept is asked with the Dataset's columns in view, targets or not.
     assertThat(calls(model))
         .filteredOn(input -> targetRefs(input).contains("shop.public.customers"))

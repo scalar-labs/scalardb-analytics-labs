@@ -20,10 +20,10 @@ two kinds:
 
 Every description in the log is to be in the recording language, whoever writes it.
 
-**[Planned]** Generators, the policy evaluation model, and the Semantic Catalog's own deterministic
-writers write in the recording language, and an agent translates what a person writes into it before submitting. A person reads in
-the language their principal prefers, and an agent session can switch it. A Query Agent reasons on
-originals.
+Generators and the policy evaluation model write in the recording language. **[Planned]** So do the
+Semantic Catalog's own deterministic writers, and an agent translates what a person writes into it
+before submitting. A person reads in the language their principal prefers, and an agent session can
+switch it. A Query Agent reasons on originals.
 
 The split rests on what the Semantic Catalog guarantees: that meaning is right. A translation says
 the same meaning in other words, so recording it as a Fact would make the deciding party judge
@@ -95,10 +95,14 @@ documents use them in (see [`generators.md`](generators.md#meaning-inference)). 
 the declared languages and gives each name with the language it is written in; each name becomes a
 candidate at the Fact Address of its language, and a name in a language the domain does not
 declare is dropped and recorded as missing input. A name is never copied from a translation,
-because the word a team uses is the knowledge being recorded. **[Planned]** A confirmed business
-term that lacks a selected name in some declared language triggers the inference again for that
-name, with the term's other names and the element it refers to as input; with nothing that states
-one, the name is an `inference`, judged like any other candidate.
+because the word a team uses is the knowledge being recorded. Confirming a business term's
+existence or one of its names triggers the inference again when the term has neither a selected
+name nor a pending candidate in some declared language. That call asks only for those names, with
+the term's other names, the element it refers to, and the documents as input, and proposes nothing
+else. A name a document states is checked against it; with nothing that states one, the name is an
+`inference`, judged like any other candidate. Either rests on the term's existence, its confirmed
+names and referenced element, and the documents the call read. A name the model does not give is
+recorded as missing input.
 
 Finding elements by written form matches the names of every language, because a reader may use a
 name from a language other than the one they read in (see
@@ -126,9 +130,12 @@ another language creates another domain.
 
 Every writer writes in the recording language:
 
-- **[Planned]** Generators and the policy evaluation model are instructed to write in the recording
-  language. A quotation from a document stays in the document's own words, because it is checked
-  against the document's text.
+- Generators and the policy evaluation model are instructed to write in the recording language.
+  The language is given in each call's input rather than in the fixed instructions, so a
+  Generator's version is the same in every domain (see
+  [`generators.md`](generators.md#reaching-a-language-model)). A quotation from a document stays in
+  the document's own words, because it is checked against the document's text, and a business
+  term's name is written in its own language.
 - **[Planned]** Text the Semantic Catalog composes without a model is written in the recording
   language too: the business definition schema interpretation states for a foreign key, the reason
   inline policy evaluation gives, and the reason of a new domain's default user policy version. How

@@ -319,9 +319,10 @@ UI. A review item carries:
   their content, and the items a rejection would cascade to.
 - **Review material,** when the policy evaluation model sent it to a person: what is to be decided,
   why it was not adopted and what remains uncertain, the evidence for and against, and a suggested
-  answer with its reasons. The material is kept with the evaluation. **[Planned]** It is written in
-  the domain's primary language and reaches a deciding party who reads another language as a
-  translation (see [`languages.md`](languages.md#translations)). **[Planned]** The policy
+  answer with its reasons. The material is kept with the evaluation. It is written in the domain's
+  recording language, its primary language. **[Planned]** It reaches a deciding party who reads
+  another language as a translation (see [`languages.md`](languages.md#translations)).
+  **[Planned]** The policy
   evaluation model may sample values through the application's SQL execution within its build
   task's limits to build it, and it sorts the items of each table into those likely to follow the
   suggestion and those that need judgement.

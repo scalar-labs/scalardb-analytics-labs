@@ -268,6 +268,10 @@ class IdentifierCorrespondenceInferenceTest extends StoreScenarioTest {
 
     drain(s, policy, sample(), model);
 
+    // Every call is told to write in the domain's recording language.
+    assertThat(calls(model))
+        .isNotEmpty()
+        .allSatisfy(input -> assertThat(input.path("recordingLanguage").asText()).isEqualTo("ja"));
     // One call passed the customer Fields of both sources with the glossary.
     assertThat(calls(model))
         .anySatisfy(

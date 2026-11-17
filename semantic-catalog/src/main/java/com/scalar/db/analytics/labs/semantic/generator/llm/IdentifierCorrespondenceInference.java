@@ -104,8 +104,9 @@ final class IdentifierCorrespondenceInference implements ModelGenerator {
       or documents support. When a document states it, also give a "citation" with the \
       "document" identifier and a "quotation" copied exactly from its text; a quotation not \
       found in that document counts only as your inference. Omit what you cannot decide; do not \
-      guess. Write the definition in the language of the source's names and documents, or \
-      English when they give none.
+      guess.
+
+      %s
 
       Answer with exactly one JSON object and nothing else:
       {"correspondences": [{"pairs": [{"from": "<column ref>", "fromNormalization": \
@@ -115,7 +116,8 @@ final class IdentifierCorrespondenceInference implements ModelGenerator {
       "definition": {"value": "<business definition>", "basis": "<what supports it>", \
       "citation": {...}}}]}
       Omit "citation" when no document states it.
-      """;
+      """
+          .formatted(RecordingLanguage.INSTRUCTION);
 
   @Override
   public String name() {
@@ -342,6 +344,7 @@ final class IdentifierCorrespondenceInference implements ModelGenerator {
       Set<String> missing) {
     var read = new LinkedHashSet<String>();
     var input = JSON.objectNode();
+    RecordingLanguage.put(input, context);
     var conceptNodes = input.putArray("concepts");
     var datasetNodes = input.putArray("datasets");
     var correspondenceNodes = input.putArray("correspondences");

@@ -137,6 +137,24 @@ class LanguageModelPolicyEvaluationTest extends StoreScenarioTest {
   }
 
   @Test
+  void theModelIsToldToWriteItsReasonAndReviewMaterialInTheRecordingLanguage() throws Exception {
+    var s = scenario();
+    undecidedRowKind(s);
+
+    drain(s, answering("{\"decision\": \"adopt\", \"reason\": \"名前と種類が一致する\"}"));
+
+    // The language is in the subject, so the instructions, and with them the version, are the same
+    // in every domain.
+    var prompt = Files.readString(directory.resolve("prompt.txt"));
+    var subjectStart = prompt.indexOf("\n\n{");
+    assertThat(prompt.substring(0, subjectStart))
+        .contains("\"recordingLanguage\"")
+        .doesNotContain("\"ja\"");
+    var subject = MAPPER.readTree(prompt.substring(subjectStart + 2));
+    assertThat(subject.path("recordingLanguage").asText()).isEqualTo("ja");
+  }
+
+  @Test
   void aConsentRequestReachesTheReviewItemWithItsReviewMaterial() throws Exception {
     var s = scenario();
     var undecided = undecidedRowKind(s);

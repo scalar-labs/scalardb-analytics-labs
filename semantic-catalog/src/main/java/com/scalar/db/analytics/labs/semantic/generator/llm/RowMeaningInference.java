@@ -49,8 +49,9 @@ final class RowMeaningInference extends MeaningInference {
       support it, and state that support as the basis. When a document states the value, also give \
       a "citation" with the "document" identifier and a "quotation" copied exactly from its text; \
       a quotation not found in that document counts only as your inference. Omit a predicate you \
-      cannot infer; do not guess. Write descriptions in the language of the source's names and \
-      comments, or English when they give none.
+      cannot infer; do not guess.
+
+      %s
 
       Answer with exactly one JSON object and nothing else:
       {"targets": [{"ref": "<target ref>", "values": {"<predicate>": {"value": <value>, \
@@ -58,7 +59,8 @@ final class RowMeaningInference extends MeaningInference {
       "quotation": "<exact text>"}}}}]}
       Omit "citation" when no document states the value.
       Every value is a JSON string.
-      """;
+      """
+          .formatted(RecordingLanguage.INSTRUCTION);
 
   RowMeaningInference() {
     super(NAME, ElementKind.DATASET);

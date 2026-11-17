@@ -874,7 +874,11 @@ public final class CatalogSnapshot {
               .toList();
       return Optional.of(
           new PolicyEvaluationModel.Subject.Confirmation(
-              target, reader.content(fact), acceptance.inputsRead(), premises));
+              target,
+              reader.content(fact),
+              acceptance.inputsRead(),
+              premises,
+              languages.primary()));
     }
     var proposalAt = record.openRetirementProposal();
     if (record.is(FactState.CONFIRMED) && proposalAt.isPresent()) {
@@ -889,7 +893,8 @@ public final class CatalogSnapshot {
               target,
               reader.content(fact),
               Urns.logRecord(domain, proposalAt.get()),
-              (LogRecord.ProposeRetire) proposal));
+              (LogRecord.ProposeRetire) proposal,
+              languages.primary()));
     }
     return Optional.empty();
   }

@@ -42,6 +42,12 @@ public interface PolicyEvaluationModel {
     Knowledge.RevisionContent fact();
 
     /**
+     * The domain's recording language, in which the decision's reason and review material are
+     * written (see {@code docs/semantic-catalog/languages.md}).
+     */
+    String recordingLanguage();
+
+    /**
      * The confirmation of a candidate.
      *
      * @param inputsRead what the Generator read, from the candidate's latest acceptance
@@ -51,7 +57,8 @@ public interface PolicyEvaluationModel {
         Review.Target target,
         Knowledge.RevisionContent fact,
         JsonNode inputsRead,
-        List<Knowledge.RevisionContent> premises)
+        List<Knowledge.RevisionContent> premises,
+        String recordingLanguage)
         implements Subject {
       public Confirmation {
         premises = List.copyOf(premises);
@@ -67,7 +74,8 @@ public interface PolicyEvaluationModel {
         Review.Target target,
         Knowledge.RevisionContent fact,
         String proposal,
-        LogRecord.ProposeRetire proposalRecord)
+        LogRecord.ProposeRetire proposalRecord,
+        String recordingLanguage)
         implements Subject {}
   }
 
