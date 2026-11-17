@@ -17,6 +17,7 @@ public final class MeaningInferences {
         new FieldMeaningInference(),
         new ConceptInference(),
         new AnalyticalSemanticsInference(),
+        new IdentifierCorrespondenceInference(),
         new CorrectionInterpretation());
   }
 }

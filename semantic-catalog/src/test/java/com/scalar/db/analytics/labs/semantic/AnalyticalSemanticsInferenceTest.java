@@ -321,8 +321,8 @@ class AnalyticalSemanticsInferenceTest extends StoreScenarioTest {
 
     var registration =
         (DocumentRegistration.Observed) store.registerDocument(s.domain, "owner", null, GLOSSARY);
-    // Concept inference reads documents too.
-    assertThat(registration.buildTasks()).hasSize(2);
+    // Concept inference and identifier correspondence inference read documents too.
+    assertThat(registration.buildTasks()).hasSize(3);
     var summary = drain(s, policy, sql, model);
 
     var ecSales = element(s, ElementKind.MEASURE, "ec-sales");

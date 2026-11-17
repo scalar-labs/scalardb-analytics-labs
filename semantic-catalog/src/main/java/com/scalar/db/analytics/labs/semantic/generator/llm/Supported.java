@@ -63,6 +63,25 @@ final class Supported {
     return new Given(item.get("value"), basis.asText(), citation(what, item, unreadable));
   }
 
+  /**
+   * Reads the support stated for a claim that has no value of its own, such as a correspondence's
+   * existence: {@code {"basis": ..., "citation": {"document": ..., "quotation": ...}}} with the
+   * citation optional.
+   *
+   * @return null when the item is absent or null, which means the model stated no support
+   */
+  static @Nullable Given stated(
+      String what, JsonNode item, Function<String, LanguageModelException> unreadable) {
+    if (item.isMissingNode() || item.isNull()) {
+      return null;
+    }
+    var basis = item.path("basis");
+    if (!item.isObject() || !basis.isTextual() || basis.asText().isBlank()) {
+      throw unreadable.apply("the support of " + what + " has no basis");
+    }
+    return new Given(JSON.nullNode(), basis.asText(), citation(what, item, unreadable));
+  }
+
   private static @Nullable Citation citation(
       String what, JsonNode item, Function<String, LanguageModelException> unreadable) {
     var citation = item.path("citation");
@@ -86,10 +105,19 @@ final class Supported {
    * @param statistics the data observation an inference read, if any
    */
   static Check check(Given given, @Nullable String quoted, @Nullable Ref statistics) {
+    return check(given, quoted, statistics, JSON.textNode(Vocabulary.VALUE_ITEM));
+  }
+
+  /**
+   * The check of a claim over some validation items, such as the pairs and normalization steps of a
+   * correspondence's existence; otherwise as {@link #check(Given, String, Ref)}.
+   */
+  static Check check(
+      Given given, @Nullable String quoted, @Nullable Ref statistics, JsonNode items) {
     if (quoted == null || given.citation() == null) {
       return new Check(
           ValidationMethod.INFERENCE,
-          JSON.textNode(Vocabulary.VALUE_ITEM),
+          items,
           CheckResult.SUPPORTED,
           null,
           statistics,
@@ -97,7 +125,7 @@ final class Supported {
     }
     return new Check(
         ValidationMethod.DOCUMENT,
-        JSON.textNode(Vocabulary.VALUE_ITEM),
+        items,
         CheckResult.SUPPORTED,
         null,
         Ref.urn(quoted),

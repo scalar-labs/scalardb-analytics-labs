@@ -47,7 +47,8 @@ class DocumentRegistrationTest extends StoreScenarioTest {
         .extracting(BuildTask::work)
         .containsExactly(
             new BuildTask.Work.GeneratorRun("concept-inference"),
-            new BuildTask.Work.GeneratorRun("analytical-semantics-inference"));
+            new BuildTask.Work.GeneratorRun("analytical-semantics-inference"),
+            new BuildTask.Work.GeneratorRun("identifier-correspondence-inference"));
     assertThat(tasks)
         .allSatisfy(
             task ->
@@ -73,7 +74,7 @@ class DocumentRegistrationTest extends StoreScenarioTest {
 
     assertThat(second.buildTasks()).isEqualTo(first.buildTasks());
     assertThat(store.buildTasks(s.domain))
-        .hasSize(2)
+        .hasSize(3)
         .allSatisfy(task -> assertThat(task.triggers()).hasSize(2));
   }
 

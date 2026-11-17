@@ -181,7 +181,7 @@ final class ConceptInference implements ModelGenerator {
    * The confirmed Datasets a document observation names by their table or by one of their columns,
    * matched as the relevant parts of documents are.
    */
-  private static List<String> namedBy(GeneratorContext context, String observation) {
+  static List<String> namedBy(GeneratorContext context, String observation) {
     var content = context.observationContent(observation);
     if (content.isEmpty()) {
       return List.of();
@@ -201,7 +201,7 @@ final class ConceptInference implements ModelGenerator {
   }
 
   /** The table name and the column names of a Dataset. */
-  private static List<String> names(GeneratorContext context, GeneratorContext.DatasetTable table) {
+  static List<String> names(GeneratorContext context, GeneratorContext.DatasetTable table) {
     var names = new ArrayList<String>();
     names.add(table.reference().table());
     for (var child : context.fields(table.dataset())) {

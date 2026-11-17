@@ -4,17 +4,20 @@
  */
 package com.scalar.db.analytics.labs.semantic;
 
+import static com.scalar.db.analytics.labs.semantic.EcPosSample.drain;
+import static com.scalar.db.analytics.labs.semantic.EcPosSample.element;
+import static com.scalar.db.analytics.labs.semantic.EcPosSample.facts;
+import static com.scalar.db.analytics.labs.semantic.EcPosSample.missingInputs;
+import static com.scalar.db.analytics.labs.semantic.EcPosSample.only;
+import static com.scalar.db.analytics.labs.semantic.EcPosSample.registerDocument;
+import static com.scalar.db.analytics.labs.semantic.EcPosSample.registerPos;
+import static com.scalar.db.analytics.labs.semantic.EcPosSample.registerShop;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.scalar.db.analytics.labs.semantic.TableMetadataObservation.Read;
-import com.scalar.db.analytics.labs.semantic.TableMetadataObservation.SourceMetadata;
 import com.scalar.db.analytics.labs.semantic.model.BuildTask;
 import com.scalar.db.analytics.labs.semantic.model.Dependency;
-import com.scalar.db.analytics.labs.semantic.model.Document;
-import com.scalar.db.analytics.labs.semantic.model.FactRevision;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
 import com.scalar.db.analytics.labs.semantic.model.Urns;
@@ -24,16 +27,12 @@ import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Transition;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ValidationMethod;
-import com.scalar.db.analytics.labs.semantic.policy.PolicyEvaluationModel;
 import java.sql.SQLException;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.stream.StreamSupport;
 import org.junit.jupiter.api.AfterEach;
@@ -47,7 +46,6 @@ import org.junit.jupiter.api.Test;
  */
 class ConceptInferenceTest extends StoreScenarioTest {
   private static final JsonNodeFactory JSON = JsonNodeFactory.instance;
-  private static final AtomicLong VERSIONS = new AtomicLong();
   private static final String ROW = "row-meaning-inference";
   private static final String FIELD = "field-meaning-inference";
   private static final String CONCEPT = "concept-inference";
@@ -74,105 +72,9 @@ class ConceptInferenceTest extends StoreScenarioTest {
   // The sample
 
   private DuckDbConstructionSql sample() {
-    var engine =
-        new DuckDbConstructionSql(1000)
-            .run(
-                "ATTACH ':memory:' AS shop",
-                "CREATE SCHEMA shop.public",
-                "CREATE TABLE shop.public.customers (id INT, email VARCHAR)",
-                "INSERT INTO shop.public.customers VALUES (1, 'sato@example.com'),"
-                    + " (2, 'ito@example.com')",
-                "CREATE TABLE shop.public.orders (id INT, customer_id INT, amount INT)",
-                "INSERT INTO shop.public.orders VALUES (1001, 1, 4000), (1002, 1, 1200),"
-                    + " (1003, 2, 3500)",
-                "ATTACH ':memory:' AS pos",
-                "CREATE SCHEMA pos.public",
-                "CREATE TABLE pos.public.members (member_id INT, email VARCHAR)",
-                "INSERT INTO pos.public.members VALUES (501, 'SATO@example.com'),"
-                    + " (503, 'Ito@Example.com')",
-                "CREATE TABLE pos.public.store_sales (sale_id INT, member_id INT, amount INT)",
-                "INSERT INTO pos.public.store_sales VALUES (9001, 501, 5000), (9003, NULL, 800)");
+    var engine = EcPosSample.data();
     engines.add(engine);
     return engine;
-  }
-
-  private static ObjectNode column(String name, String kind) {
-    return JSON.objectNode()
-        .put("name", name)
-        .put("nullable", false)
-        .put("dataSourceType", kind)
-        .set("analyticsType", JSON.objectNode().put("kind", kind));
-  }
-
-  private static void register(Scenario s, String identifier, String key, String... columns) {
-    var parts = identifier.split("\\.");
-    var metadata = JSON.objectNode();
-    metadata.putArray("table").add(parts[1]).add(parts[2]);
-    metadata.put("kind", "table");
-    var array = metadata.putArray("columns");
-    for (var index = 0; index < columns.length; index++) {
-      var kind = columns[index].equals("email") ? "text" : "int";
-      array.add(column(columns[index], kind).put("ordinal", index + 1));
-    }
-    metadata.put("columnsMayBeHidden", false);
-    var primaryKey =
-        metadata
-            .putObject("constraints")
-            .put("state", "value")
-            .putArray("value")
-            .addObject()
-            .put("kind", "primary-key")
-            .put("name", parts[2] + "_pkey")
-            .put("enforced", true);
-    primaryKey.putArray("columns").add(key);
-    var version = VERSIONS.incrementAndGet();
-    store.registerTableMetadata(
-        s.domain,
-        "app",
-        new TableMetadataObservation(
-            identifier,
-            Optional.of(Scenario.table(identifier)),
-            version,
-            new Read(
-                true,
-                metadata,
-                new SourceMetadata("postgresql", JSON.objectNode().set("table", metadata)),
-                Scenario.SCHEMA,
-                Instant.parse("2026-11-17T00:00:00Z")),
-            JSON.objectNode(),
-            "digest-" + version));
-  }
-
-  private static void registerShop(Scenario s) {
-    register(s, "shop.public.customers", "id", "id", "email");
-    register(s, "shop.public.orders", "id", "id", "customer_id", "amount");
-  }
-
-  private static void registerPos(Scenario s) {
-    register(s, "pos.public.members", "member_id", "member_id", "email");
-    register(s, "pos.public.store_sales", "sale_id", "sale_id", "member_id", "amount");
-  }
-
-  private static String registerGlossary(Scenario s, String text) {
-    return ((DocumentRegistration.Observed)
-            store.registerDocument(s.domain, "owner", null, new Document("glossary.md", text)))
-        .inputObservation();
-  }
-
-  /** A policy evaluation model that adopts every candidate and records what it was asked about. */
-  private static final class Adopting implements PolicyEvaluationModel {
-    final Set<String> asked = new HashSet<>();
-
-    @Override
-    public JsonNode version() {
-      return JSON.objectNode().put("model", "adopting");
-    }
-
-    @Override
-    public synchronized Decision evaluate(Subject subject) {
-      asked.add(subject.fact().revision().fact());
-      return new Decision.Adopt("the inputs support it");
-    }
   }
 
   // Scripts
@@ -274,45 +176,7 @@ class ConceptInferenceTest extends StoreScenarioTest {
     };
   }
 
-  private static BuildRun.Summary drain(
-      Scenario s, PolicyEvaluationModel policy, ConstructionSql sql, ScriptedModel model) {
-    var summary =
-        store.runBuildTasks(
-            s.domain,
-            new BuildRun.Environment(policy, sql, model, ScriptedModel.NO_DATA),
-            BuildRun.drain(),
-            task -> {});
-    assertThat(summary.finished())
-        .allSatisfy(
-            task -> assertThat(task.status()).isInstanceOf(BuildTask.Status.Succeeded.class));
-    return summary;
-  }
-
   // Reading what was recorded
-
-  private static String element(Scenario s, ElementKind kind, String identifier) {
-    return Urns.element(s.domain, kind, identifier);
-  }
-
-  private static List<FactRevision> facts(Scenario s, String element, String predicate) {
-    var address = Urns.factAddress(element, predicate);
-    var found = new ArrayList<FactRevision>();
-    for (var number = 1; number <= 10; number++) {
-      var urn = Urns.fact(address, number);
-      var revision = s.latest(snapshot -> snapshot.latestRevision(urn));
-      if (revision.isEmpty()) {
-        break;
-      }
-      found.add(revision.get());
-    }
-    return found;
-  }
-
-  private static FactRevision only(Scenario s, String element, String predicate) {
-    var found = facts(s, element, predicate);
-    assertThat(found).as(predicate + " of " + element).hasSize(1);
-    return found.getFirst();
-  }
 
   private static List<JsonNode> calls(ScriptedModel model) {
     return model.calls.stream()
@@ -332,10 +196,10 @@ class ConceptInferenceTest extends StoreScenarioTest {
   @Test
   void customersAndMembersReferToOneConceptThatThePolicyEvaluationModelDecides() {
     var s = scenario();
-    var glossary = registerGlossary(s, GLOSSARY);
+    var glossary = registerDocument(s, "glossary.md", GLOSSARY);
     registerShop(s);
     registerPos(s);
-    var policy = new Adopting();
+    var policy = new EcPosSample.Adopting();
     var model = meanings().answering(CONCEPT, concepts(Set.of()));
 
     drain(s, policy, sample(), model);
@@ -407,13 +271,13 @@ class ConceptInferenceTest extends StoreScenarioTest {
     var sql = sample();
     registerShop(s);
     var model = meanings().answering(CONCEPT, concepts(Set.of()));
-    drain(s, new Adopting(), sql, model);
+    drain(s, new EcPosSample.Adopting(), sql, model);
     var customer = element(s, ElementKind.CONCEPT, "customer");
     assertThat(only(s, customer, Vocabulary.EXISTENCE).state()).isEqualTo(FactState.CONFIRMED);
     var before = calls(model).size();
 
     registerPos(s);
-    drain(s, new Adopting(), sql, model);
+    drain(s, new EcPosSample.Adopting(), sql, model);
 
     // The model read the concepts in use and the slugs taken.
     var later = calls(model).subList(before, calls(model).size());
@@ -444,7 +308,7 @@ class ConceptInferenceTest extends StoreScenarioTest {
     registerShop(s);
     var model = meanings().answering(CONCEPT, concepts(Set.of()));
 
-    var summary = drain(s, new Adopting(), sample(), model);
+    var summary = drain(s, new EcPosSample.Adopting(), sample(), model);
 
     // The model was told the slug is taken; declaring it anyway creates nothing.
     assertThat(calls(model))
@@ -461,17 +325,7 @@ class ConceptInferenceTest extends StoreScenarioTest {
                 element(s, ElementKind.DATASET, "shop.public.customers"),
                 Vocabulary.ROW_CONCEPT))
         .isEmpty();
-    assertThat(
-            summary.finished().stream()
-                .filter(
-                    task ->
-                        task.work() instanceof BuildTask.Work.GeneratorRun run
-                            && run.generator().equals(CONCEPT))
-                .flatMap(
-                    task ->
-                        ((BuildTask.Result.Generated)
-                                ((BuildTask.Status.Succeeded) task.status()).result())
-                            .missingInputs().stream()))
+    assertThat(missingInputs(summary, CONCEPT))
         .contains("concept customer, whose slug is already taken");
     // A concept not taken is still created.
     assertThat(only(s, element(s, ElementKind.CONCEPT, "order"), Vocabulary.EXISTENCE).state())
@@ -532,7 +386,7 @@ class ConceptInferenceTest extends StoreScenarioTest {
                   return answer.toString();
                 });
 
-    drain(s, new Adopting(), sample(), model);
+    drain(s, new EcPosSample.Adopting(), sample(), model);
 
     var customer = element(s, ElementKind.CONCEPT, "customer");
     var buyer = element(s, ElementKind.CONCEPT, "buyer");
@@ -551,25 +405,24 @@ class ConceptInferenceTest extends StoreScenarioTest {
     registerPos(s);
     // The model leaves the members table undecided at first.
     var model = meanings().answering(CONCEPT, concepts(Set.of("pos.public.members")));
-    drain(s, new Adopting(), sql, model);
+    drain(s, new EcPosSample.Adopting(), sql, model);
     var members = element(s, ElementKind.DATASET, "pos.public.members");
     assertThat(facts(s, members, Vocabulary.ROW_CONCEPT)).isEmpty();
     var before = calls(model).size();
 
-    var glossary = registerGlossary(s, GLOSSARY);
+    var glossary = registerDocument(s, "glossary.md", GLOSSARY);
     assertThat(store.buildTasks(s.domain))
         .filteredOn(task -> task.status() instanceof BuildTask.Status.Created)
         .filteredOn(task -> task.work().equals(new BuildTask.Work.GeneratorRun(CONCEPT)))
         .singleElement()
         .satisfies(
             task -> {
-              assertThat(task.work()).isEqualTo(new BuildTask.Work.GeneratorRun(CONCEPT));
               assertThat(task.triggers())
                   .containsExactly(Urns.logRecord(s.domain, Urns.position(glossary)));
             });
 
     model.answering(CONCEPT, concepts(Set.of()));
-    drain(s, new Adopting(), sql, model);
+    drain(s, new EcPosSample.Adopting(), sql, model);
 
     // The glossary names the customers and members tables, so the run asks about what is still
     // open there and nothing about the tables it does not name.

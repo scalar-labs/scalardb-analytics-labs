@@ -254,7 +254,8 @@ class SemanticBuildCliIntegrationTest {
         .extracting(BuildTask::work)
         .containsExactly(
             new BuildTask.Work.GeneratorRun("concept-inference"),
-            new BuildTask.Work.GeneratorRun("analytical-semantics-inference"));
+            new BuildTask.Work.GeneratorRun("analytical-semantics-inference"),
+            new BuildTask.Work.GeneratorRun("identifier-correspondence-inference"));
     assertThat(buildTasks())
         .allSatisfy(
             task -> {

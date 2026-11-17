@@ -12,9 +12,9 @@ counts that are expected to be tuned from use of the product.
 ## One rule per Generator
 
 The schema-interpretation and data-check Generators, row and Field meaning inference, concept
-inference, analytical semantics inference for Measures and business terms, and correction
-interpretation are implemented. **[Planned]** Identifier correspondence inference and Dimensions are
-not.
+inference, analytical semantics inference for Measures and business terms, identifier
+correspondence inference, and correction interpretation are implemented. **[Planned]** Dimensions
+are not.
 
 Each interpretation or check rule is its own Generator. The rule that derives a key from a primary
 key and the rule that derives an identifier correspondence from a foreign key are separate
@@ -61,10 +61,11 @@ never by itself a basis for derivation.
 **Input kinds.** Each Generator declares what it may read, and build tasks are created from these
 declarations. A commit that records a new observation, a confirmation, or an acceptance creates, in
 the same transaction, a run of each Generator that reads it, or adds the commit's log record as a
-trigger to the run of that Generator not started yet. Concept inference and analytical semantics
-inference declare document input. **[Planned]** No Generator declares usage feedback without related
-Facts yet, so that feedback creates no build tasks. Row and Field meaning inference read the
-domain's current documents when their other inputs start them.
+trigger to the run of that Generator not started yet. Concept inference, analytical semantics
+inference, and identifier correspondence inference declare document input. **[Planned]** No
+Generator declares usage feedback without related Facts yet, so that feedback creates no build
+tasks. Row and Field meaning inference read the domain's current documents when their other inputs
+start them.
 
 | Input kind | Creates build tasks when |
 | --- | --- |
@@ -288,9 +289,10 @@ while the schema stays the same is not re-examined. A uniqueness
 that has since broken stays selected, and a query relying on it can double-count. The Query Agent
 can see from dependencies when the data was observed and how much of it was read.
 
-When uniqueness declaration ingestion and the uniqueness check reach the same value, or inclusion
-discovery and correspondence inference propose the same correspondence, the second becomes an
-additional acceptance. A result that disagrees with a candidate is a refuting check, and a new
+When uniqueness declaration ingestion and the uniqueness check reach the same value, or correspondence
+from foreign key states a correspondence inclusion discovery proposed, the second becomes an
+additional acceptance. Inclusion discovery and identifier correspondence inference propose nothing
+for a correspondence that already exists, so whichever comes second adds no support to it. A result that disagrees with a candidate is a refuting check, and a new
 observation that refutes a confirmed Fact produces a retirement proposal with the reason that the
 confirmation was wrong.
 
@@ -306,10 +308,10 @@ coincidental correspondence. For the same reason, keys from candidate key discov
 
 ## Meaning inference
 
-Row and Field meaning inference, with documents as input and `document` checks, concept inference,
-with the trigger of documents, analytical semantics inference for Measures and business terms,
-triggered by documents and confirmed Field meaning, and correction interpretation are implemented.
-**[Planned]** Identifier correspondence inference, Dimensions and a Measure's default time
+Row and Field meaning inference, with documents as input and `document` checks, concept inference
+and identifier correspondence inference, with the trigger of documents, analytical semantics
+inference for Measures and business terms, triggered by documents and confirmed Field meaning, and
+correction interpretation are implemented. **[Planned]** Dimensions and a Measure's default time
 granularity, and the trigger of feedback without related Facts are not.
 
 Meaning inference uses a model for predicates that declarations and data cannot decide. For a target
@@ -327,7 +329,7 @@ each.
 | Field meaning inference | Confirmed Field existence, documents, feedback without related Facts |
 | Concept inference | Confirmed row kind and Field meaning, documents, feedback without related Facts |
 | Analytical semantics inference | Documents, feedback without related Facts, confirmed Field meaning |
-| Identifier correspondence inference | Confirmed Field meaning and represented concept, documents, feedback without related Facts |
+| Identifier correspondence inference | Confirmed represented concept of a Field, confirmed concept relationship, documents, feedback without related Facts |
 | Correction interpretation | Feedback with related Facts, including corrections from review |
 
 All of them also run when a Fact they depend on stops being selected. They create a free-description
@@ -371,6 +373,24 @@ e-mail address given at registration, compared after lower-casing because the tw
 in different case. Once its existence is confirmed, the set relationship check examines it. Its
 business definition cannot be checked against data and is judged as a separate candidate.
 
+Fields stand side by side when they represent the same object: the Fields whose represented concept
+is confirmed are grouped by Concept, and Concepts a confirmed `same-object` relationship links form
+one group. One call passes a group's Fields with the confirmed Facts of them and their Datasets, the
+correspondences already among them, and the relevant document parts; a group within one Dataset
+asks nothing, and the Fields past 50 in one group, an initial bound, are recorded as missing input.
+The model answers pairs of Fields from one Dataset to another, each side with normalization steps
+from the closed list, the support for the existence, and a business definition. The existence
+depends on each Field's existence and represented concept, on the `same-object` relationships of
+the group when its ends stand for different Concepts, and on the documents read; its check covers
+every pair and normalization step. A pair naming a Field the call did not pass, a step not on the
+list, or ends that are not the Fields of one Dataset each in two different Datasets is recorded as
+missing input. Nothing is proposed for a correspondence whose existence, in the same or the reverse
+direction, is a candidate, confirmed, or rejected, since the reverse states the same objects.
+
+Only direct correspondences are inferred, and only between Fields whose represented concept is
+confirmed. These are initial behavior: a correspondence through a mapping table, or one whose
+composite identifier has a column that represents no concept, waits until use shows it matters.
+
 Currency, code meanings, tax treatment, and the posting date of sales rarely have support in data or
 declarations. Without documents, meaning inference can offer only `inference`, and the deciding
 party's judgement becomes the main source: a tax treatment that only a column name suggests is a
@@ -408,12 +428,13 @@ recorded on the build task as not interpreted yet.
 
 What concerns deterministic Generators is implemented: order through declared inputs, targets from
 observations and confirmations, and producing for every target. The conditions and bounds for
-non-deterministic Generators are implemented for row and Field meaning inference, which confirmations
-trigger, for analytical semantics inference, which documents and confirmed Field meaning trigger,
-and for correction interpretation, which feedback with related Facts triggers. Concept inference
-also runs on a new document observation. **[Planned]** The other triggers of non-deterministic
-Generators are not: feedback without related Facts, a Fact no longer selected, an impact judgement,
-and a rejection, retirement, or cascade.
+non-deterministic Generators are implemented for row and Field meaning inference, concept
+inference, and identifier correspondence inference, which confirmations trigger, for analytical
+semantics inference, which documents and confirmed Field meaning trigger, and for correction
+interpretation, which feedback with related Facts triggers. Concept inference and identifier
+correspondence inference also run on a new document observation. **[Planned]** The other triggers
+of non-deterministic Generators are not: feedback without related Facts, a Fact no longer selected,
+an impact judgement, and a rejection, retirement, or cascade.
 
 **Order.** The strategy defines no global order. Order emerges because a later Generator declares as
 input the confirmation of what an earlier one produces. When the e-commerce database is registered:
@@ -442,7 +463,7 @@ candidates that could not reach the deciding party anyway.
 | A Fact no longer selected | The Fact Addresses of Facts that depended on it |
 | An impact judgement | The Fact Addresses of Facts selected for re-examination |
 | A rejection, retirement, or cascade | That Fact's Fact Address |
-| A document | For concept inference, the confirmed Datasets the document names by table or column, matched as the relevant parts of documents are, with their Fields |
+| A document | For concept inference, the confirmed Datasets the document names by table or column, matched as the relevant parts of documents are, with their Fields; for identifier correspondence inference, the groups with a Field of such a Dataset |
 | Feedback without related Facts | **[Planned]** The Generator's predicates for elements the model selects from the content |
 
 A deterministic Generator produces for every target. Identical acceptances record nothing, so
