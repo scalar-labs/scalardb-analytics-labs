@@ -58,8 +58,8 @@ scalardb-analytics workspace init \
 | `constructionQueryTimeLimitSeconds` | `60` | How long one construction-run query may take, at most `86400` |
 | `languageModel` | none | The language model the build tasks call; `semantic build` needs it |
 | `modelInput` | see below | Which data reads reach the language model |
-| `languages` | `["en"]` | The languages the domain's readers use, as canonical BCP 47 language tags such as `ja` and `en`; a business term has one name per language (see [`../docs/semantic-catalog/languages.md`](../docs/semantic-catalog/languages.md)) |
-| `primaryLanguage` | the first of `languages` | The primary one of `languages` |
+| `languages` | `["en"]` | The languages the domain's readers use, such as `["ja", "en"]`, `["zh-Hant"]`, or `["pt-BR", "en"]`; a business term has one name per language. Each is a BCP 47 language tag in its canonical form, so `EN` or `zh-hant` is rejected; the accepted forms are in [`../docs/semantic-catalog/languages.md`](../docs/semantic-catalog/languages.md#declared-languages) |
+| `primaryLanguage` | the first of `languages` | The primary one of `languages`, and the language the domain records every description in. It cannot change once the domain exists; an operation on a domain created with another primary language fails with `RECORDING_LANGUAGE_CHANGED` |
 
 `languageModel` names the adapter that reaches the model and the concrete model it uses (see
 [`../docs/semantic-catalog/generators.md`](../docs/semantic-catalog/generators.md#reaching-a-language-model)):

@@ -57,9 +57,10 @@ adapter and the concrete model it uses (see
 [`semantic-catalog/generators.md`](semantic-catalog/generators.md#reaching-a-language-model)), and
 whether count statistics (on by default) and value samples (off by default) reach the model (see
 [`semantic-catalog/generators.md`](semantic-catalog/generators.md#input-passed-to-external-models)),
-and the languages the domain's readers use and which of them is primary, English alone by default
-(see [`semantic-catalog/languages.md`](semantic-catalog/languages.md#declared-languages)),
-under `semanticCatalog` in `workspace.json` (see
+and the languages the domain's readers use and which of them is primary, the language the domain
+records in, which cannot change once the domain exists, English alone by default (see
+[`semantic-catalog/languages.md`](semantic-catalog/languages.md#declared-languages)), under
+`semanticCatalog` in `workspace.json` (see
 [`../application/README.md`](../application/README.md#standalone-cli)). **[Planned]** It is also to
 hold:
 
@@ -228,7 +229,9 @@ to read in another language, the agent maps the request to one of the domain's d
 and passes it on every later read of the session; the principal's preferred language changes only
 when the user asks for it to change from then on. The agent shows the translations the Semantic
 Catalog returns and never translates knowledge itself, so a reader can always tell a translation
-from the wording that was judged, and writes its own explanations in the reader's language. When
+from the wording that was judged, and writes its own explanations in the reader's language. What
+the user writes for the Semantic Catalog to record, such as a correction's wording or usage
+feedback, the agent translates into the domain's recording language before submitting it. When
 answering a question, it composes SQL from original text and requests translations only for text it
 shows the user, such as a definition it cites, so an unreviewed translation never shapes a query.
 

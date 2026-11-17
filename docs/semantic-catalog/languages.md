@@ -3,8 +3,9 @@
 One Semantic Catalog serves a team whose members read different languages, such as a team that
 works mainly in Japanese with members who read only English. This document explains how language
 runs through the Semantic Catalog: what a domain declares, which text is knowledge in each language
-and which has one original, how translations are made and read, and in which language models and
-people write. Other documents state only what their part needs and link here.
+and which is written in the domain's one recording language, how translations are made and read,
+and how models and people come to write in the recording language. Other documents state only what
+their part needs and link here.
 
 ## The model in brief
 
@@ -13,13 +14,16 @@ two kinds:
 
 - **Names** of business terms are knowledge in each language. A term has its own name in each
   declared language, and each name is a Fact the deciding party confirms.
-- **[Planned]** **Descriptions**, every other text, have one original, written in one language and
-  recorded with that language. Readers of other declared languages read a **translation**, which is
-  derived for display and is not knowledge.
+- **Descriptions**, every other text, are to be written in the domain's **recording language**,
+  its primary language, which is fixed when the domain is created. **[Planned]** Readers of other
+  declared languages read a **translation**, which is derived for display and is not knowledge.
 
-**[Planned]** Generators and the policy evaluation model write in the primary language. A person
-reads in the language their principal prefers, and an agent session can switch it. A Query Agent
-reasons on originals.
+Every description in the log is to be in the recording language, whoever writes it.
+
+**[Planned]** Generators, the policy evaluation model, and the Semantic Catalog's own deterministic
+writers write in the recording language, and an agent translates what a person writes into it before submitting. A person reads in
+the language their principal prefers, and an agent session can switch it. A Query Agent reasons on
+originals.
 
 The split rests on what the Semantic Catalog guarantees: that meaning is right. A translation says
 the same meaning in other words, so recording it as a Fact would make the deciding party judge
@@ -27,6 +31,10 @@ every meaning once per language. A definition such as whether sales include retu
 its exact words, so the reviewed original stays the only wording a query is composed from. A name
 is different: the English name a team uses for 売上 may be "net revenue" rather than a literal
 translation, so which word a team uses in a language is itself knowledge about the domain.
+
+Fixing one recording language per domain, rather than recording a language with each text, keeps
+every original comparable with every other and gives every translation the same source. It also
+leaves no language for a writer to label wrongly.
 
 ## Declared languages
 
@@ -37,11 +45,24 @@ them primary. The declaration lives in the workspace configuration (see
 - for which languages a business term's name is missing knowledge;
 - **[Planned]** into which languages text is translated;
 - **[Planned]** which languages a read can ask for;
-- **[Planned]** in which language generated text is written, the primary one.
+- in which language every description is to be written: the primary one, the domain's
+  recording language.
 
 A domain chooses as primary the language most of its readers, and its semantics owner, read
-directly, because they then read generated text as written and only the others read translations. A
-domain whose semantics owner reads English sets English as primary.
+directly, because they then read the recorded text as written and only the others read
+translations. A domain whose semantics owner reads English sets English as primary. Any declared
+language can be primary, and the primary language cannot change once the domain exists (see
+[the recording language](#descriptions-one-recording-language)).
+Declaring further languages, or no longer declaring one other than the primary, is always
+possible.
+
+A language is written as a BCP 47 language tag that is well-formed and in its canonical form, so one
+language always has one spelling: `ja`, `en`, `zh-Hant`, `pt-BR`, and `ja-JP-u-ca-japanese` are
+accepted. `EN` and `zh-hant` are rejected, and the error names the canonical forms `en` and
+`zh-Hant` to use instead; `en_US` is rejected as malformed. A domain declares at least one language and none twice, and its primary
+language is one of them; without a stated primary, the first declared language is primary. Only the
+form of a tag is checked, not whether the IANA Language Subtag Registry lists the language, so a
+well-formed tag such as `xx` is accepted.
 
 ## Names: one Fact per language
 
@@ -88,28 +109,37 @@ names in the other languages.
 A name is one per language; synonyms within a language, such as 売上 and 売上高, are not
 represented.
 
-## Descriptions: one original with its language
-
-**[Planned]** This section describes design that is not implemented yet.
+## Descriptions: one recording language
 
 Every other text, a description such as a Field's meaning, a Dataset's row inclusion, a
 correspondence's business definition, an applicability scope's description, or a free-description
-predicate's definition, has one original. A Fact records the language of the text in its value
-beside the value, and so do an evaluation for its reason and review material, an answer for its
-wording, and usage feedback for its content.
+predicate's definition, and likewise an evaluation's reason and review material, an answer's
+wording, and usage feedback, is to be written in the domain's recording language. The language
+belongs to the domain, not to each text: no log record carries a language of its own, and whether a
+reader reads the original or a translation follows from comparing the language read in with the
+recording language.
 
-The writer sets the language, because it knows what it wrote and no detection is needed:
+The recording language is the primary language declared when the domain is created. The store keeps
+it with the domain, and an operation on a domain whose declared primary language is now another one
+fails and writes nothing, so a domain's log is never in two languages. A team that wants to record in
+another language creates another domain.
 
-- Generators and the policy evaluation model are instructed to write in the domain's primary
-  language and record it. A quotation from a document stays in the document's own words, because it
-  is checked against the document's text.
-- A person's text takes the language their principal prefers.
+Every writer writes in the recording language:
 
-The language takes no part in identity or sameness. Facts with text values are the same only when
-the proposer points to them, whatever their language (see
-[`record-model.md`](record-model.md#identity-and-urns)). Recording it lets every reader be told
-whether they read the original or a translation, and lets a read skip translation when the reader's
-language is the original's.
+- **[Planned]** Generators and the policy evaluation model are instructed to write in the recording
+  language. A quotation from a document stays in the document's own words, because it is checked
+  against the document's text.
+- **[Planned]** Text the Semantic Catalog composes without a model is written in the recording
+  language too: the business definition schema interpretation states for a foreign key, the reason
+  inline policy evaluation gives, and the reason of a new domain's default user policy version. How
+  is not decided yet; these texts are written in English today, whatever the recording language.
+- **[Planned]** A person may write in any language. The agent that submits a person's answer
+  wording, conflict resolution wording, or usage feedback translates it into the recording language
+  first, so the Semantic Catalog records only text in the recording language (see
+  [Agents and sessions](#agents-and-sessions)).
+
+The Semantic Catalog does not detect the language of text it is given, so text in another language
+is recorded as it is; keeping to the recording language is the writer's part.
 
 ## Translations
 
@@ -118,11 +148,11 @@ language is the original's.
 A **translation** says an original's text in another declared language. A commit that records text,
 in a Fact's value, an evaluation's reason or review material, an answer's wording, or usage
 feedback, creates a translation build task (see
-[`construction.md`](construction.md#build-tasks)). The task translates each such text into every
-declared language other than the text's own, through the same language-model adapter as Generators
-(see [`generators.md`](generators.md#reaching-a-language-model)), and keeps the result outside the
-log, keyed by the record that holds the text and the target language, with the model version that
-made it. Adding a declared language creates translation tasks for the text already recorded. A
+[`construction.md`](construction.md#build-tasks)). The task translates each such text from the
+recording language into every other declared language, through the same language-model adapter as
+Generators (see [`generators.md`](generators.md#reaching-a-language-model)), and keeps the result
+outside the log, keyed by the record that holds the text and the target language, with the model
+version that made it. Adding a declared language creates translation tasks for the text already recorded. A
 failed translation task is resumed like any other.
 
 A translation changes no Fact's state. It is never evaluated or reviewed, and never a dependency or
@@ -132,8 +162,8 @@ term names are not translated, because a name in another language is a Fact of i
 Translating in a build task rather than on read keeps reads free of model calls and side effects. A
 read therefore returns only translations that exist and reports the rest as pending.
 
-A mistranslation cannot be caught by review. Every translation is therefore marked as one, with its
-original language, and the original is always returned with it.
+A mistranslation cannot be caught by review. Every translation is therefore marked as one, and the
+original is always returned with it.
 
 ## Reading in a language
 
@@ -141,13 +171,13 @@ original language, and the original is always returned with it.
 
 A read takes, optionally, the language to read in, one of the domain's declared languages. Without
 one, the application supplies the language the using party's principal prefers, and without a
-preference the domain's primary language is used. Every text a read returns comes as its original
-with its language, and, when that differs from the language read in, with its translation or a mark
-that the translation is pending. Reading the domain's languages returns the declared languages and
-the primary one. The exact contract is in [`public-api.md`](public-api.md#common-contract).
+preference the domain's primary language is used. Every text a read returns comes as its original,
+in the recording language, and, when the language read in is another, with its translation or a
+mark that the translation is pending. Reading the domain's languages returns the declared
+languages and the primary one. The exact contract is in [`public-api.md`](public-api.md#common-contract).
 
-Review material is written in the primary language like other generated text, so a deciding party
-who reads another language reviews it as a translation, with the original beside it (see
+Review material is written in the recording language like other generated text, so a deciding
+party who reads another language reviews it as a translation, with the original beside it (see
 [`construction.md`](construction.md#review)).
 
 ## Agents and sessions
@@ -160,7 +190,9 @@ person asks for in whatever words: it maps the request to a declared language an
 every later read of the session, and changes the principal's preference only when asked to change
 it from then on. It shows the Semantic Catalog's translations and never translates knowledge
 itself, so a reader can always tell a translation from the wording that was judged. Its own
-explanations it writes in the reader's language.
+explanations it writes in the reader's language. What the person writes for the Semantic Catalog to
+record, such as a correction's wording or usage feedback, it translates into the recording language
+before submitting it.
 
 A Query Agent composes SQL from original text and requests translations only for text it shows the
 user, such as a definition it cites, so an unreviewed translation never shapes a query. How the

@@ -55,13 +55,16 @@ declared languages (see [`languages.md`](languages.md#reading-in-a-language)). T
 in from the using party's preferred language when the caller names none, and without either the
 domain's primary language is used; a language the domain does not declare is invalid input. Every
 text a read returns, in Fact values, scopes, evaluations, answers, and feedback, comes as its
-original with the language it was written in. When that differs from the language read in, the
-text comes with its translation, marked as a translation, or marked as pending when the translation
-task has not run yet (see [`languages.md`](languages.md#translations)). A translation never
-replaces the original, so a caller can always show which wording was judged. Business-term names
-are not translated: each language's name is returned at its own Fact Address. Reading the domain's
-languages returns the declared languages and the primary one, so an agent can map a reader's
-request, such as "show it in English", to a language it can pass.
+original, in the domain's recording language (see
+[`languages.md`](languages.md#descriptions-one-recording-language)). When the language read in is
+another, the text comes with its translation, marked as a translation, or marked as pending when
+the translation task has not run yet (see [`languages.md`](languages.md#translations)). A
+translation never replaces the original, so a caller can always show which wording was judged.
+Business-term names are not translated: each language's name is returned at its own Fact Address.
+Text an operation records, such as an answer's wording or usage feedback, is given in the recording
+language; a caller translates a person's text first. Reading the domain's languages returns the
+declared languages and the primary one, which is the recording language, so an agent can map a
+reader's request, such as "show it in English", to a language it can pass.
 
 **[Planned]** **Authority check.** Submitting answers and resolving a conflict take a reference to the result
 of checking the deciding party's authority. The value is opaque, recorded without interpretation,

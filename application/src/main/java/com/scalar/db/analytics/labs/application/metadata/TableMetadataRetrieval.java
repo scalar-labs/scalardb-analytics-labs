@@ -27,6 +27,7 @@ import com.scalar.db.analytics.labs.semantic.SemanticCatalogStore;
 import com.scalar.db.analytics.labs.semantic.TableMetadataObservation;
 import com.scalar.db.analytics.labs.semantic.TableMetadataRegistration;
 import com.scalar.db.analytics.labs.semantic.model.PhysicalCatalogReference;
+import com.scalar.db.analytics.labs.semantic.model.RecordingLanguageChangedException;
 import com.scalar.db.analytics.labs.semantic.model.SemanticCatalogException;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -42,6 +43,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * The retrieval operation (see {@code docs/application.md}, "Table metadata retrieval"): retrieves
@@ -136,6 +138,9 @@ public final class TableMetadataRetrieval {
           domain,
           connector,
           options);
+    } catch (RecordingLanguageChangedException e) {
+      throw new ApplicationFailure(
+          "RECORDING_LANGUAGE_CHANGED", Objects.requireNonNull(e.getMessage()));
     } catch (SemanticCatalogException e) {
       throw registrationFailed();
     }
@@ -237,6 +242,8 @@ public final class TableMetadataRetrieval {
                 identifier,
                 observation.version(),
                 semanticCatalog.registerTableMetadata(domain, AUTHOR, observation)));
+      } catch (RecordingLanguageChangedException e) {
+        throw e;
       } catch (SemanticCatalogException e) {
         throw registrationFailed();
       }

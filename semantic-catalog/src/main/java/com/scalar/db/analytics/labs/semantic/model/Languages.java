@@ -12,7 +12,8 @@ import java.util.Locale;
  * The languages a domain's readers use, one of them primary (see {@code
  * docs/semantic-catalog/languages.md}, "Declared languages"). They decide for which languages a
  * language-qualified predicate is missing knowledge and which languages a Fact Address of one may
- * carry.
+ * carry. The primary language is also the domain's recording language, in which every description
+ * in its log is to be written, fixed when the domain is created.
  *
  * @param declared the declared languages, as BCP 47 language tags in their canonical form, without
  *     duplicates

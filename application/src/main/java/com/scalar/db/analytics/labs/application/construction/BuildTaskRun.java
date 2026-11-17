@@ -15,10 +15,12 @@ import com.scalar.db.analytics.labs.semantic.llm.LanguageModel;
 import com.scalar.db.analytics.labs.semantic.model.BuildRunInProgressException;
 import com.scalar.db.analytics.labs.semantic.model.BuildTask;
 import com.scalar.db.analytics.labs.semantic.model.Hierarchy;
+import com.scalar.db.analytics.labs.semantic.model.RecordingLanguageChangedException;
 import com.scalar.db.analytics.labs.semantic.model.Review;
 import com.scalar.db.analytics.labs.semantic.model.SemanticCatalogException;
 import com.scalar.db.analytics.labs.semantic.policy.LanguageModelPolicyEvaluation;
 import java.time.Duration;
+import java.util.Objects;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
@@ -103,6 +105,9 @@ public final class BuildTaskRun {
       throw new ApplicationFailure(
           "BUILD_RUN_IN_PROGRESS",
           "Another process is running the workspace's build tasks; only one runs them at a time.");
+    } catch (RecordingLanguageChangedException e) {
+      throw new ApplicationFailure(
+          "RECORDING_LANGUAGE_CHANGED", Objects.requireNonNull(e.getMessage()));
     } catch (SemanticCatalogException e) {
       throw new ApplicationFailure(
           "BUILD_RUN_FAILED", "The Semantic Catalog could not run the build tasks.");

@@ -597,8 +597,8 @@ that change away from the Generators.
 
 Analytical semantics inference records each business-term name in the language the model says it
 is written in, among the domain's declared languages (see [`languages.md`](languages.md)).
-**[Planned]** Every caller instructs the model to write in the domain's primary language and
-records that language on what it writes.
+**[Planned]** Every caller instructs the model to write in the domain's recording language, its
+primary language (see [`languages.md`](languages.md#descriptions-one-recording-language)).
 
 An unavailable model fails the build task, which can be resumed. So do a model that gives no answer
 in time and an answer not in the form the caller asked for: the policy evaluation model fails rather

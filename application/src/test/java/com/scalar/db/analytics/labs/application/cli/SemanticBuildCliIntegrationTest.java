@@ -177,6 +177,19 @@ class SemanticBuildCliIntegrationTest {
   }
 
   @Test
+  void aDomainKeepsTheRecordingLanguageItWasCreatedWith() throws Exception {
+    // The domain is created recording in English, the default primary language.
+    configureLanguageModel(INFERRING_NOTHING);
+    registerSource();
+    declareLanguages("ja", "en");
+
+    var built = execute("semantic", "build", "--workspace", workspace.toString());
+
+    assertError(built, "RECORDING_LANGUAGE_CHANGED");
+    assertThat(buildTasks()).allMatch(task -> isState(task, BuildTask.State.CREATED));
+  }
+
+  @Test
   void buildWithoutALanguageModelFailsBeforeRunning() throws Exception {
     registerSource();
 
@@ -326,6 +339,17 @@ class SemanticBuildCliIntegrationTest {
         .put("command", command)
         .put("model", "stub-model")
         .put("timeoutSeconds", 10);
+    Files.writeString(path, OBJECT_MAPPER.writeValueAsString(configuration));
+  }
+
+  /** Declares the domain's languages, the first of them primary. */
+  private void declareLanguages(String... languages) throws Exception {
+    var path = workspace.resolve(Workspace.CONFIG_FILE_NAME);
+    var configuration = (ObjectNode) OBJECT_MAPPER.readTree(path.toFile());
+    var declared = ((ObjectNode) configuration.get("semanticCatalog")).putArray("languages");
+    for (var language : languages) {
+      declared.add(language);
+    }
     Files.writeString(path, OBJECT_MAPPER.writeValueAsString(configuration));
   }
 

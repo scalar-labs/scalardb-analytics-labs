@@ -17,8 +17,9 @@ entry and a document disagree, fix the disagreement.
 | data consumer | — | The user who asks a question, and the Query Agent that composes queries for that user. | [`../semantic-catalog.md`](../semantic-catalog.md) |
 | labeled property graph | — | The structure of knowledge: a graph whose nodes and edges have kinds, each kind fixing the predicates recorded for it. | [`record-model.md`](record-model.md) |
 | open extension | — | The part of the graph that adds domain-specific meaning without changing how the closed core is interpreted. It holds only what established data-modeling vocabulary cannot express. | [`record-model.md`](record-model.md) |
-| declared languages | — | The languages a domain's readers use, as BCP 47 language tags, one of them primary. They decide which business-term names are missing knowledge, which translations are made, and which languages a read can ask for. Generated text is written in the primary language. | [`languages.md`](languages.md) |
+| declared languages | — | The languages a domain's readers use, as BCP 47 language tags, one of them primary. They decide which business-term names are missing knowledge, which translations are made, and which languages a read can ask for. The primary one is the recording language. | [`languages.md`](languages.md) |
 | language-qualified predicate | — | A predicate that holds one value per declared language, with the language as part of its Fact Address's identity, so values in different languages never conflict. `written-form` is the only one. | [`languages.md`](languages.md) |
+| recording language | — | The language every description in a domain's log is to be written in: the primary language declared when the domain was created, which never changes. No log record carries a language of its own. | [`languages.md`](languages.md#descriptions-one-recording-language) |
 
 ## Records
 

@@ -2,10 +2,12 @@
 
 -- The domains of the Semantic Catalog. builder_lock is the key of the session-level advisory lock
 -- that a process running the domain's build tasks holds, issued per domain so domains never share
--- one.
+-- one. recording_language is the language every description in the domain's log is written in,
+-- the primary language declared when the domain was created; it never changes.
 CREATE TABLE semantic_catalog.domains (
     domain text PRIMARY KEY,
     created_at timestamptz NOT NULL,
+    recording_language text NOT NULL,
     builder_lock bigint GENERATED ALWAYS AS IDENTITY UNIQUE
 );
 

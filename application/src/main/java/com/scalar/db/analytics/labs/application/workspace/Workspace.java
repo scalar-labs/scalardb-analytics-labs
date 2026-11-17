@@ -345,6 +345,9 @@ public final class Workspace {
       String storePasswordEnv,
       @Nullable SemanticCatalogConfiguration semanticCatalog) {
     void validate(String errorCode) {
+      if (semanticCatalog != null) {
+        semanticCatalog.validateLanguages(errorCode);
+      }
       if (!CONFIG_SCHEMA.equals(schema)
           || !CONFIG_SCHEMA_VERSION.equals(schemaVersion)
           || catalogName == null
@@ -400,18 +403,30 @@ public final class Workspace {
           languages, primaryLanguage != null ? primaryLanguage : languages.getFirst());
     }
 
-    private boolean languagesValid() {
+    /**
+     * Requires valid declared languages, naming what is wrong with them, such as a tag not in its
+     * canonical form, so the user can correct the setting.
+     *
+     * @throws ApplicationFailure with the error code when the languages are not valid
+     */
+    void validateLanguages(String errorCode) {
       try {
         declaredLanguages();
-        return true;
       } catch (IllegalArgumentException e) {
-        return false;
+        throw new ApplicationFailure(
+            errorCode,
+            "The workspace configuration's semanticCatalog.languages or"
+                + " semanticCatalog.primaryLanguage is invalid: "
+                + e.getMessage());
       }
     }
 
+    /**
+     * Whether the settings other than the languages, which {@link #validateLanguages} checks, are
+     * valid.
+     */
     boolean isValid() {
       return (languageModel == null || languageModel.isValid())
-          && languagesValid()
           && (sampleSize == null
               || (sampleSize > 0 && sampleSize <= ConstructionSqlSettings.MAX_SAMPLE_SIZE))
           && (constructionQueryTimeLimitSeconds == null

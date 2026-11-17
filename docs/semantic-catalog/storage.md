@@ -145,7 +145,7 @@ The log:
 
 | Table | Primary key | Holds |
 | --- | --- | --- |
-| `domains` | Domain | Creation time, builder semaphore key |
+| `domains` | Domain | Creation time, recording language, builder semaphore key |
 | `commits` | Domain, commit number | Time, kind of operation, author (the person or agent behind the call) |
 | `log_records` | Domain, commit number, order | Record kind, target Fact, target Input Resource, target Fact Address of a conflict resolution, content |
 

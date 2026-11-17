@@ -149,6 +149,40 @@ class ScalarDbAnalyticsCliTest {
   }
 
   @Test
+  void aLanguageNotInItsCanonicalFormIsAnInvalidWorkspaceThatNamesTheFix(@TempDir Path directory)
+      throws Exception {
+    Files.writeString(
+        directory.resolve(Workspace.CONFIG_FILE_NAME),
+        """
+        {
+          "schema": "scalardb-analytics/workspace-configuration",
+          "schemaVersion": "1",
+          "catalogName": "catalog",
+          "storeJdbcUrl": "jdbc:postgresql://localhost/catalog",
+          "storePasswordEnv": "STORE_PASSWORD",
+          "semanticCatalog": { "languages": ["ja", "EN"] }
+        }
+        """);
+
+    var result =
+        execute(
+            Map.of("STORE_PASSWORD", "secret"),
+            "query",
+            "--workspace",
+            directory.toString(),
+            "--sql",
+            "SELECT 1");
+
+    assertThat(result.exitCode()).isEqualTo(1);
+    var output = OBJECT_MAPPER.readTree(result.standardOutput().strip());
+    assertThat(output.get("code").textValue()).isEqualTo("INVALID_WORKSPACE");
+    assertThat(output.get("message").textValue())
+        .contains("semanticCatalog.languages")
+        .contains("EN")
+        .contains("use en");
+  }
+
+  @Test
   void workspaceLoadRejectsSymbolicLink(@TempDir Path directory) throws Exception {
     var target = directory.resolve("target");
     Files.createDirectory(target);

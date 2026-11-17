@@ -16,6 +16,7 @@ import com.scalar.db.analytics.labs.semantic.DocumentRegistration;
 import com.scalar.db.analytics.labs.semantic.SemanticCatalogStore;
 import com.scalar.db.analytics.labs.semantic.model.BuildTask;
 import com.scalar.db.analytics.labs.semantic.model.Document;
+import com.scalar.db.analytics.labs.semantic.model.RecordingLanguageChangedException;
 import com.scalar.db.analytics.labs.semantic.model.SemanticCatalogException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -203,6 +204,9 @@ public final class SemanticCommand implements Runnable {
           registration =
               semanticCatalog.registerDocument(
                   domain, System.getProperty("user.name", "unknown"), resource, document);
+        } catch (RecordingLanguageChangedException e) {
+          throw new ApplicationFailure(
+              "RECORDING_LANGUAGE_CHANGED", Objects.requireNonNull(e.getMessage()));
         } catch (SemanticCatalogException e) {
           throw new ApplicationFailure(
               "DOCUMENT_REGISTRATION_FAILED",

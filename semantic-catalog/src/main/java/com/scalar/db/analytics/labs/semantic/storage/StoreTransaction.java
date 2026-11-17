@@ -73,15 +73,27 @@ public final class StoreTransaction {
         > 0;
   }
 
+  /** The recording language of a domain in this transaction's snapshot, if the domain exists. */
+  public Optional<String> recordingLanguage(String domain) {
+    return jdbc.sql("SELECT recording_language FROM semantic_catalog.domains WHERE domain = ?")
+        .param(domain)
+        .query(String.class)
+        .optional();
+  }
+
   /**
    * Inserts a domain.
    *
+   * @param recordingLanguage the language every description in the domain's log is written in
    * @throws org.springframework.dao.DuplicateKeyException when the domain exists, including one a
    *     concurrent transaction created
    */
-  public void insertDomain(String domain) {
-    jdbc.sql("INSERT INTO semantic_catalog.domains (domain, created_at) VALUES (?, now())")
+  public void insertDomain(String domain, String recordingLanguage) {
+    jdbc.sql(
+            "INSERT INTO semantic_catalog.domains (domain, created_at, recording_language)"
+                + " VALUES (?, now(), ?)")
         .param(domain)
+        .param(recordingLanguage)
         .update();
   }
 

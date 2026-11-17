@@ -11,6 +11,7 @@ import com.scalar.db.analytics.labs.semantic.model.Document;
 import com.scalar.db.analytics.labs.semantic.model.Languages;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.LogRecordJson;
+import com.scalar.db.analytics.labs.semantic.model.RecordingLanguageChangedException;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
 import com.scalar.db.analytics.labs.semantic.model.Review;
 import com.scalar.db.analytics.labs.semantic.model.ReviewPresentation;
@@ -108,14 +109,31 @@ public final class SemanticCatalogStore implements AutoCloseable {
         languages);
   }
 
-  private Languages languages(String domain) {
-    return languages.apply(domain);
+  /**
+   * The languages a domain declares, once its recording language is checked: the primary language
+   * declared for it must be the one it was created with.
+   *
+   * @throws SemanticCatalogException when the domain does not exist
+   * @throws RecordingLanguageChangedException when its primary language changed
+   */
+  private Languages languages(StoreTransaction transaction, String domain) {
+    var recording =
+        transaction
+            .recordingLanguage(domain)
+            .orElseThrow(() -> new SemanticCatalogException("Unknown domain " + domain));
+    var declared = languages.apply(domain);
+    if (!declared.primary().equals(recording)) {
+      throw new RecordingLanguageChangedException(domain, recording, declared.primary());
+    }
+    return declared;
   }
 
   /**
    * Creates a domain under a caller-supplied domain identifier. A domain is the unit of management
    * that assigns one responsible party to a body of data and its semantics, and every other record
-   * belongs to exactly one domain. Its first commit records the {@linkplain
+   * belongs to exactly one domain. The domain's recording language, the primary language declared
+   * for it now, is fixed from then on (see {@code docs/semantic-catalog/languages.md},
+   * "Descriptions: one recording language"). Its first commit records the {@linkplain
    * LogRecord.PolicyVersion#DEFAULT default user policy version}.
    *
    * @param domain the domain identifier, in the form {@link Urns#DOMAIN} requires
@@ -130,10 +148,11 @@ public final class SemanticCatalogStore implements AutoCloseable {
             if (transaction.domainExists(domain)) {
               throw new SemanticCatalogException("Domain " + domain + " already exists");
             }
-            transaction.insertDomain(domain);
+            var declared = languages.apply(domain);
+            transaction.insertDomain(domain, declared.primary());
             var initial = CommitRequest.builder("create-domain", "semantic-catalog");
             initial.add(LogRecord.PolicyVersion.DEFAULT);
-            commit(transaction, expressions, domain, languages(domain), initial.build(), true);
+            commit(transaction, expressions, domain, declared, initial.build(), true);
             return Boolean.TRUE;
           });
     } catch (DuplicateKeyException e) {
@@ -165,7 +184,9 @@ public final class SemanticCatalogStore implements AutoCloseable {
    */
   public CommitResult commit(String domain, CommitRequest request) {
     return store.write(
-        transaction -> commit(transaction, expressions, domain, languages(domain), request, true));
+        transaction ->
+            commit(
+                transaction, expressions, domain, languages(transaction, domain), request, true));
   }
 
   /**
@@ -174,7 +195,9 @@ public final class SemanticCatalogStore implements AutoCloseable {
    */
   CommitResult commitAsWritten(String domain, CommitRequest request) {
     return store.write(
-        transaction -> commit(transaction, expressions, domain, languages(domain), request, false));
+        transaction ->
+            commit(
+                transaction, expressions, domain, languages(transaction, domain), request, false));
   }
 
   /**
@@ -365,7 +388,7 @@ public final class SemanticCatalogStore implements AutoCloseable {
     var declared = observation.table().observed();
     return store.write(
         transaction -> {
-          requireDomain(transaction, domain);
+          languages(transaction, domain);
           var existing = transaction.lockTableResource(domain, table);
           var latest = existing.flatMap(resource -> optional(resource.latestVersion()));
           if (latest.isPresent() && version <= latest.get()) {
@@ -398,7 +421,13 @@ public final class SemanticCatalogStore implements AutoCloseable {
                       .put("tableIdentifier", table)
                       .put("tableMetadataVersion", version)));
           var written =
-              commit(transaction, expressions, domain, languages(domain), request.build(), true);
+              commit(
+                  transaction,
+                  expressions,
+                  domain,
+                  languages(transaction, domain),
+                  request.build(),
+                  true);
           var resource = written.urn(resourceRef);
           recordVersion(transaction, domain, resource, observation);
           return new TableMetadataRegistration.Observed(
@@ -430,7 +459,7 @@ public final class SemanticCatalogStore implements AutoCloseable {
       String domain, String author, @Nullable String inputResource, Document document) {
     return store.write(
         transaction -> {
-          requireDomain(transaction, domain);
+          languages(transaction, domain);
           Ref resourceRef;
           var request = CommitRequest.builder("register-observation", author);
           if (inputResource == null) {
@@ -459,7 +488,13 @@ public final class SemanticCatalogStore implements AutoCloseable {
                   observed,
                   JsonNodeFactory.instance.objectNode().put("document", document.name())));
           var written =
-              commit(transaction, expressions, domain, languages(domain), request.build(), true);
+              commit(
+                  transaction,
+                  expressions,
+                  domain,
+                  languages(transaction, domain),
+                  request.build(),
+                  true);
           return new DocumentRegistration.Observed(
               inputResource == null ? written.urn(resourceRef) : inputResource,
               written.urn(observed),
@@ -497,7 +532,7 @@ public final class SemanticCatalogStore implements AutoCloseable {
   public Optional<JsonNode> derivedRecord(String domain, String tableIdentifier, long version) {
     return store.read(
         transaction -> {
-          requireDomain(transaction, domain);
+          languages(transaction, domain);
           return transaction.derivedRecord(domain, tableIdentifier, version);
         });
   }
@@ -511,7 +546,7 @@ public final class SemanticCatalogStore implements AutoCloseable {
   public Optional<JsonNode> observationContent(String domain, String inputObservation) {
     return store.read(
         transaction -> {
-          requireDomain(transaction, domain);
+          languages(transaction, domain);
           if (!Urns.kind(inputObservation).equals(Urns.INPUT_OBSERVATION)) {
             return Optional.empty();
           }
@@ -541,7 +576,7 @@ public final class SemanticCatalogStore implements AutoCloseable {
     }
     return store.write(
         transaction -> {
-          requireDomain(transaction, domain);
+          languages(transaction, domain);
           var answers = submission.answers();
           var openProposals = openRetirementProposals(transaction, domain, answers);
           var request = CommitRequest.builder("submit-answers", submission.decidedBy());
@@ -581,7 +616,13 @@ public final class SemanticCatalogStore implements AutoCloseable {
                             : answer.reviewPresentation().toString())));
           }
           var result =
-              commit(transaction, expressions, domain, languages(domain), request.build(), true);
+              commit(
+                  transaction,
+                  expressions,
+                  domain,
+                  languages(transaction, domain),
+                  request.build(),
+                  true);
           var commit = result.commit().orElseThrow();
           var outcomes = new ArrayList<Answers.Outcome>();
           var answered = new HashSet<String>();
@@ -782,7 +823,7 @@ public final class SemanticCatalogStore implements AutoCloseable {
     }
     return store.write(
         transaction -> {
-          requireDomain(transaction, domain);
+          languages(transaction, domain);
           if (resolution.reviewPresentation() != null
               && transaction.presentation(domain, resolution.reviewPresentation()).isEmpty()) {
             throw new SemanticCatalogException(
@@ -800,7 +841,13 @@ public final class SemanticCatalogStore implements AutoCloseable {
                   resolution.reviewPresentation() == null
                       ? null
                       : resolution.reviewPresentation().toString()));
-          return commit(transaction, expressions, domain, languages(domain), request.build(), true);
+          return commit(
+              transaction,
+              expressions,
+              domain,
+              languages(transaction, domain),
+              request.build(),
+              true);
         });
   }
 
@@ -815,11 +862,17 @@ public final class SemanticCatalogStore implements AutoCloseable {
   public PolicyVersionSet setPolicyVersion(String domain, LogRecord.PolicyVersion version) {
     return store.write(
         transaction -> {
-          requireDomain(transaction, domain);
+          languages(transaction, domain);
           var request = CommitRequest.builder("set-policy-version", version.setBy());
           var ref = request.add(version);
           var urn =
-              commit(transaction, expressions, domain, languages(domain), request.build(), true)
+              commit(
+                      transaction,
+                      expressions,
+                      domain,
+                      languages(transaction, domain),
+                      request.build(),
+                      true)
                   .urn(ref);
           var task =
               BuildTasks.trigger(transaction, domain, new BuildTask.Work.PolicyReEvaluation(), urn);
@@ -845,7 +898,7 @@ public final class SemanticCatalogStore implements AutoCloseable {
   public long registerReviewPresentation(String domain, ReviewPresentation presentation) {
     return store.write(
         transaction -> {
-          requireDomain(transaction, domain);
+          languages(transaction, domain);
           var projection = new Projection(domain, transaction.projectionSource(domain));
           for (var target : presentation.targets()) {
             var address = projection.factAddress(target.fact());
@@ -894,11 +947,8 @@ public final class SemanticCatalogStore implements AutoCloseable {
       BuildRun.Environment environment,
       BuildRun.Mode mode,
       BuildRun.Listener listener) {
-    if (!domainExists(domain)) {
-      throw new SemanticCatalogException("Unknown domain " + domain);
-    }
-    return new BuildRunner(store, expressions, domain, languages(domain), environment)
-        .run(mode, listener);
+    var declared = store.read(transaction -> languages(transaction, domain));
+    return new BuildRunner(store, expressions, domain, declared, environment).run(mode, listener);
   }
 
   /**
@@ -911,7 +961,7 @@ public final class SemanticCatalogStore implements AutoCloseable {
   public BuildTask resumeBuildTask(String domain, long task) {
     return store.write(
         transaction -> {
-          requireDomain(transaction, domain);
+          languages(transaction, domain);
           var current =
               transaction
                   .buildTask(domain, task)
@@ -939,7 +989,7 @@ public final class SemanticCatalogStore implements AutoCloseable {
   public List<BuildTask> buildTasks(String domain) {
     return store.read(
         transaction -> {
-          requireDomain(transaction, domain);
+          languages(transaction, domain);
           return transaction.buildTasks(domain);
         });
   }
@@ -986,7 +1036,7 @@ public final class SemanticCatalogStore implements AutoCloseable {
   public <T> T read(String domain, Point point, Function<CatalogSnapshot, T> reader) {
     return store.read(
         transaction -> {
-          requireDomain(transaction, domain);
+          languages(transaction, domain);
           var last = transaction.lastCommit(domain);
           var commit =
               switch (point) {
@@ -999,7 +1049,8 @@ public final class SemanticCatalogStore implements AutoCloseable {
                   yield at.commit();
                 }
               };
-          return reader.apply(new CatalogSnapshot(transaction, domain, languages(domain), commit));
+          return reader.apply(
+              new CatalogSnapshot(transaction, domain, languages(transaction, domain), commit));
         });
   }
 
@@ -1013,7 +1064,7 @@ public final class SemanticCatalogStore implements AutoCloseable {
   public ReplayCheck replayCheck(String domain) {
     return store.read(
         transaction -> {
-          requireDomain(transaction, domain);
+          languages(transaction, domain);
           var projection = new Projection(domain, ProjectionSource.EMPTY);
           var projector = Projector.replaying(projection);
           var commit = 0L;
