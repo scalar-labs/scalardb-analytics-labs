@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.scalar.db.analytics.labs.application.ApplicationFailure;
 import com.scalar.db.analytics.labs.application.cli.CliOutput;
+import com.scalar.db.analytics.labs.application.cli.WorkspaceOption;
 import com.scalar.db.analytics.labs.application.semantic.SemanticCatalogService;
 import com.scalar.db.analytics.labs.application.workspace.Workspace;
 import java.io.IOException;
@@ -23,8 +24,8 @@ import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.function.Function;
 import org.jspecify.annotations.Nullable;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Model.CommandSpec;
-import picocli.CommandLine.Option;
 import picocli.CommandLine.Spec;
 
 /**
@@ -36,8 +37,7 @@ abstract class SemanticCall implements Callable<Integer> {
 
   private final Map<String, String> environment;
 
-  @Option(names = "--workspace", required = true, paramLabel = "DIR")
-  private @Nullable Path workspaceDirectory;
+  @Mixin private WorkspaceOption workspaceOption = new WorkspaceOption();
 
   @Spec private @Nullable CommandSpec commandSpec;
 
@@ -52,9 +52,7 @@ abstract class SemanticCall implements Callable<Integer> {
   public final Integer call() throws JsonProcessingException {
     var out = Objects.requireNonNull(commandSpec, "commandSpec").commandLine().getOut();
     try {
-      var workspace =
-          Workspace.load(
-              Objects.requireNonNull(workspaceDirectory, "workspaceDirectory"), environment);
+      var workspace = Workspace.load(workspaceOption.directory(environment), environment);
       CliOutput.write(out, call(new SemanticCatalogService(workspace)));
       return CliOutput.SUCCESS;
     } catch (ApplicationFailure e) {

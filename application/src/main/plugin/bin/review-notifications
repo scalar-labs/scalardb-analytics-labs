@@ -1,0 +1,28 @@
+#!/bin/sh
+# Reads the output of `scalardb-analytics semantic build --watch` on stdin and prints, one line
+# each, only what the agent must act on:
+#   - a build task event whose awaitingReview is higher than in the previous event;
+#   - a build task event for a failed task;
+#   - any other JSON line, such as a classified error or the run summary.
+# Other lines, such as runtime warnings, are dropped. Each line is handled as soon as it arrives,
+# so the filter can sit behind `tail -f`.
+last=0
+while IFS= read -r line; do
+  case $line in
+    '{'*'"schema":"scalardb-analytics/build-task-event"'*)
+      awaiting=0
+      case $line in
+        *'"awaitingReview":'[0-9]*)
+          awaiting=${line##*'"awaitingReview":'}
+          awaiting=${awaiting%%[!0-9]*}
+          ;;
+      esac
+      case $line in
+        *'"state":"failed"'*) printf '%s\n' "$line" ;;
+        *) [ "$awaiting" -gt "$last" ] && printf '%s\n' "$line" ;;
+      esac
+      last=$awaiting
+      ;;
+    '{'*) printf '%s\n' "$line" ;;
+  esac
+done

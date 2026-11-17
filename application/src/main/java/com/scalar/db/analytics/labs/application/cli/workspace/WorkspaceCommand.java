@@ -7,14 +7,15 @@ package com.scalar.db.analytics.labs.application.cli.workspace;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.scalar.db.analytics.labs.application.ApplicationFailure;
 import com.scalar.db.analytics.labs.application.cli.CliOutput;
+import com.scalar.db.analytics.labs.application.cli.WorkspaceOption;
 import com.scalar.db.analytics.labs.application.workspace.Workspace;
-import java.nio.file.Path;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Callable;
 import org.jspecify.annotations.Nullable;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Spec;
@@ -40,8 +41,7 @@ public final class WorkspaceCommand implements Runnable {
 final class WorkspaceInitCommand implements Callable<Integer> {
   private final Map<String, String> environment;
 
-  @Option(names = "--workspace", required = true, paramLabel = "DIR")
-  private @Nullable Path workspaceDirectory;
+  @Mixin private WorkspaceOption workspaceOption = new WorkspaceOption();
 
   @Option(names = "--catalog", required = true, paramLabel = "NAME")
   private @Nullable String catalogName;
@@ -66,7 +66,7 @@ final class WorkspaceInitCommand implements Callable<Integer> {
     try {
       var workspace =
           Workspace.initialize(
-              Objects.requireNonNull(workspaceDirectory),
+              workspaceOption.directory(environment),
               Objects.requireNonNull(catalogName),
               Objects.requireNonNull(storeJdbcUrl),
               storeUsername,

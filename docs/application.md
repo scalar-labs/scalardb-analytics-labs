@@ -241,15 +241,19 @@ feedback, the agent translates into the domain's recording language before submi
 answering a question, it composes SQL from original text and requests translations only for text it
 shows the user, such as a definition it cites, so an unreviewed translation never shapes a query.
 
-**[Planned]** The first distribution of the Agent Skill for an agent host is a Claude Code plugin in
-the distribution. A user starts Claude Code with the plugin directory (`claude --plugin-dir`), and
-the plugin bundles Agent Skill v1, the slash commands `setup`, `build`, `ask`, and `status`, and a
-wrapper that only locates the distribution's CLI; the CLI itself reads the workspace from an
-environment variable. Claude Code wakes an agent whose turn has ended only on a notification, so
-`build` runs the watching build under Claude Code's `Monitor` tool, and its event that review items
-are ready wakes the agent. Only when another process already runs the domain's build tasks does the
-agent read the review list at an interval instead. The plugin is a way to deliver the Agent Skill,
-not an agent the product owns.
+The first distribution of the Agent Skill for an agent host is a Claude Code plugin in the
+distribution. A user starts Claude Code with the plugin directory (`claude --plugin-dir`), and the
+plugin bundles Agent Skill v1, the slash commands `setup`, `build`, `ask`, and `status`, and a
+wrapper that only locates the distribution's CLI; the CLI itself reads the workspace from the
+`SCALARDB_ANALYTICS_WORKSPACE` environment variable when `--workspace` is omitted. Claude Code wakes
+an agent whose turn has ended only on a notification, so `build` makes the watching build's events
+notifications: it runs the watching build in the background and watches its output with Claude
+Code's `Monitor` tool, which passes on a build task event that raises the number of items awaiting
+review, a failed task, or an error. The watching build is not itself the `Monitor` command, because
+Claude Code stops a monitor at a deadline and re-arms only the watch, which must not stop a build
+task. Only when another process already runs the domain's build tasks does the agent read the review
+list at an interval instead. The plugin is a way to deliver the Agent Skill, not an agent the product
+owns.
 
 ## Table metadata retrieval
 

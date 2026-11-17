@@ -126,25 +126,31 @@ build tasks; nothing has run them yet.
 
 ## 5. Start the agent
 
-Give Claude Code the packaged skill, and start it in this directory with `CATALOG_PASSWORD` still
-exported:
+Start Claude Code in this directory with the distribution's plugin, the workspace named in
+`SCALARDB_ANALYTICS_WORKSPACE`, and `CATALOG_PASSWORD` still exported:
 
 ```console
-mkdir -p .claude/skills
-cp -R ../../application/build/install/scalardb-analytics-*/skills/query-agent-v1 \
-  .claude/skills/scalardb-analytics-query-agent
-claude
+export SCALARDB_ANALYTICS_WORKSPACE="$PWD/workspace"
+claude --plugin-dir "$(cd ../../application/build/install/scalardb-analytics-*/plugins/scalardb-analytics && pwd)"
 ```
 
-Ask it to build and review the catalog with you, with the workspace `./workspace`:
+The plugin bundles Query Agent Skill v1 and adds four commands. Check that the session reaches the
+workspace:
 
 ```text
-./workspace の Semantic Catalog を構築して、レビューが必要なものを見せてください。
+/scalardb-analytics:setup
 ```
 
-The agent starts a watching build in the background, reads the review list as items appear, and
-presents them per table: items the review material suggests consenting to, one line each, for
-consent together, and the items that need judgement one by one. Answer them, for example "all
+Then build and review the catalog with the agent:
+
+```text
+/scalardb-analytics:build
+```
+
+The agent starts a watching build in the background and watches its output, so it is woken when
+items become reviewable, even while you are idle. It presents them per table: items the review
+material suggests consenting to, one line each, for consent together, and the items that need
+judgement one by one. Answer them, for example "all
 OK", or name the ones that are wrong and say what is right. You are the semantics owner here: the
 CLI records the person running it as the deciding party, so the agent submits only the answers you
 give. Confirmed knowledge lets more Generators run, so new items keep appearing for a while. The
@@ -153,7 +159,7 @@ review is done when nothing awaits review and no build task is created or runnin
 Then ask the question:
 
 ```text
-2026年9月に EC と店舗の両方で購入した顧客の、9月の EC 売上の合計は?
+/scalardb-analytics:ask 2026年9月に EC と店舗の両方で購入した顧客の、9月の EC 売上の合計は?
 ```
 
 The agent fixes one Catalog Snapshot, reads the knowledge the question needs, composes one
@@ -162,8 +168,9 @@ Revision URNs it used. If knowledge is missing, it says so and registers usage f
 guessing. [`queries/both-channels-ec-sales.sql`](queries/both-channels-ec-sales.sql) is the query
 the confirmed knowledge leads to.
 
-Claude Code asks before it runs a command. Choose the option that stops asking for
-`scalardb-analytics`, or start it with `--allowedTools "Bash(scalardb-analytics:*)"`.
+Claude Code asks before it runs a command. Choose the option that stops asking for the plugin's
+`bin/scalardb-analytics`. `/scalardb-analytics:status` summarizes the catalog, its review list, and
+its build tasks at any point.
 
 ## 6. The commands behind it
 
@@ -206,7 +213,7 @@ checks, what it depends on, its confirmation path, and who consented.
 
 ```console
 docker compose down -v
-rm -rf workspace .claude
+rm -rf workspace
 ```
 
 ## Troubleshooting

@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.scalar.db.analytics.labs.application.ApplicationFailure;
 import com.scalar.db.analytics.labs.application.ArrowJson;
 import com.scalar.db.analytics.labs.application.cli.CliOutput;
+import com.scalar.db.analytics.labs.application.cli.WorkspaceOption;
 import com.scalar.db.analytics.labs.application.workspace.Workspace;
 import com.scalar.db.analytics.labs.query.QueryEngineException;
 import com.scalar.db.analytics.labs.query.QueryError;
@@ -32,6 +33,7 @@ import org.apache.arrow.vector.types.pojo.Field;
 import org.jspecify.annotations.Nullable;
 import picocli.CommandLine.ArgGroup;
 import picocli.CommandLine.Command;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Spec;
@@ -48,8 +50,7 @@ public final class QueryCommand implements Callable<Integer>, AutoCloseable {
   private final AtomicBoolean cancellationRequested = new AtomicBoolean();
   private volatile @Nullable QueryApplicationService queryService;
 
-  @Option(names = "--workspace", required = true, paramLabel = "DIR")
-  private @Nullable Path workspaceDirectory;
+  @Mixin private WorkspaceOption workspaceOption = new WorkspaceOption();
 
   @Option(names = "--time-limit-seconds", paramLabel = "SECONDS")
   private @Nullable Long timeLimitSeconds;
@@ -75,9 +76,7 @@ public final class QueryCommand implements Callable<Integer>, AutoCloseable {
   @Override
   public Integer call() throws JsonProcessingException {
     try {
-      var workspace =
-          Workspace.load(
-              Objects.requireNonNull(workspaceDirectory, "workspaceDirectory"), environment);
+      var workspace = Workspace.load(workspaceOption.directory(environment), environment);
       var sql = readSql();
       var limit = timeLimit();
       active.set(true);

@@ -19,7 +19,8 @@ You are not the semantics owner. Only the owner's own answer confirms knowledge.
 
 ## Working contract
 
-- Pass the workspace directory with `--workspace <dir>`. Do not read or edit files inside it.
+- Pass the workspace directory with `--workspace <dir>`, or omit the option when the environment
+  sets `SCALARDB_ANALYTICS_WORKSPACE` to it. Do not read or edit files inside it.
 - Every command prints JSON objects on stdout, one per line, each with `schema` and
   `schemaVersion`. Exit code `0` is success, `1` is a classified error
   (`schema: scalardb-analytics/error` with a `code` and a `message`), and `2` is invalid usage.

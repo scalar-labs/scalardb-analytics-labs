@@ -427,6 +427,15 @@ class SemanticCatalogCliIntegrationTest {
     assertError(semantic("languages"), "RECORDING_LANGUAGE_CHANGED");
   }
 
+  @Test
+  void aSessionThatNamesTheWorkspaceInTheEnvironmentOmitsTheOption() throws Exception {
+    environment.put(WorkspaceOption.ENVIRONMENT_VARIABLE, workspace.toString());
+
+    var languages = single(execute("semantic", "languages"));
+
+    assertThat(languages.get("primary").textValue()).isEqualTo("en");
+  }
+
   private String domain() {
     return domain;
   }

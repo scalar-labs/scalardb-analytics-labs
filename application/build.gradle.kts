@@ -247,6 +247,8 @@ val generateDistributionProvenance = tasks.register("generateDistributionProvena
     }
 }
 
+val pluginVersion = project.version.toString()
+
 distributions {
     main {
         distributionClassifier.set(distributionPlatform)
@@ -254,6 +256,22 @@ distributions {
             from(rootProject.layout.projectDirectory.file("LICENSE"))
             from("src/main/resources/META-INF/scalardb-analytics/skills") {
                 into("skills")
+            }
+            // The Claude Code plugin, which delivers Agent Skill v1 with its commands.
+            into("plugins/scalardb-analytics") {
+                from("src/main/plugin") {
+                    exclude("bin/**")
+                    filesMatching(".claude-plugin/plugin.json") {
+                        expand("version" to pluginVersion)
+                    }
+                }
+                from("src/main/plugin/bin") {
+                    into("bin")
+                    filePermissions { unix("rwxr-xr-x") }
+                }
+                from("src/main/resources/META-INF/scalardb-analytics/skills/query-agent-v1") {
+                    into("skills/scalardb-analytics-query-agent")
+                }
             }
             from(generateDistributionProvenance) {
                 into("provenance")

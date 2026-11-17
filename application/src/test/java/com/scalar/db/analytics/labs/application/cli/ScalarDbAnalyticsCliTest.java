@@ -72,6 +72,42 @@ class ScalarDbAnalyticsCliTest {
   }
 
   @Test
+  void withoutTheOptionOrTheEnvironmentVariableNoWorkspaceIsClassified() throws Exception {
+    var result = execute(Map.of(), "semantic", "languages");
+
+    assertThat(result.exitCode()).isEqualTo(1);
+    assertThat(result.standardError()).isEmpty();
+    var output = OBJECT_MAPPER.readTree(result.standardOutput().strip());
+    assertThat(output.get("code").textValue()).isEqualTo("INVALID_WORKSPACE");
+    assertThat(output.get("message").textValue())
+        .contains("--workspace")
+        .contains(WorkspaceOption.ENVIRONMENT_VARIABLE);
+  }
+
+  @Test
+  void theWorkspaceOptionOverridesTheEnvironmentVariable(@TempDir Path directory) throws Exception {
+    var named = directory.resolve("named");
+    Files.createDirectory(named);
+    Files.writeString(named.resolve(Workspace.CONFIG_FILE_NAME), "not-json");
+    var environment = Map.of(WorkspaceOption.ENVIRONMENT_VARIABLE, named.toString());
+
+    var fromEnvironment = execute(environment, "query", "--sql", "SELECT 1");
+    var fromOption =
+        execute(
+            environment,
+            "query",
+            "--workspace",
+            directory.resolve("missing").toString(),
+            "--sql",
+            "SELECT 1");
+
+    assertThat(OBJECT_MAPPER.readTree(fromEnvironment.standardOutput().strip()).get("message"))
+        .hasToString("\"The workspace configuration is invalid.\"");
+    assertThat(OBJECT_MAPPER.readTree(fromOption.standardOutput().strip()).get("message"))
+        .hasToString("\"The workspace does not exist or is invalid.\"");
+  }
+
+  @Test
   void invalidWorkspaceUsesClassifiedJsonOnStdout(@TempDir Path directory) throws Exception {
     Files.writeString(directory.resolve(Workspace.CONFIG_FILE_NAME), "not-json");
 

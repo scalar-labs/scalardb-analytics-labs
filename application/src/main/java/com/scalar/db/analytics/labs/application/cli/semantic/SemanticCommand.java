@@ -8,6 +8,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.scalar.db.analytics.labs.application.ApplicationFailure;
 import com.scalar.db.analytics.labs.application.SemanticCatalogDomains;
 import com.scalar.db.analytics.labs.application.cli.CliOutput;
+import com.scalar.db.analytics.labs.application.cli.WorkspaceOption;
 import com.scalar.db.analytics.labs.application.construction.BuildTaskRun;
 import com.scalar.db.analytics.labs.application.construction.QueryEngineSqlParser;
 import com.scalar.db.analytics.labs.application.semantic.SemanticCatalogService;
@@ -33,6 +34,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.jspecify.annotations.Nullable;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Spec;
@@ -90,8 +92,7 @@ public final class SemanticCommand implements Runnable {
     private final AtomicBoolean watching = new AtomicBoolean();
     private final AtomicBoolean stopRequested = new AtomicBoolean();
 
-    @Option(names = "--workspace", required = true, paramLabel = "DIR")
-    private @Nullable Path workspaceDirectory;
+    @Mixin private WorkspaceOption workspaceOption = new WorkspaceOption();
 
     @Option(
         names = "--watch",
@@ -116,9 +117,7 @@ public final class SemanticCommand implements Runnable {
     public Integer call() throws JsonProcessingException {
       var out = Objects.requireNonNull(commandSpec, "commandSpec").commandLine().getOut();
       try {
-        var workspace =
-            Workspace.load(
-                Objects.requireNonNull(workspaceDirectory, "workspaceDirectory"), environment);
+        var workspace = Workspace.load(workspaceOption.directory(environment), environment);
         var mode =
             watch ? new BuildTaskRun.Mode.Watch(stopRequested::get) : new BuildTaskRun.Mode.Drain();
         stopRequested.set(false);
@@ -187,8 +186,7 @@ public final class SemanticCommand implements Runnable {
   static final class RegisterDocumentCommand implements Callable<Integer> {
     private final Map<String, String> environment;
 
-    @Option(names = "--workspace", required = true, paramLabel = "DIR")
-    private @Nullable Path workspaceDirectory;
+    @Mixin private WorkspaceOption workspaceOption = new WorkspaceOption();
 
     @Option(
         names = "--resource",
@@ -209,9 +207,7 @@ public final class SemanticCommand implements Runnable {
     public Integer call() throws JsonProcessingException {
       var out = Objects.requireNonNull(commandSpec, "commandSpec").commandLine().getOut();
       try {
-        var workspace =
-            Workspace.load(
-                Objects.requireNonNull(workspaceDirectory, "workspaceDirectory"), environment);
+        var workspace = Workspace.load(workspaceOption.directory(environment), environment);
         var path = Objects.requireNonNull(file, "file");
         var document = read(path);
         var domain = workspace.semanticCatalogDomain();

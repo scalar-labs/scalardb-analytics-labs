@@ -40,6 +40,10 @@ configuration. The CLI refuses symbolic-link or group/other-writable workspace c
 creates new configuration with private permissions on POSIX file systems, and rejects JDBC URLs
 that embed usernames or passwords.
 
+Every command that uses a workspace takes it from `--workspace`, or, when the option is omitted, from
+the `SCALARDB_ANALYTICS_WORKSPACE` environment variable. With neither, the command fails with
+`INVALID_WORKSPACE`.
+
 ```console
 scalardb-analytics workspace init \
   --workspace ./analytics-workspace \
@@ -196,3 +200,12 @@ It covers building and reviewing the Semantic Catalog with its semantics owner a
 question with SQL composed from confirmed knowledge, cited by Catalog Snapshot and Fact Revisions
 (see [`../docs/application.md`](../docs/application.md#query-agents)).
 [`../examples/agent-loop/`](../examples/agent-loop/README.md) runs both workflows on sample data.
+
+The distribution also carries a Claude Code plugin at `plugins/scalardb-analytics`, which bundles the
+same skill. Start Claude Code with `claude --plugin-dir <distribution>/plugins/scalardb-analytics`
+and `SCALARDB_ANALYTICS_WORKSPACE` exported, and drive the workflows with
+`/scalardb-analytics:setup`, `/scalardb-analytics:build`, `/scalardb-analytics:ask <question>`, and
+`/scalardb-analytics:status`. The plugin's `bin/scalardb-analytics` runs the distribution's CLI with
+its arguments unchanged. `/scalardb-analytics:build` runs the watching build in the background and
+watches its output with Claude Code's `Monitor` tool through `bin/review-notifications`, so a build
+event that raises the number of items awaiting review wakes the agent.

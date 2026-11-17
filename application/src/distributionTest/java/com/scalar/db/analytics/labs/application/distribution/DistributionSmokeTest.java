@@ -43,6 +43,7 @@ import org.junit.jupiter.api.io.TempDir;
 class DistributionSmokeTest {
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final String SOURCE = "source";
+  private static final String PLUGIN = "plugins/scalardb-analytics";
   private static final Pattern INVENTORY_ENTRY =
       Pattern.compile("\\*\\*Name:\\*\\* `([^`]+)` \\*\\*Version:\\*\\* `([^`]+)`");
 
@@ -98,6 +99,21 @@ class DistributionSmokeTest {
             "scalardb-analytics-" + requiredProperty("distribution.version") + "-" + platform);
     assertThat(distribution.resolve("bin/scalardb-analytics")).isExecutable();
     assertThat(distribution.resolve("skills/query-agent-v1/SKILL.md")).isRegularFile();
+    // The Claude Code plugin delivers the same Agent Skill with its commands.
+    var plugin = distribution.resolve(PLUGIN);
+    assertThat(
+            OBJECT_MAPPER
+                .readTree(plugin.resolve(".claude-plugin/plugin.json").toFile())
+                .get("version")
+                .textValue())
+        .isEqualTo(requiredProperty("distribution.version"));
+    for (var command : List.of("setup", "build", "ask", "status")) {
+      assertThat(plugin.resolve("commands/" + command + ".md")).isRegularFile();
+    }
+    assertThat(plugin.resolve("bin/scalardb-analytics")).isExecutable();
+    assertThat(plugin.resolve("bin/review-notifications")).isExecutable();
+    assertThat(plugin.resolve("skills/scalardb-analytics-query-agent/SKILL.md"))
+        .hasSameTextualContentAs(distribution.resolve("skills/query-agent-v1/SKILL.md"));
     assertThat(distribution.resolve("LICENSE")).isRegularFile();
     assertThat(distribution.resolve("licenses/third-party/THIRD-PARTY.md")).isRegularFile();
     assertThat(distribution.resolve("provenance/physical-catalog.properties")).isRegularFile();
@@ -288,6 +304,71 @@ class DistributionSmokeTest {
       assertThat(result.allOutput())
           .doesNotContain(environment.store().password(), environment.server(SOURCE).password());
     }
+  }
+
+  @Test
+  @Order(9)
+  void thePluginRunsTheCliOnTheWorkspaceItsSessionNames() throws Exception {
+    var variables = new HashMap<>(credentials);
+    variables.put("SCALARDB_ANALYTICS_WORKSPACE", workspace);
+
+    var result =
+        requireEnvironment()
+            .startExecutable(
+                PLUGIN + "/bin/scalardb-analytics",
+                variables,
+                null,
+                "query",
+                "--sql",
+                "SELECT count(*) FROM warehouse.public.orders")
+            .await(RestrictedEnvironment.COMMAND_TIMEOUT);
+
+    assertSuccessful(result, "scalardb-analytics/query-result");
+    assertThat(json(result).get("rows").toString()).isEqualTo("[[2]]");
+  }
+
+  @Test
+  @Order(10)
+  void reviewNotificationsPassOnlyWhatTheAgentMustActOn() throws Exception {
+    var rising = taskEvent("succeeded", 2);
+    var failed = taskEvent("failed", 2);
+    var error = "{\"schema\":\"scalardb-analytics/error\",\"code\":\"BUILD_RUN_IN_PROGRESS\"}";
+    var buildOutput =
+        String.join(
+            "\n",
+            "WARNING: a runtime warning",
+            taskEvent("succeeded", 0),
+            rising,
+            taskEvent("succeeded", 2),
+            failed,
+            error,
+            "");
+
+    var result =
+        requireEnvironment()
+            .startExecutable(PLUGIN + "/bin/review-notifications", Map.of(), buildOutput)
+            .await(RestrictedEnvironment.COMMAND_TIMEOUT);
+
+    assertThat(result.exitCode()).isZero();
+    assertThat(result.standardOutput().lines()).containsExactly(rising, failed, error);
+
+    // Answers lower the count without an event, so the agent re-arms the filter after answering;
+    // a re-armed filter passes the first event with items awaiting review, at any count.
+    var afterAnswers = taskEvent("succeeded", 1);
+    var rearmed =
+        requireEnvironment()
+            .startExecutable(PLUGIN + "/bin/review-notifications", Map.of(), afterAnswers + "\n")
+            .await(RestrictedEnvironment.COMMAND_TIMEOUT);
+    assertThat(rearmed.standardOutput().lines()).containsExactly(afterAnswers);
+  }
+
+  private static String taskEvent(String state, int awaitingReview) {
+    return "{\"schema\":\"scalardb-analytics/build-task-event\",\"schemaVersion\":\"1\","
+        + "\"task\":{\"status\":{\"state\":\""
+        + state
+        + "\"}},\"awaitingReview\":"
+        + awaitingReview
+        + "}";
   }
 
   private Result registerSource(String name, String passwordVariable, Map<String, String> variables)

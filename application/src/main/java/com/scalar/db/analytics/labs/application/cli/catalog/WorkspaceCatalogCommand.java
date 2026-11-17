@@ -7,20 +7,20 @@ package com.scalar.db.analytics.labs.application.cli.catalog;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.scalar.db.analytics.labs.application.ApplicationFailure;
 import com.scalar.db.analytics.labs.application.cli.CliOutput;
+import com.scalar.db.analytics.labs.application.cli.WorkspaceOption;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.Objects;
 import org.jspecify.annotations.Nullable;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Model.CommandSpec;
-import picocli.CommandLine.Option;
 import picocli.CommandLine.Spec;
 
 /** Holds the workspace and classified-output contract shared by Physical Catalog commands. */
 abstract class WorkspaceCatalogCommand {
   final Map<String, String> environment;
 
-  @Option(names = "--workspace", required = true, paramLabel = "DIR")
-  @Nullable Path workspaceDirectory;
+  @Mixin WorkspaceOption workspaceOption = new WorkspaceOption();
 
   @Spec @Nullable CommandSpec commandSpec;
 
@@ -29,7 +29,7 @@ abstract class WorkspaceCatalogCommand {
   }
 
   final Path workspaceDirectory() {
-    return Objects.requireNonNull(workspaceDirectory, "workspaceDirectory");
+    return workspaceOption.directory(environment);
   }
 
   final CommandSpec commandSpec() {

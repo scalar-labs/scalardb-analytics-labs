@@ -88,13 +88,27 @@ sealed interface RestrictedEnvironment extends AutoCloseable {
   /** The regular files under a directory, by path relative to it, with their contents. */
   Map<String, String> files(String directory) throws Exception;
 
+  /** The distribution's launcher, by its path in the distribution. */
+  String LAUNCHER = "bin/scalardb-analytics";
+
   /**
-   * Starts the launcher with only the given variables in addition to the isolated home, temporary
-   * directory, and Java runtime, reading standard input from the given text or from an empty input.
+   * Starts an executable of the distribution, named by its path in the distribution, with only the
+   * given variables in addition to the isolated home, temporary directory, and Java runtime,
+   * reading standard input from the given text or from an empty input.
    */
-  Running start(
-      Map<String, String> environment, @Nullable String standardInput, String... arguments)
+  Running startExecutable(
+      String executable,
+      Map<String, String> environment,
+      @Nullable String standardInput,
+      String... arguments)
       throws Exception;
+
+  /** Starts the launcher; see {@link #startExecutable}. */
+  default Running start(
+      Map<String, String> environment, @Nullable String standardInput, String... arguments)
+      throws Exception {
+    return startExecutable(LAUNCHER, environment, standardInput, arguments);
+  }
 
   /** Runs the launcher to completion; see {@link #start}. */
   default Result runWithInput(
@@ -173,7 +187,7 @@ sealed interface RestrictedEnvironment extends AutoCloseable {
 
     private final DatabaseServer.PostgreSql store;
     private final Map<String, DatabaseServer> sources;
-    private final Path launcher;
+    private final Path distribution;
     private final Path home;
     private final Path temporary;
     private final Path workspaces;
@@ -189,7 +203,7 @@ sealed interface RestrictedEnvironment extends AutoCloseable {
         throws IOException {
       this.store = store;
       this.sources = sources;
-      launcher = distribution.resolve("bin/scalardb-analytics");
+      this.distribution = distribution;
       home = Files.createDirectories(scratch.resolve("home"));
       temporary = Files.createDirectories(scratch.resolve("tmp"));
       workspaces = Files.createDirectories(scratch.resolve("workspaces"));
@@ -321,11 +335,16 @@ sealed interface RestrictedEnvironment extends AutoCloseable {
     }
 
     @Override
-    public Running start(
-        Map<String, String> environment, @Nullable String standardInput, String... arguments)
+    public Running startExecutable(
+        String executable,
+        Map<String, String> environment,
+        @Nullable String standardInput,
+        String... arguments)
         throws Exception {
       var command = new ArrayList<String>();
-      command.addAll(List.of("/usr/bin/sandbox-exec", "-p", profile, launcher.toString()));
+      command.addAll(
+          List.of(
+              "/usr/bin/sandbox-exec", "-p", profile, distribution.resolve(executable).toString()));
       command.addAll(List.of(arguments));
       var variables = new LinkedHashMap<String, String>();
       variables.put("PATH", "/usr/bin:/bin");
@@ -498,8 +517,11 @@ sealed interface RestrictedEnvironment extends AutoCloseable {
     }
 
     @Override
-    public Running start(
-        Map<String, String> environment, @Nullable String standardInput, String... arguments)
+    public Running startExecutable(
+        String executable,
+        Map<String, String> environment,
+        @Nullable String standardInput,
+        String... arguments)
         throws Exception {
       var id = UUID.randomUUID().toString();
       var base = CAPTURES + "/" + id;
@@ -519,7 +541,7 @@ sealed interface RestrictedEnvironment extends AutoCloseable {
               "TMPDIR=" + TEMPORARY,
               "JAVA_OPTS=-Duser.home=" + HOME + " -Djava.io.tmpdir=" + TEMPORARY));
       environment.forEach((name, value) -> command.add(name + "=" + value));
-      command.add(DISTRIBUTION + "/bin/scalardb-analytics");
+      command.add(DISTRIBUTION + "/" + executable);
       command.addAll(List.of(arguments));
       // The shell records its process ID and then execs the launcher, which execs the JVM, so the
       // recorded process receives the signals sent to it. A detached exec, unlike a background job

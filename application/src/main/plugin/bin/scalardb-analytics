@@ -1,0 +1,6 @@
+#!/bin/sh
+# Runs the scalardb-analytics CLI of the distribution this plugin is part of, with the arguments
+# unchanged. The CLI takes the workspace from SCALARDB_ANALYTICS_WORKSPACE when --workspace is
+# omitted.
+plugin_bin=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 1
+exec "$plugin_bin/../../../bin/scalardb-analytics" "$@"
