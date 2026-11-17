@@ -94,7 +94,9 @@ current state inside the recording transaction:
   name-based identifier already taken. A Fact whose value is one record, such as the Concept a row
   represents, may be proposed without a value and with an identity key of that one reference; its
   value is then the URN the reference resolves to, so a Generator can refer to a Concept it creates
-  in the same output.
+  in the same output. A Measure's default time granularity may likewise be proposed without a value
+  and with the identity key of its Dimension and level; its value is then written with the
+  Dimension's issued URN.
 - It matches edges, empty-scope Fact Addresses, and closed-range Facts, including those just written
   by concurrent Generators.
 - It finds Datasets and Fields by Physical Catalog reference. Unique constraints cannot express this

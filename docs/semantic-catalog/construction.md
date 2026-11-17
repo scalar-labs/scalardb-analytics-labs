@@ -140,6 +140,10 @@ dependencies, before comparing the acceptance with the Fact's latest one, so pro
 expression again records nothing (see
 [`record-model.md`](record-model.md#elements-and-predicates)). An acceptance of an expression value
 depends on exactly one base-dataset Fact of its Measure, over whose table the expression is read.
+It also reads a Dimension's values in the form of the kind its dimension-kind Facts state, which
+must be exactly one defined kind, parses a calendar level's expression, which may read only the
+time value, and requires a Measure's default time granularity to depend on its Dimension's
+dimension-kind Fact stating a calendar.
 If any check fails, nothing is written and the task fails with the reason.
 
 ## Choosing the confirmation path
@@ -380,7 +384,7 @@ No operation sets the selected Fact directly. Selection changes only as the rule
 | Operation | Writes in one commit | Not accepted when | Creates build tasks for |
 | --- | --- | --- | --- |
 | Register an observation | Input Observation and Observation Event | Content equals the previous observation, which records nothing; a physical schema whose source metadata is unchanged records only a derived record; a table metadata version no newer than one received records nothing | Generators that read that input kind; **[Planned]** an impact judgement for a new physical schema or document observation |
-| Record a Generator's results (inside a build task) | Data observations; acceptances, retirement proposals, inline evaluations, machine-judgement transitions, cascades | A data observation equal to its predecessor apart from when it was read, which is not recorded again; a dependency cycle, a missing referenced record, a check reference that is not a dependency, or an expression value that does not parse, which fails the task | Evaluations by the policy evaluation model; Generators that read the newly confirmed or accepted predicates |
+| Record a Generator's results (inside a build task) | Data observations; acceptances, retirement proposals, inline evaluations, machine-judgement transitions, cascades | A data observation equal to its predecessor apart from when it was read, which is not recorded again; a dependency cycle, a missing referenced record, a check reference that is not a dependency, an expression value that does not parse, or a Dimension value or default time granularity not in its form or without the Facts it rests on, which fails the task | Evaluations by the policy evaluation model; Generators that read the newly confirmed or accepted predicates |
 | Record an evaluation by the policy evaluation model (inside a build task) | Evaluation with its reason and review material, machine-judgement transitions, cascades; **[Planned]** data observations it read | The Fact no longer waits for the model, which records nothing; inline evaluation now decides it, which records that inline evaluation instead; or the material it read changed, which creates a new evaluation task | Evaluations of dependents left undecided; Generators that read the newly confirmed predicates |
 | Submit answers | Answers, resulting transitions, cascades, and feedback for each correction | An answer lacks an authority-check reference | Evaluations left undecided; Generators that read newly confirmed predicates; Generators that read feedback with related Facts; **[Planned]** Generators of rejected, corrected, retired, and cascaded Facts |
 | Resolve a conflict | `resolve-conflict` | The chosen and passed-over Facts were not the eligible Facts at the previous commit, or no authority-check reference | **[Planned]** Generators of Facts depending on Facts no longer selected |

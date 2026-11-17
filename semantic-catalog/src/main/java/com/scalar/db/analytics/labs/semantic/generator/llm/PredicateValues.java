@@ -11,6 +11,7 @@ import com.scalar.db.analytics.labs.semantic.model.IdentityKey;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
+import com.scalar.db.analytics.labs.semantic.projection.DimensionValues;
 import com.scalar.db.analytics.labs.semantic.projection.ExpressionValues;
 import com.scalar.db.analytics.labs.semantic.projection.ExpressionValues.AggregationRule;
 import java.util.List;
@@ -110,7 +111,12 @@ final class PredicateValues {
     /** One Field of the base Dataset of the Measure the value is about. */
     BASE_FIELD,
     /** One Measure, Dataset, or Field. */
-    ELEMENT
+    ELEMENT,
+    /**
+     * One calendar Dimension, with a level named in words: a Measure's default time granularity,
+     * which depends on the calendar's kind rather than its existence.
+     */
+    CALENDAR
   }
 
   /** The rule of a predicate of an element kind, if model-backed Generators propose it. */
@@ -167,6 +173,29 @@ final class PredicateValues {
                         "the name of one of the base table's columns, from \"columns\" of the"
                             + " choices",
                         Names.BASE_FIELD);
+                case Vocabulary.DEFAULT_TIME_GRANULARITY ->
+                    new Naming(
+                        "an object {\"dimension\": <the \"ref\" of one of the calendars in"
+                            + " \"calendars\" of the choices>, \"level\": <the name of its level>}",
+                        Names.CALENDAR);
+                default -> null;
+              };
+          case DIMENSION ->
+              switch (predicate) {
+                case Vocabulary.MEANING, Vocabulary.CALENDAR_RULE -> TEXT;
+                case Vocabulary.DIMENSION_KIND ->
+                    choices(
+                        java.util.Arrays.stream(Vocabulary.DimensionKind.values())
+                            .map(Vocabulary.DimensionKind::value)
+                            .toList());
+                case Vocabulary.HIERARCHY ->
+                    new Plain(
+                        "an object {\"levels\": [{\"name\": <text>, \"expression\": <optional"
+                            + " DuckDB SQL expression over the TIMESTAMP column \""
+                            + DimensionValues.TIME_VALUE
+                            + "\" giving the key of the level's period>}, ...]}, from coarse to"
+                            + " fine",
+                        PredicateValues::hierarchy);
                 default -> null;
               };
           case BUSINESS_TERM ->
@@ -322,7 +351,29 @@ final class PredicateValues {
     }
   }
 
+  /**
+   * A Dimension's hierarchy, {@code {"levels": [{"name": ..., "expression": ...}, ...]}}, in its
+   * form. Whether its expressions parse is checked by whoever records it, with the parser.
+   */
+  static Valued hierarchy(JsonNode given) {
+    try {
+      return new Valued.Value(DimensionValues.Hierarchy.of(given).value(), null);
+    } catch (IllegalArgumentException e) {
+      return new Valued.Invalid(String.valueOf(e.getMessage()));
+    }
+  }
+
   // Naming values
+
+  /**
+   * A Measure's default time granularity at a level of a calendar. It takes no value of its own:
+   * the commit writes it from the identity key, so it can name a calendar proposed in the same
+   * request.
+   */
+  static Valued.Value granularity(Ref calendar, String level) {
+    return new Valued.Value(
+        JSON.nullNode(), DimensionValues.Granularity.identityKey(calendar, level.strip()));
+  }
 
   /**
    * The value of a predicate that names one element, compared as that reference. The Concept a row

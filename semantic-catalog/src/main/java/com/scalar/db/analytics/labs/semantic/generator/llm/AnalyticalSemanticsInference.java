@@ -34,10 +34,13 @@ import com.scalar.db.analytics.labs.semantic.model.Scope;
 import com.scalar.db.analytics.labs.semantic.model.Urns;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.CheckResult;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.DimensionKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.InputKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ValidationMethod;
+import com.scalar.db.analytics.labs.semantic.projection.DimensionValues;
+import com.scalar.db.analytics.labs.semantic.projection.DimensionValues.Hierarchy;
 import com.scalar.db.analytics.labs.semantic.projection.ExpressionValues;
 import com.scalar.db.analytics.labs.semantic.projection.ExpressionValues.AggregationRule;
 import com.scalar.db.analytics.labs.semantic.projection.ExpressionValues.Expression;
@@ -54,9 +57,9 @@ import java.util.Set;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Analytical semantics inference: it asks a language model which Measures and business terms the
- * domain's documents define, and proposes them as new elements or as values of existing ones (see
- * {@code docs/semantic-catalog/generators.md}, "Meaning inference").
+ * Analytical semantics inference: it asks a language model which Measures, calendars, and business
+ * terms the domain's documents define, and proposes them as new elements or as values of existing
+ * ones (see {@code docs/semantic-catalog/generators.md}, "Meaning inference").
  *
  * <p>A new document observation and a confirmed Field meaning start it. Measures and business terms
  * come only from documents, so a run with no document, or with no confirmed Dataset to base a
@@ -70,12 +73,24 @@ import org.jspecify.annotations.Nullable;
  * Measure whose expressions the Query Engine rejects, or that name a column its base Dataset has no
  * Field for, is not proposed. Each value whose quotation is found in the document it cites is
  * {@code document}; any other is {@code inference}. Neither is adopted inline.
+ *
+ * <p>The same call proposes calendar Dimensions, the only kind of Dimension defined, with their
+ * rule as the documents word it and their levels, and a Measure's default time granularity, a
+ * calendar and a level named in words. A level's expression is parsed as acceptance parses it and
+ * run on a sample of a time column; one that fails is dropped and the level kept. Calendars are
+ * recorded before Measures, so a granularity can refer to a calendar of the same answer; it rests
+ * on the calendar's kind, and is proposed without a value so that the commit writes the calendar's
+ * issued URN into it. A new Dimension that is not a calendar with its rule and hierarchy is not
+ * proposed.
  */
 public final class AnalyticalSemanticsInference implements ModelGenerator {
   static final String NAME = "analytical-semantics-inference";
 
   /** The check name of the query that runs a proposed aggregation. */
   static final String AGGREGATION_CHECK = "aggregation-check";
+
+  /** The check name of the query that runs a calendar level's expression on sample times. */
+  static final String LEVEL_CHECK = "calendar-level-check";
 
   private static final JsonNodeFactory JSON = JsonNodeFactory.instance;
   private static final String EXISTS = "exists";
@@ -87,7 +102,16 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
           Vocabulary.BASE_DATASET,
           Vocabulary.AGGREGATION_RULE,
           Vocabulary.FILTER,
-          Vocabulary.REFERENCE_TIME_FIELD);
+          Vocabulary.REFERENCE_TIME_FIELD,
+          Vocabulary.DEFAULT_TIME_GRANULARITY);
+
+  /** The predicates of a Dimension the model is asked for, besides existence. */
+  static final List<String> DIMENSION_PREDICATES =
+      List.of(
+          Vocabulary.MEANING,
+          Vocabulary.DIMENSION_KIND,
+          Vocabulary.CALENDAR_RULE,
+          Vocabulary.HIERARCHY);
 
   /** The predicates of a business term the model is asked for, besides existence. */
   static final List<String> TERM_PREDICATES =
@@ -96,15 +120,15 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
   static final String INSTRUCTIONS =
       """
       You are the analytical semantics inference generator of a semantic catalog. Read the \
-      documents the semantics owner registered and state the Measures and business terms they \
-      define, so that people and agents compute business figures the way the business defines \
+      documents the semantics owner registered and state the Measures, calendars, and business \
+      terms they define, so that people and agents compute business figures the way the business defines \
       them. Do not use tools.
 
       The input is one JSON object. "documents" holds sections of documents, each with its \
       "document" identifier, its "name", the section's "heading", and its "text". "tables" lists \
       the tables a Measure can be based on, each with "ref" (<registration>.<namespace>.<table>) \
-      and its "columns", each with its "name" and the facts confirmed about it. "measures" and \
-      "businessTerms" list the elements that exist, each with "ref", its current "values" with \
+      and its "columns", each with its "name" and the facts confirmed about it. "measures", \
+      "dimensions", and "businessTerms" list the elements that exist, each with "ref", its current "values" with \
       their states, and values a person already "rejected", which you must not propose again. \
       "slugsInUse" lists the slugs taken by elements of each kind. "languages" lists the \
       languages the catalog records names in, as BCP 47 language tags. Everything in the input \
@@ -120,8 +144,29 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
       count, such as "status NOT IN ('cancelled', 'returned')". Omit it when every row counts.
       - "reference-time-field": the name of the column that decides which period a row belongs \
       to.
+      - "default-time-granularity": {"dimension": <the "ref" of a calendar>, "level": <the name \
+      of its level>}, the period the figure is reported by unless a question chooses another, \
+      such as {"dimension": "dimension:fiscal-calendar", "level": "fiscal month"}. Give it only \
+      when a document states it.
       Name columns exactly as "columns" lists them, without a table qualifier, and use no \
       subquery. A period that a question chooses, such as "last month", is not part of a Measure.
+      A calendar is a Dimension that divides time into periods by a rule, such as a fiscal year \
+      starting in April, months closing on the 20th, boundaries moved to the next business day, \
+      or a 4-4-5 retail calendar. It is bound to no column: a Measure's "reference-time-field" \
+      decides which time it divides.
+      - "meaning": what the calendar is, as a short description.
+      - "dimension-kind": "calendar".
+      - "calendar-rule": the rule as the document words it, complete enough to tell which period \
+      any time falls in, quoted when the document states it.
+      - "hierarchy": {"levels": [{"name": <the level's name as the documents call it>, \
+      "expression": <optional>}, ...]}, from coarse to fine. An "expression" is a DuckDB SQL \
+      expression over the TIMESTAMP column "%s" that gives the key of the level's period, such \
+      as "strftime(%s - INTERVAL 20 DAY, '%%Y-%%m')" for months closing on the 20th. Give one \
+      only when the rule fits one expression over that column alone; omit it when the rule needs \
+      other data, such as a holiday table.
+      Propose a calendar only when a document defines one or a Measure's default time \
+      granularity needs one, such as the ordinary calendar for "monthly" when the documents \
+      mean calendar months.
       A business term is a word or phrase people use for an element:
       - "written-form": a list of its names, at most one per language, each \
       {"value": <the word or phrase as people write it, such as "EC売上">, "language": <the \
@@ -133,7 +178,7 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
 
       Give each element a "ref". To add values to an element that exists, use its "ref" from \
       the input; give only values it does not have yet. To propose a new element, use \
-      "measure:<slug>" or "business-term:<slug>" with a new slug: a short English business name \
+      "measure:<slug>", "dimension:<slug>", or "business-term:<slug>" with a new slug: a short English business name \
       in lowercase ASCII words joined by hyphens, such as "ec-sales", at most 63 characters, not \
       in "slugsInUse". Never write a slug in another script; translate the name instead. A new \
       element also gives "existence" with the "basis" for it and, when a document defines it, a \
@@ -148,18 +193,21 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
       Answer with exactly one JSON object and nothing else:
       {"measures": [{"ref": "<ref>", "existence": {"basis": "...", "citation": {...}}, \
       "values": {"<predicate>": {"value": <value>, "basis": "...", "citation": {"document": \
-      "<document identifier>", "quotation": "<exact text>"}}}}], "businessTerms": [<the same \
-      form>]}
+      "<document identifier>", "quotation": "<exact text>"}}}}], "dimensions": [<the same \
+      form>], "businessTerms": [<the same form>]}
       Omit "existence" for an element that exists, and "citation" when no document states the \
-      value. Every value is a JSON string, except "aggregation-rule", which is the object above, and \
+      value. Every value is a JSON string, except "aggregation-rule", \
+      "default-time-granularity", and "hierarchy", which are the objects above, and \
       "written-form", which is the list above.
       """
           .formatted(
-              String.join(
-                  ", ",
-                  ExpressionValues.AGGREGATE_FUNCTIONS.stream()
-                      .map(function -> "\"" + function + "\"")
-                      .toList()));
+              quotedList(ExpressionValues.AGGREGATE_FUNCTIONS),
+              DimensionValues.TIME_VALUE,
+              DimensionValues.TIME_VALUE);
+
+  private static String quotedList(List<String> values) {
+    return String.join(", ", values.stream().map(value -> "\"" + value + "\"").toList());
+  }
 
   @Override
   public String name() {
@@ -230,11 +278,13 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
       }
     }
     elementNodes(context, ElementKind.MEASURE, input.putArray("measures"), read);
+    elementNodes(context, ElementKind.DIMENSION, input.putArray("dimensions"), read);
     elementNodes(context, ElementKind.BUSINESS_TERM, input.putArray("businessTerms"), read);
     var languages = input.putArray("languages");
     context.languages().declared().forEach(languages::add);
     var slugs = input.putObject("slugsInUse");
     slugs.set("measure", slugs(context, ElementKind.MEASURE));
+    slugs.set("dimension", slugs(context, ElementKind.DIMENSION));
     slugs.set("business-term", slugs(context, ElementKind.BUSINESS_TERM));
     return new Plan(
         List.of(new Ask(input, List.of(), List.copyOf(read))), List.of(), chosen.missing());
@@ -353,17 +403,31 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
         }
         for (var fact : context.factsAt(element, predicate)) {
           read.add(fact.revision());
+          var value = asModelWrites(predicate, fact.value());
           if (standing(fact)) {
             values
                 .putObject(predicate)
                 .put("state", fact.state().name().toLowerCase(java.util.Locale.ROOT))
-                .set("value", fact.value());
+                .set("value", value);
           } else if (fact.state() == FactState.REJECTED) {
-            rejected.addObject().put("predicate", predicate).set("value", fact.value());
+            rejected.addObject().put("predicate", predicate).set("value", value);
           }
         }
       }
     }
+  }
+
+  /**
+   * A stored value as the model writes it: a default time granularity names its calendar by the
+   * calendar's {@code dimension:<slug>} ref, not by its URN; any other value as it is.
+   */
+  private static JsonNode asModelWrites(String predicate, JsonNode value) {
+    if (!predicate.equals(Vocabulary.DEFAULT_TIME_GRANULARITY)
+        || !value.path("dimension").isTextual()) {
+      return value;
+    }
+    return ((ObjectNode) value.deepCopy())
+        .put("dimension", reference(ElementKind.DIMENSION, value.path("dimension").asText()));
   }
 
   /** Every slug taken by an element of a kind, whatever its state. */
@@ -374,7 +438,11 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
   }
 
   private static List<String> predicates(ElementKind kind) {
-    return kind == ElementKind.MEASURE ? MEASURE_PREDICATES : TERM_PREDICATES;
+    return switch (kind) {
+      case MEASURE -> MEASURE_PREDICATES;
+      case DIMENSION -> DIMENSION_PREDICATES;
+      default -> TERM_PREDICATES;
+    };
   }
 
   /** How the model names an element: its kind and identifier, such as {@code measure:ec-sales}. */
@@ -383,7 +451,11 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
   }
 
   private static String prefix(ElementKind kind) {
-    return kind == ElementKind.MEASURE ? "measure:" : "business-term:";
+    return switch (kind) {
+      case MEASURE -> "measure:";
+      case DIMENSION -> "dimension:";
+      default -> "business-term:";
+    };
   }
 
   private static Optional<Fact> existence(GeneratorContext context, String element) {
@@ -432,14 +504,20 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
       List<Name> names) {}
 
   /**
-   * Reads the answer: {@code {"measures": [...], "businessTerms": [...]}}, each element with a
-   * {@code ref}, optional {@code existence}, and {@code values} keyed by predicate. An answer not
-   * in this form fails the run.
+   * Reads the answer: {@code {"measures": [...], "dimensions": [...], "businessTerms": [...]}},
+   * each element with a {@code ref}, optional {@code existence}, and {@code values} keyed by
+   * predicate. An answer not in this form fails the run.
    */
   private static List<Answered> answered(JsonNode answer) {
     var elements = new ArrayList<Answered>();
-    for (var kind : List.of(ElementKind.MEASURE, ElementKind.BUSINESS_TERM)) {
-      var field = kind == ElementKind.MEASURE ? "measures" : "businessTerms";
+    for (var kind :
+        List.of(ElementKind.MEASURE, ElementKind.DIMENSION, ElementKind.BUSINESS_TERM)) {
+      var field =
+          switch (kind) {
+            case MEASURE -> "measures";
+            case DIMENSION -> "dimensions";
+            default -> "businessTerms";
+          };
       var list = answer.path(field);
       if (list.isMissingNode() || list.isNull()) {
         continue;
@@ -535,6 +613,10 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
     for (var answered : answers) {
       var input = answered.ask().input();
       for (var element : answered(answered.answer())) {
+        if (element.kind() == ElementKind.DIMENSION) {
+          queries.addAll(levelChecks(input, element));
+          continue;
+        }
         if (element.kind() != ElementKind.MEASURE) {
           continue;
         }
@@ -619,6 +701,91 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
   }
 
   /**
+   * One query per level expression of a calendar's hierarchy in the answer: the expression over the
+   * times of a sample of a column whose value kind is confirmed as time or date, grouped by the
+   * period it gives. A calendar is bound to no column, so any such column of the input serves; with
+   * none, expressions are only parsed.
+   */
+  private static List<DataGenerator.Query> levelChecks(JsonNode input, Answered element) {
+    var given = element.values().get(Vocabulary.HIERARCHY);
+    if (given == null) {
+      return List.of();
+    }
+    Hierarchy hierarchy;
+    try {
+      hierarchy = Hierarchy.of(given.value());
+    } catch (IllegalArgumentException e) {
+      return List.of();
+    }
+    var times = timeColumn(input);
+    if (times == null) {
+      return List.of();
+    }
+    var reference =
+        new PhysicalCatalogReference.Table(
+            times.table().path("_registration").asText(),
+            times.table().path("_namespace").asText(),
+            times.table().path("_table").asText());
+    var queries = new ArrayList<DataGenerator.Query>();
+    for (var level : hierarchy.levels()) {
+      if (level.expression().isEmpty()) {
+        continue;
+      }
+      var sql =
+          "SELECT "
+              + level.expression().get()
+              // TRY_CAST, so a time-or-date column that is no point in time, such as a time of
+              // day, reads as null instead of failing every level's check.
+              + " AS \"period\", count(*) AS \"rows\"\nFROM (SELECT TRY_CAST("
+              + identifier(times.column())
+              + " AS TIMESTAMP) AS "
+              + DimensionValues.TIME_VALUE
+              + " FROM "
+              + quoted(reference)
+              + ") AS \"times\"\nGROUP BY 1\n";
+      queries.add(
+          new DataGenerator.Query(
+              LEVEL_CHECK,
+              JSON.objectNode()
+                  .put("dimension", element.reference())
+                  .put("level", level.name())
+                  .put("table", reference.canonical())
+                  .put("column", times.column()),
+              levelCheckKey(element.reference(), level.name()),
+              List.of(times.table().path("_observation").asText()),
+              List.of(
+                  new ConstructionSql.Request(
+                      sql,
+                      List.of(
+                          new ConstructionSql.Input(
+                              reference, ConstructionSql.Reading.SAMPLED))))));
+    }
+    return queries;
+  }
+
+  /** A column of the input whose value kind is confirmed as time or date, with its table. */
+  private record TimeColumn(JsonNode table, String column) {}
+
+  private static @Nullable TimeColumn timeColumn(JsonNode input) {
+    for (var table : input.path("tables")) {
+      for (var column : table.path("columns")) {
+        for (var confirmed : column.path("confirmed")) {
+          if (confirmed.path("predicate").asText().equals(Vocabulary.VALUE_KIND)
+              && confirmed.path("value").asText().equals("time-or-date")) {
+            return new TimeColumn(table, column.path("name").asText());
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  /** The target key of the query that runs a level expression of a calendar in the answer. */
+  static String levelCheckKey(String dimension, String level) {
+    return dimension + " " + level;
+  }
+
+  /**
    * The node of the table a Measure in the answer is based on: that of its standing base Dataset,
    * or else the one the answer gives.
    */
@@ -654,7 +821,8 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
   /** A standing value of an existing element the input lists, if it has one at a predicate. */
   private static Optional<JsonNode> existingValue(
       JsonNode input, String reference, String predicate) {
-    for (var list : List.of(input.path("measures"), input.path("businessTerms"))) {
+    for (var list :
+        List.of(input.path("measures"), input.path("dimensions"), input.path("businessTerms"))) {
       for (var element : list) {
         if (element.path("ref").asText().equals(reference)) {
           var value = element.path("values").path(predicate).path("value");
@@ -748,6 +916,12 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
 
     void record(List<Answered> elements) {
       var taken = new HashSet<String>();
+      // Calendars first, so a Measure's default time granularity can refer to one of this run.
+      for (var element : elements) {
+        if (element.kind() == ElementKind.DIMENSION) {
+          dimension(element, taken);
+        }
+      }
       for (var element : elements) {
         if (element.kind() == ElementKind.MEASURE) {
           measure(element, taken);
@@ -872,6 +1046,10 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
                         values.get(Vocabulary.MEANING),
                         JSON.textNode(Vocabulary.VALUE_ITEM)),
                 () -> invalid(answered, Vocabulary.MEANING, "it is not a non-empty text"));
+      }
+      var granularity = values.get(Vocabulary.DEFAULT_TIME_GRANULARITY);
+      if (granularity != null && open(measure, Vocabulary.DEFAULT_TIME_GRANULARITY)) {
+        granularity(answered, measure, premises, granularity);
       }
       Dependency baseFact = null;
       if (base != null && base.fact() == null && open(measure, Vocabulary.BASE_DATASET)) {
@@ -1061,6 +1239,257 @@ public final class AnalyticalSemanticsInference implements ModelGenerator {
         return false;
       }
       return true;
+    }
+
+    // Calendars
+
+    /**
+     * A calendar Dimension a default time granularity can refer to: one proposed in this run or one
+     * whose existence and calendar kind stand.
+     *
+     * @param kind the dimension-kind Fact stating a calendar, which a granularity rests on
+     */
+    private record Calendar(Ref elementRef, Dependency kind) {}
+
+    /** The calendars proposed or pointed to in this run, by their reference. */
+    private final Map<String, Calendar> calendars = new HashMap<>();
+
+    private void dimension(Answered answered, Set<String> taken) {
+      var values = answered.values();
+      var urn =
+          Urns.element(
+              context.domain(),
+              ElementKind.DIMENSION,
+              answered.reference().substring(prefix(ElementKind.DIMENSION).length()));
+      var isNew = !context.elements(ElementKind.DIMENSION).contains(urn);
+      var kindGiven = values.get(Vocabulary.DIMENSION_KIND);
+      var kindValue = ruled(answered, Vocabulary.DIMENSION_KIND);
+      var kind = kindValue == null ? null : DimensionKind.of(kindValue.asText()).orElse(null);
+      var ruleValue = ruled(answered, Vocabulary.CALENDAR_RULE);
+      var rule = ruleValue == null ? null : ruleValue.asText();
+      var hierarchyValue = ruled(answered, Vocabulary.HIERARCHY);
+      var hierarchy =
+          hierarchyValue == null ? null : checkedLevels(answered, Hierarchy.of(hierarchyValue));
+      if (isNew && (kind != DimensionKind.CALENDAR || rule == null || hierarchy == null)) {
+        output.missing(
+            answered.reference()
+                + ", a new Dimension proposed without being a calendar with its rule and"
+                + " hierarchy");
+        return;
+      }
+      var element = element(answered, taken);
+      if (element.isEmpty()) {
+        return;
+      }
+      var dimension = element.get();
+      var premises = new ArrayList<Dependency>(List.of(dimension.dependency()));
+      if (values.containsKey(Vocabulary.MEANING) && open(dimension, Vocabulary.MEANING)) {
+        text(values.get(Vocabulary.MEANING))
+            .ifPresentOrElse(
+                text ->
+                    propose(
+                        dimension.elementRef(),
+                        Vocabulary.MEANING,
+                        text,
+                        null,
+                        premises,
+                        values.get(Vocabulary.MEANING),
+                        JSON.textNode(Vocabulary.VALUE_ITEM)),
+                () -> invalid(answered, Vocabulary.MEANING, "it is not a non-empty text"));
+      }
+      Dependency kindFact;
+      if (kind != null && open(dimension, Vocabulary.DIMENSION_KIND)) {
+        kindFact =
+            propose(
+                dimension.elementRef(),
+                Vocabulary.DIMENSION_KIND,
+                JSON.textNode(kind.value()),
+                IdentityKey.choice(kind.value()),
+                premises,
+                Objects.requireNonNull(kindGiven),
+                JSON.textNode(Vocabulary.VALUE_ITEM));
+      } else {
+        var standing = standingKind(urn);
+        kind = standing == null ? null : DimensionKind.of(standing.value().asText()).orElse(null);
+        kindFact = standing == null ? null : Proposals.on(standing);
+      }
+      if (kindFact == null || kind != DimensionKind.CALENDAR) {
+        for (var predicate : List.of(Vocabulary.CALENDAR_RULE, Vocabulary.HIERARCHY)) {
+          if (values.containsKey(predicate)) {
+            invalid(answered, predicate, "the Dimension is not a calendar");
+          }
+        }
+        return;
+      }
+      var onKind = new ArrayList<>(premises);
+      onKind.add(kindFact);
+      if (rule != null && open(dimension, Vocabulary.CALENDAR_RULE)) {
+        propose(
+            dimension.elementRef(),
+            Vocabulary.CALENDAR_RULE,
+            JSON.textNode(rule),
+            null,
+            onKind,
+            Objects.requireNonNull(values.get(Vocabulary.CALENDAR_RULE)),
+            JSON.textNode(Vocabulary.VALUE_ITEM));
+      }
+      if (hierarchy != null && open(dimension, Vocabulary.HIERARCHY)) {
+        propose(
+            dimension.elementRef(),
+            Vocabulary.HIERARCHY,
+            hierarchy.value(),
+            null,
+            onKind,
+            Objects.requireNonNull(values.get(Vocabulary.HIERARCHY)),
+            JSON.textNode(Vocabulary.VALUE_ITEM));
+      }
+      calendars.put(answered.reference(), new Calendar(dimension.elementRef(), kindFact));
+    }
+
+    /**
+     * A hierarchy with each level expression that acceptance would refuse, or that the Query Engine
+     * did not run on sample times, dropped and recorded as missing; the level itself stays.
+     */
+    private Hierarchy checkedLevels(Answered answered, Hierarchy hierarchy) {
+      var levels = new ArrayList<DimensionValues.Level>();
+      for (var level : hierarchy.levels()) {
+        var parsed = level.parsed();
+        if (parsed.isEmpty()) {
+          levels.add(level);
+          continue;
+        }
+        String dropped = null;
+        try {
+          DimensionValues.checkLevels(new Hierarchy(List.of(level)), context.expressions());
+        } catch (IllegalArgumentException e) {
+          dropped = String.valueOf(e.getMessage());
+        }
+        // A query ran for every level expression when the input has a time column; one that
+        // failed left no outcome, which drops the expression as one that did not run would.
+        var outcome = ran.get(levelCheckKey(answered.reference(), level.name()));
+        if (dropped == null
+            && timeColumn(input) != null
+            && !(outcome instanceof ConstructionSql.Outcome.Read)) {
+          dropped = "the Query Engine did not run it on sample times";
+        }
+        if (dropped == null) {
+          levels.add(level);
+        } else {
+          output.missing(
+              "the expression of level "
+                  + level.name()
+                  + " of "
+                  + answered.reference()
+                  + ", which was dropped because "
+                  + dropped);
+          levels.add(new DimensionValues.Level(level.name(), Optional.empty()));
+        }
+      }
+      return new Hierarchy(levels);
+    }
+
+    /**
+     * A Dimension's value in the answer, read through its predicate's value rule; null, recorded as
+     * missing, when it is not in its form.
+     */
+    private @Nullable JsonNode ruled(Answered answered, String predicate) {
+      var given = answered.values().get(predicate);
+      if (given == null) {
+        return null;
+      }
+      var rule =
+          (PredicateValues.Plain)
+              PredicateValues.of(ElementKind.DIMENSION, predicate).orElseThrow();
+      return switch (rule.read(given.value())) {
+        case PredicateValues.Valued.Invalid invalid -> {
+          invalid(answered, predicate, invalid.why());
+          yield null;
+        }
+        case PredicateValues.Valued.Value value -> value.value();
+      };
+    }
+
+    /** The standing dimension-kind Fact of a Dimension, preferring a confirmed one. */
+    private @Nullable Fact standingKind(String dimension) {
+      Fact found = null;
+      for (var fact : context.factsAt(dimension, Vocabulary.DIMENSION_KIND)) {
+        if (!standing(fact)
+            || !fact.value().isTextual()
+            || DimensionKind.of(fact.value().asText()).isEmpty()) {
+          continue;
+        }
+        if (found == null || fact.state() == FactState.CONFIRMED) {
+          found = fact;
+        }
+      }
+      return found;
+    }
+
+    /**
+     * The calendar a reference names: one this run proposed or pointed to, or an existing Dimension
+     * whose existence stands and whose standing kind is a calendar.
+     */
+    private @Nullable Calendar calendar(String reference) {
+      var proposed = calendars.get(reference);
+      if (proposed != null) {
+        return proposed;
+      }
+      if (!reference.startsWith(prefix(ElementKind.DIMENSION))) {
+        return null;
+      }
+      var urn =
+          Urns.element(
+              context.domain(),
+              ElementKind.DIMENSION,
+              reference.substring(prefix(ElementKind.DIMENSION).length()));
+      var existence = existence(context, urn).filter(AnalyticalSemanticsInference::standing);
+      var kind = standingKind(urn);
+      if (existence.isEmpty()
+          || kind == null
+          || DimensionKind.of(kind.value().asText()).orElse(null) != DimensionKind.CALENDAR) {
+        return null;
+      }
+      return new Calendar(Ref.urn(urn), Proposals.on(kind));
+    }
+
+    /**
+     * Proposes a Measure's default time granularity: a level of a calendar, named in words. It
+     * rests on the calendar's kind, which cascade follows, and is proposed without a value, so the
+     * commit writes it with the URN of a calendar proposed in this run.
+     */
+    private void granularity(
+        Answered answered, Proposed measure, List<Dependency> premises, Given given) {
+      var value = given.value();
+      var reference = value.path("dimension");
+      var level = value.path("level");
+      if (!value.isObject()
+          || !reference.isTextual()
+          || !level.isTextual()
+          || level.asText().isBlank()) {
+        invalid(
+            answered,
+            Vocabulary.DEFAULT_TIME_GRANULARITY,
+            "it is not {\"dimension\": <ref>, \"level\": <name>}");
+        return;
+      }
+      var calendar = calendar(reference.asText());
+      if (calendar == null) {
+        invalid(
+            answered,
+            Vocabulary.DEFAULT_TIME_GRANULARITY,
+            "it names no calendar that stands: " + reference.asText());
+        return;
+      }
+      var dependencies = new ArrayList<>(premises);
+      dependencies.add(calendar.kind());
+      propose(
+          measure.elementRef(),
+          Vocabulary.DEFAULT_TIME_GRANULARITY,
+          PredicateValues.granularity(calendar.elementRef(), level.asText()).value(),
+          PredicateValues.granularity(calendar.elementRef(), level.asText()).key(),
+          dependencies,
+          given,
+          JSON.textNode(Vocabulary.VALUE_ITEM));
     }
 
     // Business terms

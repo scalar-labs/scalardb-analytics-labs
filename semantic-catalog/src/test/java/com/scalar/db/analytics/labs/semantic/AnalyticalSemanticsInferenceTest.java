@@ -433,6 +433,282 @@ class AnalyticalSemanticsInferenceTest extends StoreScenarioTest {
     assertThat(read.toString()).doesNotContain("\"_");
   }
 
+  private static final Document FISCAL_GLOSSARY =
+      new Document(
+          "fiscal-glossary.md",
+          """
+          # Sales glossary
+
+          ## Fiscal calendar
+
+          The fiscal year starts in April. A fiscal month runs from the 21st to the 20th of the \
+          next month and is named by the month it ends in; a boundary that falls on a holiday \
+          moves to the next business day. The fiscal year is divided into quarters and months.
+
+          ## Retail calendar
+
+          The stores follow a 4-4-5 retail calendar whose year starts on the Sunday nearest \
+          February 1. Its year is divided into months of four, four, and five weeks.
+
+          ## Sales
+
+          - **EC sales**: the total pre-tax amount of EC orders. EC sales are managed by fiscal \
+          month.
+          - **Store sales**: the total pre-tax amount of sales recorded at the stores' POS. They \
+          are managed by retail week.
+          """);
+
+  /** A Measure in the fiscal answer, with its existence and the values every Measure needs. */
+  private static ObjectNode fiscalMeasure(
+      com.fasterxml.jackson.databind.node.ArrayNode measures,
+      String ref,
+      String meaning,
+      String table,
+      String timeColumn,
+      String document) {
+    var measure = measures.addObject().put("ref", ref);
+    measure.putObject("existence").put("basis", "the glossary defines " + meaning);
+    var values = measure.putObject("values");
+    values.set(Vocabulary.MEANING, value(meaning, "the glossary", document, null));
+    values.set(Vocabulary.BASE_DATASET, value(table, "the glossary", document, null));
+    values.set(
+        Vocabulary.AGGREGATION_RULE, value(rule("sum", "amount"), "a total", document, null));
+    values.set(Vocabulary.REFERENCE_TIME_FIELD, value(timeColumn, "the period", document, null));
+    return values;
+  }
+
+  /** A calendar in the fiscal answer with its rule and levels, each a name and an expression. */
+  private static void calendar(
+      com.fasterxml.jackson.databind.node.ArrayNode dimensions,
+      String ref,
+      String meaning,
+      String rule,
+      String document,
+      String... namesAndExpressions) {
+    var calendar = dimensions.addObject().put("ref", ref);
+    calendar
+        .putObject("existence")
+        .put("basis", "the glossary defines it")
+        .putObject("citation")
+        .put("document", document)
+        .put("quotation", rule);
+    var values = calendar.putObject("values");
+    values.set(Vocabulary.MEANING, value(meaning, "the glossary", document, null));
+    values.set(Vocabulary.DIMENSION_KIND, value("calendar", "a calendar", document, null));
+    values.set(Vocabulary.CALENDAR_RULE, value(rule, "the glossary's rule", document, rule));
+    var levels = JSON.objectNode();
+    var list = levels.putArray("levels");
+    for (var i = 0; i < namesAndExpressions.length; i += 2) {
+      var level = list.addObject().put("name", namesAndExpressions[i]);
+      if (!namesAndExpressions[i + 1].isEmpty()) {
+        level.put("expression", namesAndExpressions[i + 1]);
+      }
+    }
+    values.set(Vocabulary.HIERARCHY, value(levels, "the glossary's divisions", document, null));
+  }
+
+  private static final String FISCAL_RULE =
+      "A fiscal month runs from the 21st to the 20th of the next month and is named by the month"
+          + " it ends in; a boundary that falls on a holiday moves to the next business day.";
+
+  private static final String RETAIL_RULE =
+      "The stores follow a 4-4-5 retail calendar whose year starts on the Sunday nearest February"
+          + " 1.";
+
+  /**
+   * The fiscal glossary's answer: a fiscal calendar whose months close on the 20th, with one level
+   * expression that reads another column; a 4-4-5 retail calendar with no expressions; EC sales by
+   * fiscal month and store sales by retail week; and an age band, a kind of Dimension not defined
+   * yet.
+   */
+  private static String fiscalAnswer(JsonNode input) {
+    var document = input.path("documents").get(0).path("document").asText();
+    var answer = JSON.objectNode();
+    var dimensions = answer.putArray("dimensions");
+    calendar(
+        dimensions,
+        "dimension:fiscal-calendar",
+        "The fiscal calendar",
+        FISCAL_RULE,
+        document,
+        "fiscal year",
+        "",
+        "fiscal half",
+        "date_trunc('fiscal_half', time_value)",
+        "fiscal quarter",
+        "strftime(amount, '%Y')",
+        "fiscal month",
+        "strftime(time_value - INTERVAL 20 DAY, '%Y-%m')");
+    calendar(
+        dimensions,
+        "dimension:retail-calendar",
+        "The stores' 4-4-5 retail calendar",
+        RETAIL_RULE,
+        document,
+        "retail year",
+        "",
+        "retail month",
+        "",
+        "retail week",
+        "");
+
+    var ageBand = dimensions.addObject().put("ref", "dimension:age-band");
+    ageBand.putObject("existence").put("basis", "a guess");
+    ageBand
+        .putObject("values")
+        .set(Vocabulary.DIMENSION_KIND, value("classification", "a guess", document, null));
+
+    var measures = answer.putArray("measures");
+    fiscalMeasure(
+            measures,
+            "measure:ec-sales",
+            "The total pre-tax amount of EC orders",
+            "shop.public.orders",
+            "ordered_at",
+            document)
+        .set(
+            Vocabulary.DEFAULT_TIME_GRANULARITY,
+            value(
+                JSON.objectNode()
+                    .put("dimension", "dimension:fiscal-calendar")
+                    .put("level", "fiscal month"),
+                "managed by fiscal month",
+                document,
+                "EC sales are managed by fiscal month."));
+    fiscalMeasure(
+            measures,
+            "measure:store-sales",
+            "The total pre-tax amount of store sales",
+            "pos.public.sales",
+            "sold_at",
+            document)
+        .set(
+            Vocabulary.DEFAULT_TIME_GRANULARITY,
+            value(
+                JSON.objectNode()
+                    .put("dimension", "dimension:retail-calendar")
+                    .put("level", "retail week"),
+                "managed by retail week",
+                document,
+                null));
+    return answer.toString();
+  }
+
+  private static JsonNode level(FactRevision hierarchy, String name) {
+    for (var level : hierarchy.value().path("levels")) {
+      if (level.path("name").asText().equals(name)) {
+        return level;
+      }
+    }
+    throw new AssertionError("No level " + name);
+  }
+
+  @Test
+  void calendarsAreProposedWithTheirWordingAndLevelsAndMeasuresReferToThem() {
+    var s = scenario();
+    var sql = data();
+    registerTables(s);
+    var policy = new AdoptingDataSemantics();
+    var model = model(AnalyticalSemanticsInferenceTest::fiscalAnswer);
+    drain(s, policy, sql, model);
+    var registration =
+        (DocumentRegistration.Observed)
+            store.registerDocument(s.domain, "owner", null, FISCAL_GLOSSARY);
+    var summary = drain(s, policy, sql, model);
+
+    // The fiscal calendar keeps the document's wording, quoted from it, and rests on its kind.
+    var fiscal = element(s, ElementKind.DIMENSION, "fiscal-calendar");
+    assertThat(only(s, fiscal, Vocabulary.DIMENSION_KIND).value().asText()).isEqualTo("calendar");
+    var rule = only(s, fiscal, Vocabulary.CALENDAR_RULE);
+    assertThat(rule.value().asText()).isEqualTo(FISCAL_RULE);
+    assertThat(rule.checks())
+        .singleElement()
+        .satisfies(check -> assertThat(check.method()).isEqualTo(ValidationMethod.DOCUMENT));
+    var kindFact = Urns.fact(Urns.factAddress(fiscal, Vocabulary.DIMENSION_KIND), 1);
+    var hierarchy = only(s, fiscal, Vocabulary.HIERARCHY);
+    assertThat(factDependencies(rule)).contains(existence(fiscal), kindFact);
+    assertThat(factDependencies(hierarchy)).contains(existence(fiscal), kindFact);
+
+    // Its levels keep their names; the expression that ran on sample order dates stays, and the
+    // ones that read another column or fail when the Query Engine runs them are dropped while their
+    // levels stay.
+    assertThat(hierarchy.value().path("levels"))
+        .extracting(level -> level.path("name").asText())
+        .containsExactly("fiscal year", "fiscal half", "fiscal quarter", "fiscal month");
+    assertThat(level(hierarchy, "fiscal month").path("expression").asText())
+        .isEqualTo("strftime(time_value - INTERVAL 20 DAY, '%Y-%m')");
+    assertThat(level(hierarchy, "fiscal quarter").has("expression")).isFalse();
+    assertThat(level(hierarchy, "fiscal half").has("expression")).isFalse();
+    assertThat(generated(summary).missingInputs())
+        .anyMatch(missing -> missing.contains("fiscal half") && missing.contains("did not run"));
+    assertThat(sql.requests)
+        .anyMatch(
+            request ->
+                request.sql().contains("strftime(time_value - INTERVAL 20 DAY, '%Y-%m')")
+                    && request.sql().contains("AS time_value"));
+    assertThat(generated(summary).missingInputs())
+        .anyMatch(missing -> missing.contains("fiscal quarter") && missing.contains("amount"));
+
+    // The retail calendar has no expression at all and is recorded by its wording alone.
+    var retail = element(s, ElementKind.DIMENSION, "retail-calendar");
+    assertThat(only(s, retail, Vocabulary.CALENDAR_RULE).value().asText()).isEqualTo(RETAIL_RULE);
+    assertThat(only(s, retail, Vocabulary.HIERARCHY).value().path("levels"))
+        .extracting(level -> level.path("name").asText())
+        .containsExactly("retail year", "retail month", "retail week");
+
+    // The Measures name their calendar by the URN issued in the same commit and their level in
+    // words, resting on the calendar's kind.
+    var ecSales = element(s, ElementKind.MEASURE, "ec-sales");
+    var granularity = only(s, ecSales, Vocabulary.DEFAULT_TIME_GRANULARITY);
+    assertThat(granularity.value())
+        .isEqualTo(JSON.objectNode().put("dimension", fiscal).put("level", "fiscal month"));
+    assertThat(factDependencies(granularity)).contains(existence(ecSales), kindFact);
+    var storeSales = element(s, ElementKind.MEASURE, "store-sales");
+    assertThat(only(s, storeSales, Vocabulary.DEFAULT_TIME_GRANULARITY).value())
+        .isEqualTo(JSON.objectNode().put("dimension", retail).put("level", "retail week"));
+
+    // A classification is not a kind defined yet.
+    assertThat(first(s, element(s, ElementKind.DIMENSION, "age-band"), Vocabulary.EXISTENCE))
+        .isEmpty();
+    assertThat(generated(summary).missingInputs())
+        .anyMatch(missing -> missing.contains("dimension:age-band"));
+
+    // A changed document runs it again: the calendars exist, and a granularity names its calendar
+    // by the ref the model writes, not by its URN.
+    store.registerDocument(
+        s.domain,
+        "owner",
+        registration.inputResource(),
+        new Document(
+            FISCAL_GLOSSARY.name(), FISCAL_GLOSSARY.text() + "\nAll amounts are in JPY.\n"));
+    drain(s, policy, sql, model);
+    var again =
+        model.calls.stream()
+            .filter(each -> each.generator().equals(ANALYTICAL))
+            .toList()
+            .getLast()
+            .input();
+    assertThat(again.path("slugsInUse").path("dimension"))
+        .extracting(JsonNode::asText)
+        .contains("fiscal-calendar", "retail-calendar");
+    assertThat(again.path("dimensions"))
+        .extracting(dimension -> dimension.path("ref").asText())
+        .contains("dimension:fiscal-calendar", "dimension:retail-calendar");
+    var ecSalesNode =
+        java.util.stream.StreamSupport.stream(again.path("measures").spliterator(), false)
+            .filter(measure -> measure.path("ref").asText().equals("measure:ec-sales"))
+            .findFirst()
+            .orElseThrow();
+    assertThat(
+            ecSalesNode
+                .path("values")
+                .path(Vocabulary.DEFAULT_TIME_GRANULARITY)
+                .path("value")
+                .path("dimension")
+                .asText())
+        .isEqualTo("dimension:fiscal-calendar");
+  }
+
   @Test
   void anExistingMeasureIsPointedToAndItsSlugIsGivenAsInUse() {
     var s = scenario();

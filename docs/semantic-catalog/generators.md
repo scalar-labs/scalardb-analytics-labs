@@ -13,8 +13,9 @@ counts that are expected to be tuned from use of the product.
 
 The schema-interpretation and data-check Generators, row and Field meaning inference, concept
 inference, analytical semantics inference for Measures and business terms, identifier
-correspondence inference, and correction interpretation are implemented. **[Planned]** Dimensions
-are not.
+correspondence inference, and correction interpretation are implemented. Analytical semantics
+inference also proposes calendar Dimensions and a Measure's default time granularity. **[Planned]**
+Other kinds of Dimension are not defined yet.
 
 Each interpretation or check rule is its own Generator. The rule that derives a key from a primary
 key and the rule that derives an identifier correspondence from a foreign key are separate
@@ -115,7 +116,8 @@ A deciding party's wording is never support for a new candidate. Correction inte
 correction through the usage feedback it registers: the feedback's observation is an input read and
 a dependency, but never a check reference. A candidate made from a correction is therefore never
 adopted inline, and the original correction can be traced and shown from its inputs read.
-Analytical semantics inference proposes new nodes: Measures and business terms. **[Planned]** No
+Analytical semantics inference proposes new nodes: Measures, calendar Dimensions, and business
+terms. **[Planned]** No
 implemented Generator reads answers yet. An answer is an
 input read, referenced by its log record. It is neither a dependency, because it never changes, nor
 a check reference.
@@ -311,8 +313,10 @@ coincidental correspondence. For the same reason, keys from candidate key discov
 Row and Field meaning inference, with documents as input and `document` checks, concept inference
 and identifier correspondence inference, with the trigger of documents, analytical semantics
 inference for Measures and business terms, triggered by documents and confirmed Field meaning, and
-correction interpretation are implemented. **[Planned]** Dimensions and a Measure's default time
-granularity, and the trigger of feedback without related Facts are not.
+correction interpretation are implemented. Analytical semantics inference proposes calendar
+Dimensions with Measures, and a Measure's default time granularity may refer to a calendar it
+proposes in the same run. **[Planned]** Other kinds of Dimension, and the trigger of feedback without
+related Facts, are not.
 
 Meaning inference uses a model for predicates that declarations and data cannot decide. For a target
 element it passes names and types, the table's source metadata with the source metadata schema it
@@ -370,8 +374,10 @@ interpretation read values through the same rule, so a corrected value is read e
 proposed one. A key, uniqueness, and a set relationship, which schema interpretation and data
 checks build without a model, have rules in the same form for correction interpretation. Each
 caller still decides which elements a value may name, since only it knows what its call passed or
-created. Predicates no Generator proposes yet, such as a Dimension's, get their rule with the
-Generator that proposes them; until then no Fact of them exists to correct.
+created. A calendar's kind, rule, and hierarchy and a Measure's default time granularity have
+rules too, since analytical semantics inference proposes them. Predicates no Generator proposes
+yet, such as those of a Dimension kind not defined yet, get their rule with the Generator that
+proposes them; until then no Fact of them exists to correct.
 
 Undeclared identifier correspondences are central to combining sources. Identifier correspondence
 inference proposes, for example, that e-commerce customers and POS members correspond through the
@@ -403,17 +409,24 @@ party's judgement becomes the main source: a tax treatment that only a column na
 signal too weak for the policy evaluation model to adopt alone.
 
 Analytical semantics inference reads the domain's documents, the confirmed Datasets with their
-confirmed Fields and Field meanings, the Measures and business terms that are neither rejected nor
-retired with their values, and the slugs in use. It runs only when documents exist and a Dataset is
+confirmed Fields and Field meanings, the Measures, Dimensions, and business terms that are neither
+rejected nor retired with their values, and the slugs in use. It runs only when documents exist and a Dataset is
 confirmed. The model either points to an existing element, which gets values only at its open Fact
 Addresses, or proposes a new one under a slug not in use; an answer whose new slug is not one fails
 the task. A Measure's aggregation rule and filter conditions are parsed as acceptance parses them
 and run once through the application's SQL execution on a sample of the base table before anything
 is recorded. A new Measure is proposed only with a base Dataset and an aggregation rule that passed
-both; otherwise the build task records it as missing. Each candidate depends on the documents the
-call read and on the existence of its element; a Measure's expression values, reference time Field,
-and a business term's referenced element also depend on what they refer to, so the existence and
-the aggregation rule of a new Measure reach the deciding party together.
+both; otherwise the build task records it as missing. A new Dimension is proposed only as a calendar
+with its rule's wording and a hierarchy; anything else is recorded as missing. A calendar level's
+expression is parsed as acceptance parses it and run on a sample of a column whose value kind is
+confirmed as time or date; one that fails is dropped and recorded as missing, and its level stays.
+With no such column, expressions are only parsed. A default time granularity names a calendar that
+stands or is proposed in the same answer, which is why calendars are recorded before Measures.
+Each candidate depends on the documents the call read and on the existence of its element; a
+Measure's expression values, reference time Field, and default time granularity, a calendar's rule
+and hierarchy, and a business term's referenced element also depend on what they refer to: a
+granularity and a calendar's rule and hierarchy on the calendar's kind. The existence and the aggregation
+rule of a new Measure therefore reach the deciding party together.
 
 Correction interpretation gives the model the feedback's content and context and the related Facts'
 content, and asks for a revised value or applicability scope for the same element and predicate. Its
@@ -433,7 +446,13 @@ Concept a Field represents, a key's Fields, or a Measure's base Dataset, is show
 names a revision may choose from: the Concepts whose existence stands, the Dataset's columns whose
 Field is confirmed, or the confirmed Datasets. The revision depends on the existence of what it
 names instead of what the corrected value named; a name not listed, such as a new Concept, creates
-nothing and is recorded as missing input. A revised aggregation rule or filter condition is parsed
+nothing and is recorded as missing input. A default time granularity is shown with its calendar's
+name and chooses among the calendars that stand, with their levels; it depends on the chosen
+calendar's kind rather than its existence, as acceptance requires. A revised hierarchy's level
+expressions are parsed as acceptance parses them; a revision with one that would be refused is
+not proposed and is recorded as missing input, unlike analytical semantics inference, which keeps
+the level without the expression, because a revision states the whole hierarchy the wording asks
+for. A revised aggregation rule or filter condition is parsed
 over its base Dataset's Fields and run once on a sample of the base table with the Measure's other
 expression, as analytical semantics inference does, and is recorded as missing input when either
 fails. A revised name keeps its language. A correction of an element's existence or of a Physical

@@ -47,7 +47,7 @@ the field is aggregated.
 | Field | Physical Catalog reference, meaning, value kind, unit, meaning of null, represented concept, time meaning and time zone |
 | Concept | Meaning |
 | Measure | Meaning, base Dataset, aggregation rule, filter conditions, reference time Field, default time granularity |
-| Dimension | Meaning, Dimension kind, source Field and classification expression, source time Field, hierarchy, calendar rule |
+| Dimension | Meaning, Dimension kind, hierarchy, and the predicates of its kind: a calendar's calendar rule |
 | Business term | Written form in each declared language (see [`languages.md`](languages.md)), referenced element |
 
 | Edge element | Ends and direction | Identifying part | Predicates |
@@ -68,7 +68,7 @@ Each predicate is named in records by an identifier:
 | Field | `physical-catalog-reference`, `meaning`, `value-kind`, `unit`, `null-meaning`, `represented-concept`, `time-meaning` (with the time zone) |
 | Concept | `meaning` |
 | Measure | `meaning`, `base-dataset`, `aggregation-rule`, `filter`, `reference-time-field`, `default-time-granularity` |
-| Dimension | `meaning`, `dimension-kind`, `classification` (the source Field and classification expression), `source-time-field`, `hierarchy`, `calendar-rule` |
+| Dimension | `meaning`, `dimension-kind`, `hierarchy`, and those of its kind: `calendar-rule` for a calendar |
 | Business term | `written-form`, `referenced-element` |
 | Identifier correspondence | `set-relationship`, `business-definition` |
 | Concept relationship | `multiplicity` |
@@ -76,7 +76,9 @@ Each predicate is named in records by an identifier:
 A uniqueness predicate names its Field set, so it cannot be listed before a Field set is proposed.
 Every other identifier above is a **closed-core predicate** of its kind: a request for all
 predicates of an element reports each one without a Fact Address as missing knowledge (see
-[`public-api.md`](public-api.md#requesting-knowledge)).
+[`public-api.md`](public-api.md#requesting-knowledge)). A Dimension's closed core is that of every
+Dimension and, once a dimension-kind Fact is selected, the predicates of the kind it states, so a
+calendar never reports a predicate of another kind as missing.
 
 There is no separate join element. Joining two Datasets correctly rests on knowing that values on
 both sides denote the same object, which is what an identifier correspondence states, from an order
@@ -131,8 +133,33 @@ Some values deserve note:
   of `sum`, `count`, `count-distinct`, `avg`, `min`, and `max`; `count` alone also takes `*` to
   count rows, which references no Field. Its **filter conditions** are one
   SQL condition in text. A period that changes per question belongs to the question, not to the
-  Measure. Its default time granularity refers to a level of a calendar
-  Dimension, because "monthly" may mean calendar or fiscal month.
+  Measure. Its **default time granularity** refers to a level of a calendar
+  Dimension, because "monthly" may mean calendar or fiscal month: `{"dimension": <Dimension URN>,
+  "level": <the level's name>}`. Only the Dimension is a reference: its acceptance depends on the
+  Dimension's dimension-kind Fact stating a calendar, which is what cascade follows when the
+  calendar is rejected or retired. The level is named in words and not matched against the
+  hierarchy.
+- A Dimension's **kind** decides its other predicates and the forms of their values, and its
+  hierarchy and the predicates of its kind are accepted depending on its dimension-kind Fact. The
+  only kind defined is `calendar`: a calendar computed from a time value by a rule, with no
+  calendar table joined. A calendar is bound to no time Field; a Measure's reference time Field
+  decides which time it divides, and that Field's time meaning gives the time zone, so one fiscal
+  calendar serves every Measure. Its **calendar rule** is the wording that defines it, in text, as
+  a document states it, because real calendars do not fit one closed structure: months closing on
+  the 20th, boundaries moved to the next business day by a holiday table, 4-4-5 retail calendars,
+  or business days switching at 4:00. Its **hierarchy** is `{"levels": [{"name": ..., "expression":
+  ...}, ...]}`, its levels from coarse to fine, each named in words and each name once. A level's
+  optional `expression` is an expression value over the single column `time_value`, the time a
+  Measure's reference time Field records in that Field's time zone, that gives the key of the
+  level's period, such as `strftime(time_value - INTERVAL 20 DAY, '%Y-%m')` for months closing on
+  the 20th. It is written only when the rule fits one such expression; a rule that needs other
+  data, such as a holiday table, has levels without expressions, and a Query Agent reads the
+  rule's wording. One calendar holds all its levels, because they follow from one rule.
+  **[Planned]** Other kinds, such as derived
+  classifications (age bands, regional groupings) with their `classification` (source Field and
+  classification expression), attribute Dimensions, calendars joined from a calendar table, and
+  Dimensions over several tables, are not defined yet. `source-time-field` is reserved for a kind
+  that needs it; a calendar does not.
 - **Expression values**, the value expression of an aggregation rule, a Measure's filter
   conditions, and a Dimension's classification expression, are SQL expression strings in the Query
   Engine's dialect over the column names of the base Dataset's table, such as
@@ -143,7 +170,10 @@ Some values deserve note:
   definitions that use it. An expression that does not parse or names a missing column is not
   accepted, and neither is text that is more than one expression over that table, such as one
   with a subquery, another table, or a further clause. **[Planned]** A Dimension's classification
-  expression is not parsed yet, because no Generator proposes Dimensions.
+  expression is not parsed yet, because the classification kind is not defined. A calendar level's
+  expression is an expression value over the single column `time_value` instead: it is parsed the
+  same way, refused when it reads any other column, and adds no premise dependency, because its
+  column is the time a Measure's reference time Field records, not a Field of its own.
   [`../design/semantic-catalog-expression-values.md`](../design/semantic-catalog-expression-values.md)
   records why.
 - An identifier correspondence's **set relationship** is equal, subset, superset, partial overlap,
@@ -167,11 +197,11 @@ Some values deserve note:
   as a member buys again. The uniqueness of Field sets records what the data shows; concept
   multiplicity records the rule.
 
-Dimensions become elements only for derived classifications (age bands, regional groupings) and
-calendars (fiscal year, fiscal month). An axis that is a Field's own value is that Field's meaning,
-and aggregation per business object rests on keys and identifier correspondences. Making Dimensions
-for those would split one meaning across two Fact Addresses that the deciding party would judge
-twice.
+Dimensions are extended by kind. A kind is added when an axis needs knowledge no other element
+holds, as a calendar's rule does. An axis that is a Field's own value is already that Field's
+meaning, and aggregation per business object rests on keys and identifier correspondences, so a
+kind for such axes must say what it adds beyond them: otherwise one meaning would be split across
+two Fact Addresses that the deciding party would judge twice.
 
 The layer of a statement follows from its element: statements about Measures, Dimensions, and
 business terms are analytical semantics, and the rest are data semantics.
@@ -186,8 +216,8 @@ statement points to the existing Fact Address or is caught by the duplicate chec
 Predicates whose values are closed choices or references to records have a **closed value range**:
 existence; a Dataset's Physical Catalog reference, represented concept, row kind, key, and uniqueness; a
 Field's Physical Catalog reference, value kind, and represented concept; a Measure's base Dataset and
-reference time Field; Dimension kind; a business term's referenced element; set relationship; and
-concept-relationship multiplicity. A Generator-declared
+reference time Field and default time granularity; Dimension kind; a business term's referenced
+element; set relationship; and concept-relationship multiplicity. A Generator-declared
 predicate with a closed range counts too. Two such values are the same exactly when they are equal.
 
 ## The log

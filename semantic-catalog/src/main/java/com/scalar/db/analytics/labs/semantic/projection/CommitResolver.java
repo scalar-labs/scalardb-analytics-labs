@@ -18,6 +18,7 @@ import com.scalar.db.analytics.labs.semantic.model.LogRecord.FactEvent;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
 import com.scalar.db.analytics.labs.semantic.model.Urns;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
+import com.scalar.db.analytics.labs.semantic.model.Vocabulary.DimensionKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
 import com.scalar.db.analytics.labs.semantic.projection.MaterializedRow.ElementRow;
@@ -64,6 +65,13 @@ import org.jspecify.annotations.Nullable;
  * of the base Dataset whose base-dataset Fact the acceptance depends on. An expression that does
  * not parse, an acceptance that depends on no base-dataset Fact of its Measure, and a column the
  * base Dataset has no existing Field for reject the commit.
+ *
+ * <p>An acceptance of a Dimension's hierarchy or of a predicate of its kind must depend on
+ * dimension-kind Facts of the Dimension that state exactly one kind, and its value must be in that
+ * kind's form; a calendar's level expressions are parsed and read only the time value. An
+ * acceptance of a Measure's default time granularity must depend on its Dimension's dimension-kind
+ * Fact stating a calendar. A value not in its form rejects the commit (see {@link
+ * DimensionValues}).
  */
 public final class CommitResolver {
   private final String domain;
@@ -159,7 +167,7 @@ public final class CommitResolver {
   private void add(LogRecord request) {
     var record = resolveRefs(request);
     if (record instanceof LogRecord.Accept accept) {
-      record = withExpressionPremises(accept);
+      record = checkedValue(accept);
     }
     var existing = existing(record);
     var index = targets.size();
@@ -284,22 +292,104 @@ public final class CommitResolver {
   }
 
   /**
-   * An acceptance of a Measure's expression value with a premise dependency on the existence of
-   * each Field its expressions reference that it does not already depend on; any other acceptance
-   * as it is.
+   * An acceptance whose value the store reads, checked: a Measure's expression value with its
+   * premise dependencies added (see {@link #withExpressionPremises}), a Measure's default time
+   * granularity and a Dimension's values checked against the Facts they depend on; any other
+   * acceptance as it is.
    */
-  private LogRecord.Accept withExpressionPremises(LogRecord.Accept accept) {
+  private LogRecord.Accept checkedValue(LogRecord.Accept accept) {
     var about = about(accept.fact().urnValue());
-    if (about.isEmpty()
-        || !ExpressionValues.holdsExpressions(about.get().predicate())
-        || kind(about.get().element()).orElse(null) != ElementKind.MEASURE) {
+    if (about.isEmpty()) {
       return accept;
     }
-    var measure = about.get().element();
-    var value = about.get().value();
+    var predicate = about.get().predicate();
+    var kind = kind(about.get().element()).orElse(null);
+    if (kind == ElementKind.MEASURE && ExpressionValues.holdsExpressions(predicate)) {
+      return withExpressionPremises(
+          accept, about.get().element(), predicate, value(accept, about.get()));
+    }
+    if (kind == ElementKind.MEASURE && predicate.equals(Vocabulary.DEFAULT_TIME_GRANULARITY)) {
+      checkGranularity(accept, value(accept, about.get()));
+    } else if (kind == ElementKind.DIMENSION && predicate.equals(Vocabulary.DIMENSION_KIND)) {
+      dimensionKind(value(accept, about.get()));
+    } else if (kind == ElementKind.DIMENSION && DimensionValues.kindSpecific(predicate)) {
+      var dimension = about.get().element();
+      var kinds = new HashSet<DimensionKind>();
+      for (var depended : dependedFacts(accept)) {
+        if (depended.element().equals(dimension)
+            && depended.predicate().equals(Vocabulary.DIMENSION_KIND)
+            && depended.value() != null) {
+          kinds.add(dimensionKind(depended.value()));
+        }
+      }
+      if (kinds.size() != 1) {
+        throw new IllegalArgumentException(
+            "The "
+                + predicate
+                + " of Dimension "
+                + dimension
+                + " depends on exactly one kind of it, not "
+                + kinds.size());
+      }
+      DimensionValues.check(
+          kinds.iterator().next(), predicate, value(accept, about.get()), expressions);
+    }
+    return accept;
+  }
+
+  private static JsonNode value(LogRecord.Accept accept, About about) {
+    var value = about.value();
     if (value == null) {
       throw new IllegalArgumentException("Fact " + accept.fact().urnValue() + " has no value");
     }
+    return value;
+  }
+
+  private static DimensionKind dimensionKind(JsonNode value) {
+    if (!value.isTextual()) {
+      throw new IllegalArgumentException("A Dimension's kind is a text");
+    }
+    return DimensionKind.of(value.asText())
+        .orElseThrow(
+            () -> new IllegalArgumentException("No kind of Dimension is " + value.asText()));
+  }
+
+  /** What each Fact an acceptance depends on is about, for those that are known. */
+  private List<About> dependedFacts(LogRecord.Accept accept) {
+    var facts = new ArrayList<About>();
+    for (var dependency : accept.dependencies()) {
+      if (dependency instanceof Dependency.OnFact onFact) {
+        about(onFact.fact().urnValue()).ifPresent(facts::add);
+      }
+    }
+    return facts;
+  }
+
+  /**
+   * Requires a Measure's default time granularity to rest on its Dimension's dimension-kind Fact
+   * stating a calendar, the premise cascade follows when the calendar is rejected or retired. The
+   * level is named in words and not matched against the hierarchy.
+   */
+  private void checkGranularity(LogRecord.Accept accept, JsonNode value) {
+    var dimension = DimensionValues.Granularity.of(value).dimension();
+    for (var depended : dependedFacts(accept)) {
+      if (depended.element().equals(dimension)
+          && depended.predicate().equals(Vocabulary.DIMENSION_KIND)
+          && depended.value() != null
+          && dimensionKind(depended.value()) == DimensionKind.CALENDAR) {
+        return;
+      }
+    }
+    throw new IllegalArgumentException(
+        "A default time granularity depends on its Dimension " + dimension + " being a calendar");
+  }
+
+  /**
+   * An acceptance of a Measure's expression value with a premise dependency on the existence of
+   * each Field its expressions reference that it does not already depend on.
+   */
+  private LogRecord.Accept withExpressionPremises(
+      LogRecord.Accept accept, String measure, String predicate, JsonNode value) {
     var table = baseTable(accept, measure);
     var dependencies = new ArrayList<>(accept.dependencies());
     var depended = new HashSet<String>();
@@ -308,7 +398,7 @@ public final class CommitResolver {
         depended.add(onFact.fact().urnValue());
       }
     }
-    for (var expression : ExpressionValues.of(about.get().predicate(), value)) {
+    for (var expression : ExpressionValues.of(predicate, value)) {
       for (var column : expressions.columns(expression)) {
         var existence = fieldExistence(table, column);
         if (depended.add(existence.fact().urnValue())) {
@@ -632,7 +722,8 @@ public final class CommitResolver {
               address.predicateDefinition());
       case LogRecord.Fact fact -> {
         var key = fact.identityKey() == null ? null : fact.identityKey().mapRefs(toRecord);
-        yield new LogRecord.Fact(toRecord.apply(fact.address()), referenceValue(fact, key), key);
+        var address = toRecord.apply(fact.address());
+        yield new LogRecord.Fact(address, referenceValue(fact, address, key), key);
       }
       case LogRecord.InputResource resource -> resource;
       case LogRecord.InputObservation observation -> {
@@ -707,11 +798,18 @@ public final class CommitResolver {
    * The value a Fact is written with. A Fact whose value is one record, such as the Concept a row
    * represents, may be proposed with a null value and an identity key of that one reference: its
    * value is then the URN the reference resolves to, so a proposer can refer to a record of the
-   * same request, whose URN is issued only now.
+   * same request, whose URN is issued only now. A Measure's default time granularity may be
+   * proposed the same way with the identity key of its Dimension and its level.
    */
-  private static JsonNode referenceValue(LogRecord.Fact fact, @Nullable IdentityKey key) {
+  private JsonNode referenceValue(LogRecord.Fact fact, Ref address, @Nullable IdentityKey key) {
     if (!fact.value().isNull()) {
       return fact.value();
+    }
+    if (key != null
+        && address(address.urnValue())
+            .filter(about -> about.predicate().equals(Vocabulary.DEFAULT_TIME_GRANULARITY))
+            .isPresent()) {
+      return DimensionValues.Granularity.fromKey(key).value();
     }
     if (key == null
         || key.parts().size() != 1

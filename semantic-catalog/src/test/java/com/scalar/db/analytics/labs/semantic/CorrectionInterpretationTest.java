@@ -28,6 +28,7 @@ import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Preset;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Transition;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ValidationMethod;
 import com.scalar.db.analytics.labs.semantic.policy.PolicyEvaluationModel;
+import com.scalar.db.analytics.labs.semantic.projection.DimensionValues;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -638,5 +639,181 @@ class CorrectionInterpretationTest extends StoreScenarioTest {
                 assertThat(missing)
                     .contains("a correction does not revise, because a Physical Catalog reference")
                     .endsWith(": 別のテーブルです"));
+  }
+
+  // Calendars
+
+  /** A calendar with a candidate kind, as a dependency on that kind names it. */
+  private record Calendar(Node node, Dependency.OnFact kind) {}
+
+  private static Calendar calendar(Scenario.Commit c, String slug) {
+    var node = node(c, ElementKind.DIMENSION, slug);
+    var kind =
+        candidate(
+            c,
+            c.address(node.element(), Vocabulary.DIMENSION_KIND),
+            JSON.textNode("calendar"),
+            IdentityKey.choice("calendar"),
+            node.existence());
+    return new Calendar(node, kind);
+  }
+
+  /** A candidate with no identity key, a description or a structured value. */
+  private static Dependency.OnFact described(
+      Scenario.Commit c, Ref address, JsonNode value, Dependency... dependencies) {
+    var fact = c.add(new LogRecord.Fact(address, value, null));
+    return new Dependency.OnFact(fact, c.accept(fact, dependencies));
+  }
+
+  private static JsonNode levels(String name, String expression) {
+    var value = JSON.objectNode();
+    var level = value.putArray("levels").addObject().put("name", name);
+    if (!expression.isEmpty()) {
+      level.put("expression", expression);
+    }
+    return value;
+  }
+
+  @Test
+  void aCorrectedGranularityChoosesAmongTheCalendarsAndRestsOnTheChosenCalendarsKind() {
+    var s = shopScenario();
+    var c = s.begin();
+    var fiscal = calendar(c, "fiscal-calendar");
+    var retail = calendar(c, "retail-calendar");
+    described(
+        c,
+        c.address(retail.node().element(), Vocabulary.HIERARCHY),
+        levels("retail week", ""),
+        retail.node().existence(),
+        retail.kind());
+    var measure = node(c, ElementKind.MEASURE, "ec-sales");
+    var granularity =
+        candidate(
+            c,
+            c.address(measure.element(), Vocabulary.DEFAULT_TIME_GRANULARITY),
+            JSON.nullNode(),
+            DimensionValues.Granularity.identityKey(fiscal.node().element(), "fiscal month"),
+            measure.existence(),
+            fiscal.kind());
+    var written = s.write(c);
+    drain(s, new ScriptedModel());
+    var ecSales = written.urn(measure.element());
+    var retailCalendar = written.urn(retail.node().element());
+
+    correct(s, written.urn(granularity.fact()), Transition.CONFIRM, "Reported by retail week");
+    var model =
+        new ScriptedModel()
+            .answering(
+                CORRECTION,
+                revising(
+                    JSON.objectNode()
+                        .put("dimension", "dimension:retail-calendar")
+                        .put("level", "retail week")));
+    drain(s, model);
+
+    var input = inputOf(model).path("facts").get(0);
+    assertThat(input.path("value").path("dimension").asText())
+        .isEqualTo("dimension:fiscal-calendar");
+    assertThat(input.path("choices").path("calendars").findValuesAsText("ref"))
+        .containsExactlyInAnyOrder("dimension:fiscal-calendar", "dimension:retail-calendar");
+    var revised = revised(s, ecSales, Vocabulary.DEFAULT_TIME_GRANULARITY);
+    assertThat(revised.value())
+        .isEqualTo(JSON.objectNode().put("dimension", retailCalendar).put("level", "retail week"));
+    // It rests on the kind of the calendar it names, not on the one the corrected value named.
+    assertThat(factsDependedOn(revised))
+        .containsExactlyInAnyOrder(existence(ecSales), written.urn(retail.kind().fact()));
+  }
+
+  @Test
+  void aCorrectedCalendarRuleIsTheNewWordingAndStillRestsOnTheKind() {
+    var s = shopScenario();
+    var c = s.begin();
+    var fiscal = calendar(c, "fiscal-calendar");
+    var rule =
+        described(
+            c,
+            c.address(fiscal.node().element(), Vocabulary.CALENDAR_RULE),
+            JSON.textNode("A fiscal month closes on the 20th."),
+            fiscal.node().existence(),
+            fiscal.kind());
+    var written = s.write(c);
+    drain(s, new ScriptedModel());
+    var calendar = written.urn(fiscal.node().element());
+
+    var wording =
+        "A fiscal month closes on the 25th; a holiday moves it to the business day before.";
+    correct(s, written.urn(rule.fact()), Transition.CONFIRM, "It closes on the 25th");
+    drain(s, new ScriptedModel().answering(CORRECTION, revising(JSON.textNode(wording))));
+
+    var revised = revised(s, calendar, Vocabulary.CALENDAR_RULE);
+    assertThat(revised.value().asText()).isEqualTo(wording);
+    assertThat(factsDependedOn(revised)).contains(written.urn(fiscal.kind().fact()));
+  }
+
+  @Test
+  void aCorrectedLevelExpressionReadingAnotherColumnIsRecordedWithoutFailingTheTask() {
+    var s = shopScenario();
+    var c = s.begin();
+    var fiscal = calendar(c, "fiscal-calendar");
+    var hierarchy =
+        described(
+            c,
+            c.address(fiscal.node().element(), Vocabulary.HIERARCHY),
+            levels("fiscal month", "strftime(time_value - INTERVAL 20 DAY, '%Y-%m')"),
+            fiscal.node().existence(),
+            fiscal.kind());
+    var written = s.write(c);
+    drain(s, new ScriptedModel());
+    var calendar = written.urn(fiscal.node().element());
+
+    correct(s, written.urn(hierarchy.fact()), Transition.CONFIRM, "Months by order amount");
+    var summary =
+        drain(
+            s,
+            new ScriptedModel()
+                .answering(
+                    CORRECTION, revising(levels("fiscal month", "strftime(amount, '%Y-%m')"))));
+
+    assertThat(facts(s, calendar, Vocabulary.HIERARCHY, null)).hasSize(1);
+    assertThat(generated(summary).missingInputs())
+        .singleElement()
+        .satisfies(missing -> assertThat(missing).contains("reads amount"));
+  }
+
+  @Test
+  void aCorrectionOfACalendarWhoseKindNoLongerStandsIsRecordedWithoutFailingTheTask() {
+    var s = shopScenario();
+    var c = s.begin();
+    var fiscal = calendar(c, "fiscal-calendar");
+    var rule =
+        described(
+            c,
+            c.address(fiscal.node().element(), Vocabulary.CALENDAR_RULE),
+            JSON.textNode("A fiscal month closes on the 20th."),
+            fiscal.node().existence(),
+            fiscal.kind());
+    var written = s.write(c);
+    drain(s, new ScriptedModel());
+    var calendar = written.urn(fiscal.node().element());
+    var kind = Ref.urn(written.urn(fiscal.kind().fact()));
+
+    correct(s, written.urn(rule.fact()), Transition.CONFIRM, "It closes on the 25th");
+    var confirm = s.begin();
+    confirm.confirmByMachine(Ref.urn(existence(calendar)));
+    confirm.confirmByMachine(kind);
+    s.write(confirm);
+    var retire = s.begin();
+    retire.retireByMachine(kind);
+    s.judge(retire);
+    var summary =
+        drain(
+            s,
+            new ScriptedModel()
+                .answering(
+                    CORRECTION, revising(JSON.textNode("A fiscal month closes on the 25th."))));
+
+    assertThat(facts(s, calendar, Vocabulary.CALENDAR_RULE, null)).hasSize(1);
+    assertThat(generated(summary).missingInputs())
+        .anySatisfy(missing -> assertThat(missing).contains("its Dimension's kind does not stand"));
   }
 }

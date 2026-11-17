@@ -1,7 +1,8 @@
 # How are expression values in the Semantic Catalog represented?
 
 Acceptance and analytical semantics inference implement this decision for a Measure's aggregation
-rule and filter conditions. **[Planned]** A Dimension's classification expression is not
+rule and filter conditions and for a calendar level's expression, which reads only the time value.
+**[Planned]** A Dimension's classification expression is not
 implemented yet.
 
 ## Current answer
@@ -12,6 +13,11 @@ over the column names of the base Dataset's table. The string is the reference r
 the definition. At acceptance the Semantic Catalog parses it with the Query Engine's parser, records
 the Fields it references as premise dependencies, and refuses an expression that does not parse or
 names a missing column.
+
+A calendar level's expression is the same kind of string over one column, `time_value`, the time a
+Measure's reference time Field records. It is parsed the same way and refused when it reads any
+other column. It adds no premise dependency, because a calendar is bound to no table and its
+column is no Field.
 
 ## Rationale
 

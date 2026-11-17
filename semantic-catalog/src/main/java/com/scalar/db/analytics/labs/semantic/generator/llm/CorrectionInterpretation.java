@@ -37,6 +37,7 @@ import com.scalar.db.analytics.labs.semantic.model.Vocabulary.CheckResult;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ValidationMethod;
+import com.scalar.db.analytics.labs.semantic.projection.DimensionValues;
 import com.scalar.db.analytics.labs.semantic.projection.ExpressionValues;
 import com.scalar.db.analytics.labs.semantic.projection.ExpressionValues.AggregationRule;
 import java.util.ArrayList;
@@ -341,6 +342,13 @@ public final class CorrectionInterpretation implements ModelGenerator {
 
     /** How the model reads a value that names elements: by the names the choices use. */
     JsonNode shown(PredicateValues.Names names, JsonNode value) {
+      if (names == PredicateValues.Names.CALENDAR) {
+        var shown = value.deepCopy();
+        if (shown instanceof ObjectNode object && value.path("dimension").isTextual()) {
+          object.put("dimension", name(value.path("dimension").asText()));
+        }
+        return shown;
+      }
       if (names == PredicateValues.Names.OWN_FIELDS) {
         var columns = JSON.arrayNode();
         for (var field : value.path("fields")) {
@@ -360,6 +368,7 @@ public final class CorrectionInterpretation implements ModelGenerator {
       return switch (kind) {
         case CONCEPT -> Urns.identifier(element);
         case MEASURE -> "measure:" + Urns.identifier(element);
+        case DIMENSION -> "dimension:" + Urns.identifier(element);
         case DATASET ->
             context
                 .datasetTable(element)
@@ -406,8 +415,43 @@ public final class CorrectionInterpretation implements ModelGenerator {
             columns(dataset.element(), node.putArray("columns"));
           }
         }
+        case CALENDAR -> {
+          var calendars = choices.putArray("calendars");
+          for (var calendar : calendars()) {
+            var node = calendars.addObject().put("ref", name(calendar.element()));
+            standing(calendar.element(), Vocabulary.HIERARCHY)
+                .ifPresent(hierarchy -> node.set("levels", hierarchy.path("levels")));
+          }
+        }
       }
       return null;
+    }
+
+    /**
+     * The calendars a default time granularity may name: Dimensions whose existence stands and
+     * whose standing kind is a calendar, each with that kind Fact, which a granularity depends on.
+     */
+    private List<Named> calendars() {
+      var found = new ArrayList<Named>();
+      for (var dimension : standingElements(ElementKind.DIMENSION)) {
+        calendarKind(dimension.element())
+            .ifPresent(
+                kind -> {
+                  read.add(kind.revision());
+                  found.add(new Named(dimension.element(), kind));
+                });
+      }
+      return found;
+    }
+
+    /** The standing dimension-kind Fact of a Dimension that states a calendar. */
+    Optional<Fact> calendarKind(String dimension) {
+      return standingFact(dimension, Vocabulary.DIMENSION_KIND)
+          .filter(
+              kind ->
+                  kind.value().isTextual()
+                      && Vocabulary.DimensionKind.of(kind.value().asText()).orElse(null)
+                          == Vocabulary.DimensionKind.CALENDAR);
     }
 
     /** Adds the names of a Dataset's columns whose Field is confirmed. */
@@ -555,6 +599,25 @@ public final class CorrectionInterpretation implements ModelGenerator {
           return new Resolved.Value(
               PredicateValues.naming(predicate, Ref.urn(named.element())),
               List.of(named.premise(), base.fact()));
+        }
+        case CALENDAR -> {
+          var dimension = given.path("dimension");
+          var level = given.path("level");
+          if (!given.isObject()
+              || !dimension.isTextual()
+              || !level.isTextual()
+              || level.asText().isBlank()) {
+            return new Resolved.Invalid(
+                "it is not an object with a calendar's ref and a level's name");
+          }
+          for (var calendar : calendars()) {
+            if (name(calendar.element()).equals(dimension.asText())) {
+              return new Resolved.Value(
+                  PredicateValues.granularity(Ref.urn(calendar.element()), level.asText()),
+                  List.of(calendar.premise()));
+            }
+          }
+          return new Resolved.Invalid("it names no calendar listed");
         }
         default -> {
           if (!given.isTextual()) {
@@ -845,6 +908,17 @@ public final class CorrectionInterpretation implements ModelGenerator {
             }
             case Valued.Value valid -> value = valid;
           }
+          if (predicate.equals(Vocabulary.HIERARCHY)) {
+            // Acceptance parses a calendar level's expressions; one it would refuse is dropped
+            // here rather than failing the task.
+            try {
+              DimensionValues.checkLevels(
+                  DimensionValues.Hierarchy.of(value.value()), context.expressions());
+            } catch (IllegalArgumentException e) {
+              dropped(String.valueOf(e.getMessage()));
+              return;
+            }
+          }
         }
         case Naming naming -> {
           if (revision.value() == null) {
@@ -908,6 +982,24 @@ public final class CorrectionInterpretation implements ModelGenerator {
           }
         }
         named.add(base.fact());
+      }
+      // Acceptance reads a Dimension's hierarchy and kind-specific values in the form of a kind
+      // that stands, and a default time granularity rests on its calendar's kind; without one, the
+      // revision would be refused and fail the whole run.
+      if (DimensionValues.kindSpecific(predicate)
+          && premises().stream()
+              .noneMatch(
+                  premise ->
+                      premise.element().equals(corrected.element())
+                          && premise.predicate().equals(Vocabulary.DIMENSION_KIND))) {
+        dropped("its Dimension's kind does not stand");
+        return;
+      }
+      if (predicate.equals(Vocabulary.DEFAULT_TIME_GRANULARITY)
+          && named.stream()
+              .noneMatch(premise -> premise.predicate().equals(Vocabulary.DIMENSION_KIND))) {
+        dropped("its calendar's kind does not stand");
+        return;
       }
       var dependencies = new ArrayList<Dependency>();
       dependencies.add(feedback);
@@ -1069,6 +1161,10 @@ public final class CorrectionInterpretation implements ModelGenerator {
       var elements = new ArrayList<String>();
       if (fact.predicate().equals(Vocabulary.KEY)) {
         fact.value().path("fields").forEach(urn -> elements.add(urn.asText()));
+      } else if (fact.predicate().equals(Vocabulary.DEFAULT_TIME_GRANULARITY)) {
+        if (fact.value().path("dimension").isTextual()) {
+          elements.add(fact.value().path("dimension").asText());
+        }
       } else if (fact.value().isTextual()) {
         elements.add(fact.value().asText());
       }
@@ -1078,15 +1174,27 @@ public final class CorrectionInterpretation implements ModelGenerator {
     /** The corrected naming value as its rule builds it, for a revision of its scope only. */
     private Valued.Value stated(PredicateValues.Names names) {
       var elements = referencedElements(corrected);
-      return names == PredicateValues.Names.OWN_FIELDS
-          ? PredicateValues.key(elements)
-          : PredicateValues.naming(corrected.predicate(), Ref.urn(elements.getFirst()));
+      return switch (names) {
+        case OWN_FIELDS -> PredicateValues.key(elements);
+        case CALENDAR ->
+            PredicateValues.granularity(
+                Ref.urn(elements.getFirst()), corrected.value().path("level").asText());
+        default -> PredicateValues.naming(corrected.predicate(), Ref.urn(elements.getFirst()));
+      };
     }
 
-    /** The existence Facts of the elements the corrected value names, when they stand. */
+    /**
+     * The Facts the corrected value depends on for what it names, when they stand: a calendar's
+     * kind for a default time granularity, and the existence of each element for any other.
+     */
     private List<Fact> referenced(Fact fact) {
       var facts = new ArrayList<Fact>();
+      var names = new Elements(context, fact, new LinkedHashSet<>());
       for (var element : referencedElements(fact)) {
+        if (fact.predicate().equals(Vocabulary.DEFAULT_TIME_GRANULARITY)) {
+          names.calendarKind(element).ifPresent(facts::add);
+          continue;
+        }
         context
             .closedRangeFact(element, Vocabulary.EXISTENCE, IdentityKey.choice(EXISTS))
             .filter(CorrectionInterpretation::standing)

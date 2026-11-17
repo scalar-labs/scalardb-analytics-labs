@@ -80,14 +80,29 @@ public final class Vocabulary {
   public static final String FILTER = "filter";
 
   public static final String REFERENCE_TIME_FIELD = "reference-time-field";
+
+  /**
+   * A Measure's default time granularity: a level of a calendar Dimension, {@code {"dimension":
+   * <Dimension URN>, "level": <level>}}, because "monthly" may mean calendar or fiscal month.
+   */
   public static final String DEFAULT_TIME_GRANULARITY = "default-time-granularity";
+
+  /** A Dimension's kind, one of {@link DimensionKind}, which decides its other predicates. */
   public static final String DIMENSION_KIND = "dimension-kind";
 
-  /** A Dimension's source Field and classification expression. */
+  /**
+   * A Dimension's source Field and classification expression, a predicate of the classification
+   * kind, which is not defined yet.
+   */
   public static final String CLASSIFICATION = "classification";
 
+  /** A Dimension's source time Field, a predicate of a kind that is not defined yet. */
   public static final String SOURCE_TIME_FIELD = "source-time-field";
+
+  /** A Dimension's levels, coarse to fine: {@code {"levels": [...]}}, a predicate of every kind. */
   public static final String HIERARCHY = "hierarchy";
+
+  /** A calendar Dimension's rule: the wording that defines how it divides time. */
   public static final String CALENDAR_RULE = "calendar-rule";
 
   /**
@@ -138,7 +153,8 @@ public final class Vocabulary {
   /**
    * The closed-core predicates of an element kind, existence first: what construction aims at for
    * every element of the kind, so a request for all predicates reports each one without a Fact
-   * Address as missing knowledge.
+   * Address as missing knowledge. For a Dimension these are the predicates of every Dimension;
+   * {@link #closedCore(DimensionKind)} adds those of its kind.
    */
   public static List<String> closedCore(ElementKind kind) {
     return switch (kind) {
@@ -171,19 +187,64 @@ public final class Vocabulary {
               FILTER,
               REFERENCE_TIME_FIELD,
               DEFAULT_TIME_GRANULARITY);
-      case DIMENSION ->
-          List.of(
-              EXISTENCE,
-              MEANING,
-              DIMENSION_KIND,
-              CLASSIFICATION,
-              SOURCE_TIME_FIELD,
-              HIERARCHY,
-              CALENDAR_RULE);
+      case DIMENSION -> List.of(EXISTENCE, MEANING, DIMENSION_KIND, HIERARCHY);
       case BUSINESS_TERM -> List.of(EXISTENCE, WRITTEN_FORM, REFERENCED_ELEMENT);
       case IDENTIFIER_CORRESPONDENCE -> List.of(EXISTENCE, SET_RELATIONSHIP, BUSINESS_DEFINITION);
       case CONCEPT_RELATIONSHIP -> List.of(EXISTENCE, MULTIPLICITY);
     };
+  }
+
+  /**
+   * The closed-core predicates of a Dimension of a kind: those of every Dimension, then those of
+   * its kind.
+   */
+  public static List<String> closedCore(DimensionKind kind) {
+    var predicates = new ArrayList<>(closedCore(ElementKind.DIMENSION));
+    predicates.addAll(kind.predicates());
+    return List.copyOf(predicates);
+  }
+
+  /**
+   * The kinds of Dimension (see {@code docs/semantic-catalog/record-model.md}, "Elements and
+   * predicates"). A kind decides which predicates a Dimension has besides those of every Dimension,
+   * and the forms of their values; a new kind of Dimension is a new constant here, with the forms
+   * of its values in {@code DimensionValues.check}, which does not compile until it covers the
+   * kind.
+   */
+  public enum DimensionKind {
+    /**
+     * A calendar computed from a time value by a rule, such as a fiscal year starting in April. It
+     * is bound to no time Field: a Measure's reference time Field decides which time it divides.
+     */
+    CALENDAR("calendar", List.of(CALENDAR_RULE));
+
+    private final String value;
+    private final List<String> predicates;
+
+    DimensionKind(String value, List<String> predicates) {
+      this.value = value;
+      this.predicates = predicates;
+    }
+
+    /** The value of a dimension-kind Fact that states this kind. */
+    public String value() {
+      return value;
+    }
+
+    /** The predicates of a Dimension of this kind besides those of every Dimension. */
+    public List<String> predicates() {
+      return predicates;
+    }
+
+    /** The kind a dimension-kind value states, if it states one. */
+    public static java.util.Optional<DimensionKind> of(String value) {
+      for (var kind : values()) {
+        if (kind.value.equals(value)) {
+          return java.util.Optional.of(kind);
+        }
+      }
+      return java.util.Optional.empty();
+    }
   }
 
   /**

@@ -192,6 +192,30 @@ public final class CatalogSnapshot {
     return values;
   }
 
+  /**
+   * The kind each Dimension among some elements has: the kind its selected dimension-kind Fact
+   * states. A Dimension with no selected kind, or a kind not defined, is left out, and its
+   * closed-core predicates are those of every Dimension.
+   */
+  private Map<String, Vocabulary.DimensionKind> dimensionKinds(Collection<ElementRow> elements) {
+    var dimensions =
+        elements.stream()
+            .filter(row -> row.kind() == ElementKind.DIMENSION)
+            .map(ElementRow::element)
+            .toList();
+    var kinds = new HashMap<String, Vocabulary.DimensionKind>();
+    if (dimensions.isEmpty()) {
+      return kinds;
+    }
+    for (var selected : selectedValues(dimensions, Vocabulary.DIMENSION_KIND)) {
+      if (selected.value().isTextual()) {
+        Vocabulary.DimensionKind.of(selected.value().asText())
+            .ifPresent(kind -> kinds.put(selected.element(), kind));
+      }
+    }
+    return kinds;
+  }
+
   // Requesting knowledge
 
   /**
@@ -224,6 +248,7 @@ public final class CatalogSnapshot {
     for (var address : transaction.addressesOf(domain, elements.keySet(), commit)) {
       addresses.computeIfAbsent(address.element(), key -> new ArrayList<>()).add(address);
     }
+    var dimensionKinds = dimensionKinds(elements.values());
     var requested = new LinkedHashSet<String>();
     var perRequest = new ArrayList<List<FactAddressRow>>();
     var missingPerRequest = new ArrayList<List<Knowledge.Missing>>();
@@ -235,7 +260,13 @@ public final class CatalogSnapshot {
       for (var element : targets.getOrDefault(request, List.of())) {
         var ofElement = addresses.getOrDefault(element.element(), List.of());
         var predicate = request.predicate();
-        var asked = predicate == null ? Vocabulary.closedCore(element.kind()) : List.of(predicate);
+        var dimensionKind = dimensionKinds.get(element.element());
+        var asked =
+            predicate != null
+                ? List.of(predicate)
+                : dimensionKind != null
+                    ? Vocabulary.closedCore(dimensionKind)
+                    : Vocabulary.closedCore(element.kind());
         for (var address : ofElement) {
           if (predicate == null
               || (address.predicate().equals(predicate) && address.predicateDefinition() == null)) {
