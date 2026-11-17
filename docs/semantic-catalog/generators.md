@@ -589,7 +589,8 @@ and a Physical Catalog reference never moves; a renamed table likewise becomes a
 The policy evaluation model (see
 [`construction.md`](construction.md#choosing-the-confirmation-path)) calls a language model through
 an **adapter**, the only part of the Semantic Catalog that knows how a model is reached.
-The implemented meaning-inference Generators call it the same way. **[Planned]** So will the
+The implemented meaning-inference Generators and translation build tasks (see
+[`languages.md`](languages.md#translations)) call it the same way. **[Planned]** So will the
 other meaning-inference Generators, impact judgement, and the duplicate check. A
 caller passes a prompt and receives the model's answer; it never depends on a particular provider,
 so the provider can change without changing a Generator.
@@ -667,8 +668,10 @@ The policy evaluation model's subject holds Fact content and what the candidate'
 as read; it expands no observation content. The settings below apply wherever observation content is
 passed to a model, that subject included.
 
-Meaning inference, impact judgement, the duplicate check, and the policy evaluation model may send
-input to an external model through the adapter. Usage feedback and data values reach a model only as
+Meaning inference, impact judgement, the duplicate check, the policy evaluation model, and
+translation may send input to an external model through the adapter. Translation sends only the
+recorded text of the records a reader asked to have translated, which includes usage feedback's
+content and context summary when it is asked for, so the usage feedback setting applies to it too. Usage feedback and data values reach a model only as
 far as the domain's settings allow:
 
 | Input | Content | Default |

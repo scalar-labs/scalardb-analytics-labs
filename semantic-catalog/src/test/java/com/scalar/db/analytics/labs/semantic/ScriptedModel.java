@@ -11,6 +11,7 @@ import com.scalar.db.analytics.labs.semantic.generator.Generators;
 import com.scalar.db.analytics.labs.semantic.generator.ModelGenerator;
 import com.scalar.db.analytics.labs.semantic.llm.LanguageModel;
 import com.scalar.db.analytics.labs.semantic.policy.PolicyEvaluationModel;
+import com.scalar.db.analytics.labs.semantic.translation.Translator;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -65,11 +66,22 @@ final class ScriptedModel implements LanguageModel {
     return JsonNodeFactory.instance.objectNode().put("adapter", "scripted").put("model", model);
   }
 
+  /** The name the translator's calls are recorded under. */
+  static final String TRANSLATOR = "translator";
+
+  /** Answers the translator's calls by a script over its input. */
+  ScriptedModel translating(Function<JsonNode, String> script) {
+    generatorsByInstructions.put(Translator.INSTRUCTIONS, TRANSLATOR);
+    scripts.put(TRANSLATOR, script);
+    return this;
+  }
+
   @Override
   public synchronized String complete(String instructions, String input) {
     var generator = generatorsByInstructions.get(instructions);
     if (generator == null) {
-      throw new AssertionError("A caller other than a model-backed Generator asked the model");
+      throw new AssertionError(
+          "A caller other than a model-backed Generator or a scripted translator asked the model");
     }
     JsonNode json;
     try {

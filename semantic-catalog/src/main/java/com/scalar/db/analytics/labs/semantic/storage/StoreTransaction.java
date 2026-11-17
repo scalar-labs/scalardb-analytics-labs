@@ -12,6 +12,7 @@ import com.scalar.db.analytics.labs.semantic.model.LogRecord.FactEvent;
 import com.scalar.db.analytics.labs.semantic.model.LogRecordJson;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
 import com.scalar.db.analytics.labs.semantic.model.ReviewPresentation;
+import com.scalar.db.analytics.labs.semantic.model.Translation;
 import com.scalar.db.analytics.labs.semantic.model.Urns;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
@@ -826,6 +827,57 @@ public final class StoreTransaction {
 
   private static BuildTask buildTaskOf(String json) {
     return LogRecordJson.fromStored(LogRecordJson.readNode(json), BuildTask.class);
+  }
+
+  // Translations, kept outside the log
+
+  /**
+   * The position of the log record a commit wrote to create a record identified by a name-based
+   * URN, such as a Fact or a Fact Address.
+   */
+  public Optional<LogPosition> namedRecordPosition(String domain, long commit, String urn) {
+    return jdbc.sql(
+            "SELECT ordinal FROM semantic_catalog.log_records"
+                + " WHERE domain = ? AND commit_number = ? AND content ->> 'urn' = ?")
+        .params(domain, commit, urn)
+        .query((rs, row) -> new LogPosition(commit, rs.getInt(1)))
+        .optional();
+  }
+
+  /** Records a translation; one already recorded for the record and language is kept. */
+  public void insertTranslation(String domain, Translation translation) {
+    jdbc.sql(
+            "INSERT INTO semantic_catalog.translations (domain, log_record, language, content)"
+                + " VALUES (?, ?, ?, CAST(? AS jsonb)) ON CONFLICT DO NOTHING")
+        .params(
+            domain,
+            translation.logRecord(),
+            translation.language(),
+            LogRecordJson.writeNode(LogRecordJson.toStored(translation)))
+        .update();
+  }
+
+  /** The translations into a language of some log records, by log record URN. */
+  public Map<String, Translation> translations(
+      String domain, String language, Collection<String> logRecords) {
+    var translations = new LinkedHashMap<String, Translation>();
+    if (logRecords.isEmpty()) {
+      return translations;
+    }
+    jdbc.sql(
+            "SELECT content::text FROM semantic_catalog.translations"
+                + " WHERE domain = :domain AND language = :language"
+                + " AND log_record = ANY(CAST(:records AS text[]))")
+        .param("domain", domain)
+        .param("language", language)
+        .param("records", array(logRecords))
+        .query(
+            (rs, row) ->
+                LogRecordJson.fromStored(
+                    LogRecordJson.readNode(rs.getString(1)), Translation.class))
+        .list()
+        .forEach(translation -> translations.put(translation.logRecord(), translation));
+    return translations;
   }
 
   // Reads for review

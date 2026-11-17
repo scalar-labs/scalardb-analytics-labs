@@ -23,6 +23,7 @@ import com.scalar.db.analytics.labs.semantic.model.LogPosition;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
 import com.scalar.db.analytics.labs.semantic.model.SemanticCatalogException;
+import com.scalar.db.analytics.labs.semantic.model.Translation;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.FactState;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.PolicyResult;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Transition;
@@ -33,8 +34,11 @@ import com.scalar.db.analytics.labs.semantic.projection.TransitionResolver;
 import com.scalar.db.analytics.labs.semantic.projection.TransitionResolver.ModelWait;
 import com.scalar.db.analytics.labs.semantic.storage.JdbcStore;
 import com.scalar.db.analytics.labs.semantic.storage.StoreTransaction;
+import com.scalar.db.analytics.labs.semantic.translation.Translator;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
@@ -163,6 +167,7 @@ final class BuildRunner {
         case BuildTask.Work.PolicyEvaluation evaluation -> evaluate(task, evaluation.fact());
         case BuildTask.Work.PolicyReEvaluation ignored -> reEvaluate(task);
         case BuildTask.Work.GeneratorRun run -> generate(task, run.generator());
+        case BuildTask.Work.Translation translation -> translate(task, translation.language());
       };
     } catch (RuntimeException e) {
       var reason = Objects.requireNonNullElse(e.getMessage(), e.getClass().getName());
@@ -556,6 +561,74 @@ final class BuildRunner {
         task,
         new BuildTask.Status.Succeeded(
             new BuildTask.Result.Generated(version, commit, output.missingInputs())));
+  }
+
+  // A translation
+
+  /**
+   * Translates the text of the task's trigger records from the recording language into the task's
+   * language, one model call per record, and keeps the translations outside the log. A record
+   * already translated by then is not translated again, and nothing is translated into a language
+   * the domain no longer declares. An unavailable model, or an answer that does not translate
+   * exactly the texts given, fails the task, which can be resumed; the translations made for the
+   * other records are kept, so a resume calls the model only for the records still missing one.
+   */
+  private BuildTask translate(BuildTask task, String language) {
+    var model = environment.languageModel();
+    var version = Translator.version(model);
+    var texts =
+        store.read(
+            transaction -> {
+              var pending = new LinkedHashMap<String, Map<String, String>>();
+              if (!languages.declares(language) || language.equals(languages.primary())) {
+                return pending;
+              }
+              var projection = new Projection(domain, transaction.projectionSource(domain));
+              var translated = transaction.translations(domain, language, task.triggers()).keySet();
+              for (var logRecord : task.triggers()) {
+                if (!translated.contains(logRecord)) {
+                  var text = Translations.textOf(transaction, domain, projection, logRecord);
+                  if (!text.isEmpty()) {
+                    pending.put(logRecord, text);
+                  }
+                }
+              }
+              return pending;
+            });
+    var translations = new ArrayList<Translation>();
+    var failures = new ArrayList<String>();
+    texts.forEach(
+        (logRecord, text) -> {
+          try {
+            translations.add(
+                new Translation(
+                    logRecord,
+                    language,
+                    Translator.read(
+                        answerObject(
+                            model.complete(
+                                Translator.INSTRUCTIONS,
+                                Translator.input(languages.primary(), language, text))),
+                        text),
+                    version));
+          } catch (LanguageModelException e) {
+            failures.add(logRecord + ": " + e.getMessage());
+          }
+        });
+    // The translations made are kept even when others failed, so a resume translates only the
+    // records still missing one.
+    return store.write(
+        transaction -> {
+          translations.forEach(translation -> transaction.insertTranslation(domain, translation));
+          return finish(
+              transaction,
+              task,
+              failures.isEmpty()
+                  ? new BuildTask.Status.Succeeded(
+                      new BuildTask.Result.Translated(
+                          version, translations.stream().map(Translation::logRecord).toList()))
+                  : new BuildTask.Status.Failed("Not translated: " + String.join("; ", failures)));
+        });
   }
 
   // Task state

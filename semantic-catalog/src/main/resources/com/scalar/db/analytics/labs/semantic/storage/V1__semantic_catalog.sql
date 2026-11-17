@@ -264,10 +264,11 @@ CREATE TABLE semantic_catalog.source_metadata_schemas (
 );
 
 -- Build tasks: one run of a Generator, an impact judgement, an evaluation by the policy evaluation
--- model, or a policy re-evaluation. Running one changes no Fact's state by itself, so it is not in
--- the log. task is a number increasing within the domain; kind and state are kept as columns for
--- build task reads; target is the Fact an evaluation task evaluates or the Generator a run runs, to
--- find the created task a new trigger joins; content holds the work, the triggers, and the result or failure reason.
+-- model, a policy re-evaluation, or a translation. Running one changes no Fact's state by itself, so
+-- it is not in the log. task is a number increasing within the domain; kind and state are kept as
+-- columns for build task reads; target is the Fact an evaluation task evaluates, the Generator a
+-- run runs, or the language a translation translates into, to find the created task a new trigger
+-- joins; content holds the work, the triggers, and the result or failure reason.
 CREATE TABLE semantic_catalog.build_tasks (
     domain text NOT NULL REFERENCES semantic_catalog.domains (domain),
     task bigint NOT NULL,
@@ -279,3 +280,17 @@ CREATE TABLE semantic_catalog.build_tasks (
 );
 
 CREATE INDEX build_tasks_state_kind ON semantic_catalog.build_tasks (domain, state, kind, target);
+
+-- Translations: the text of one log record said in one declared language other than the recording
+-- language, made by a translation build task on request. A translation changes no Fact's state and
+-- is never an input of a candidate, so it is not in the log. log_record is the URN of the log
+-- record whose text it translates; content holds the translated texts by their key in the record
+-- and the version of the translator that made them. A log record never changes, so neither does its
+-- translation.
+CREATE TABLE semantic_catalog.translations (
+    domain text NOT NULL REFERENCES semantic_catalog.domains (domain),
+    log_record text NOT NULL,
+    language text NOT NULL,
+    content jsonb NOT NULL,
+    PRIMARY KEY (domain, log_record, language)
+);

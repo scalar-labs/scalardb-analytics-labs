@@ -66,8 +66,6 @@ hold:
 
 - the semantics owners, and the Query Agents an administrator permits (see
   [Callers and authority](#callers-and-authority));
-- the language each principal prefers to read in, which the application passes on reads that name
-  none (see [`semantic-catalog/languages.md`](semantic-catalog/languages.md#agents-and-sessions));
 - whether value distributions (off by default) and usage feedback (on by default) reach models;
 - whether data checks run (on by default).
 
@@ -230,10 +228,11 @@ Agent Skill v1 covers two workflows:
 In both, only the owner's answer consents. The agent never answers for the owner, and stops at a
 consent when the user is not one (see [Callers and authority](#callers-and-authority)).
 
-**[Planned]** Both workflows follow the reader's language. When the user asks, in whatever words,
-to read in another language, the agent maps the request to one of the domain's declared languages
-and passes it on every later read of the session; the principal's preferred language changes only
-when the user asks for it to change from then on. The agent shows the translations the Semantic
+**[Planned]** Both workflows follow the reader's language. The agent knows the language the user
+reads from the conversation, or from a request in whatever words; when it is one of the domain's
+declared languages other than the primary one, the agent passes it on every read whose text it
+shows the user, and otherwise reads originals (see
+[`semantic-catalog/languages.md`](semantic-catalog/languages.md#agents-and-sessions)). The agent shows the translations the Semantic
 Catalog returns and never translates knowledge itself, so a reader can always tell a translation
 from the wording that was judged, and writes its own explanations in the reader's language. What
 the user writes for the Semantic Catalog to record, such as a correction's wording or usage

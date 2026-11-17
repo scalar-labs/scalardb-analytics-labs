@@ -15,15 +15,16 @@ two kinds:
 - **Names** of business terms are knowledge in each language. A term has its own name in each
   declared language, and each name is a Fact the deciding party confirms.
 - **Descriptions**, every other text, are to be written in the domain's **recording language**,
-  its primary language, which is fixed when the domain is created. **[Planned]** Readers of other
-  declared languages read a **translation**, which is derived for display and is not knowledge.
+  its primary language, which is fixed when the domain is created. Readers of other declared
+  languages read a **translation**, made only when one is asked for, which is derived for display
+  and is not knowledge.
 
 Every description in the log is to be in the recording language, whoever writes it.
 
 Generators and the policy evaluation model write in the recording language. **[Planned]** So do the
 Semantic Catalog's own deterministic writers, and an agent translates what a person writes into it
-before submitting. A person reads in the language their principal prefers, and an agent session can
-switch it. A Query Agent reasons on originals.
+before submitting. **[Planned]** An agent that knows its user reads another declared language names
+that language on the reads whose text it shows; without one, a read returns originals only. A Query Agent reasons on originals.
 
 The split rests on what the Semantic Catalog guarantees: that meaning is right. A translation says
 the same meaning in other words, so recording it as a Fact would make the deciding party judge
@@ -43,7 +44,7 @@ them primary. The declaration lives in the workspace configuration (see
 [`../application.md`](../application.md#workspace)) and decides:
 
 - for which languages a business term's name is missing knowledge;
-- **[Planned]** into which languages text is translated;
+- into which languages text can be translated, when a translation is asked for;
 - **[Planned]** which languages a read can ask for;
 - in which language every description is to be written: the primary one, the domain's
   recording language.
@@ -150,38 +151,57 @@ is recorded as it is; keeping to the recording language is the writer's part.
 
 ## Translations
 
-**[Planned]** This section describes design that is not implemented yet.
+A **translation** says an original's text in another declared language. Most readers of a domain
+read its primary language, even when the domain declares others, so nothing is translated when text
+is recorded: a translation is made only when a reader of another declared language asks for one.
 
-A **translation** says an original's text in another declared language. A commit that records text,
-in a Fact's value, an evaluation's reason or review material, an answer's wording, or usage
-feedback, creates a translation build task (see
-[`construction.md`](construction.md#build-tasks)). The task translates each such text from the
-recording language into every other declared language, through the same language-model adapter as
-Generators (see [`generators.md`](generators.md#reaching-a-language-model)), and keeps the result
-outside the log, keyed by the record that holds the text and the target language, with the model
-version that made it. Adding a declared language creates translation tasks for the text already recorded. A
-failed translation task is resumed like any other.
+A request names the records whose text is to be translated, such as the Facts a read returns, and
+the language to translate into (see [`public-api.md`](public-api.md#requesting-translations)). A
+record's text is what it holds in the recording language: a Fact's value when its predicate's value
+is a description, a Fact Address's applicability scope description and free-description predicate
+definition, an evaluation's reason and review material, an answer's or a conflict resolution's
+wording, a user policy version's reason, and usage feedback's content and context summary. Records
+already translated into the language, and records without such text, are left out. The others become
+triggers of the language's `created` translation build task, created when there is none (see
+[`construction.md`](construction.md#build-tasks)), so several requests are translated in one run.
+A request in the recording language asks for nothing, because its text is the original.
+
+A build run translates each triggering record's text from the recording language into the task's
+language, one model call per record, through the same language-model adapter as Generators (see
+[`generators.md`](generators.md#reaching-a-language-model)). It keeps the result outside the log,
+keyed by the log record that holds the text and the language, with the version of the translator
+that made it: the model and the instructions. A log record never changes, so neither does its
+translation. A record translated in the meantime is not translated again, and nothing is translated
+into a language the domain no longer declares. A failed translation task, such as one whose model
+left a text out, is resumed like any other.
 
 A translation changes no Fact's state. It is never evaluated or reviewed, and never a dependency or
 an input read of a candidate: Generators and the policy evaluation model read originals. Business
-term names are not translated, because a name in another language is a Fact of its own.
+term names are not translated, because a name in another language is a Fact of its own; closed
+values, references, expression values, and observed documents are not descriptions in the recording
+language and are not translated either. Names inside a structured value, such as a hierarchy's
+level names, are not translated, because other values, such as a Measure's default time
+granularity, refer to a level by its name. A Fact Revision names the text of the Fact Event that
+produced it, such as an evaluation's reason or an answer's wording; a Fact's value is asked for by
+the Fact.
 
-Translating in a build task rather than on read keeps reads free of model calls and side effects. A
-read therefore returns only translations that exist and reports the rest as pending.
+Translating in a build task rather than on read keeps reads free of model calls. **[Planned]** A
+read therefore returns only translations that exist and reports the rest as pending (see
+[Reading in a language](#reading-in-a-language)).
 
-A mistranslation cannot be caught by review. Every translation is therefore marked as one, and the
-original is always returned with it.
+A mistranslation cannot be caught by review. **[Planned]** Every translation a read returns is
+therefore marked as one, and the original is always returned with it.
 
 ## Reading in a language
 
 **[Planned]** This section describes design that is not implemented yet.
 
-A read takes, optionally, the language to read in, one of the domain's declared languages. Without
-one, the application supplies the language the using party's principal prefers, and without a
-preference the domain's primary language is used. Every text a read returns comes as its original,
-in the recording language, and, when the language read in is another, with its translation or a
-mark that the translation is pending. Reading the domain's languages returns the declared
-languages and the primary one. The exact contract is in [`public-api.md`](public-api.md#common-contract).
+A read takes, optionally, the language to read in, one of the domain's declared languages. Every
+text a read returns comes as its original, in the recording language. Without a language, or with
+the primary one, that is all it returns. When the language read in is another, each text also comes
+with its translation or a mark that the translation is pending, and the read requests the
+translations that are missing, so a later read returns them once a build run has made them.
+Reading the domain's languages returns the declared languages and the primary one. The exact contract is in [`public-api.md`](public-api.md#common-contract).
 
 Review material is written in the recording language like other generated text, so a deciding
 party who reads another language reviews it as a translation, with the original beside it (see
@@ -191,11 +211,11 @@ party who reads another language reviews it as a translation, with the original 
 
 **[Planned]** This section describes design that is not implemented yet.
 
-The application keeps each principal's preferred language and fills it in on reads that name none.
-An agent working with a person, in review or in answering a question, follows the language the
-person asks for in whatever words: it maps the request to a declared language and passes it on
-every later read of the session, and changes the principal's preference only when asked to change
-it from then on. It shows the Semantic Catalog's translations and never translates knowledge
+An agent working with a person, in review or in answering a question, knows the language the person
+reads from the conversation, or from a request in whatever words. When that language is declared
+and is not the domain's primary language, it passes it on every read whose text it shows the person;
+otherwise, and on reads it only reasons on, it names none and reads originals. No preferred
+language is kept for a principal, because the agent decides the language. It shows the Semantic Catalog's translations and never translates knowledge
 itself, so a reader can always tell a translation from the wording that was judged. Its own
 explanations it writes in the reader's language. What the person writes for the Semantic Catalog to
 record, such as a correction's wording or usage feedback, it translates into the recording language

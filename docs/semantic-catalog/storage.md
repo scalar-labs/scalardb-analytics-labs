@@ -49,8 +49,8 @@ transaction read from the store, never state cached in the process, so a retry c
 assumptions.
 
 Operations that write no commit detect collisions on the rows they write. These are a
-derived-record-only observation, a review presentation, a resume, and a build task finishing without
-candidates. Build task and review presentation numbers are also one past the last number in the
+derived-record-only observation, a review presentation, a resume, a translation request, and a
+build task finishing without candidates or with translations. Build task and review presentation numbers are also one past the last number in the
 snapshot and are unique by primary key. State changes and added triggers on a build task update the
 same `build_tasks` row, so overlapping ones also collide and retry. Registering table metadata,
 whether it records an observation or only a derived record, updates the latest received version on
@@ -198,9 +198,10 @@ Records kept outside the log:
 | `review_presentation_targets` | Domain, review presentation, Fact | Nothing more |
 | `derived_records` | Domain, Physical Catalog table identifier, table metadata version | Table metadata, completeness, read time, retrieval information, content digest, digest of the source metadata schema |
 | `source_metadata_schemas` | Domain, schema digest | Connector name, the JSON Schema |
+| `translations` | Domain, log record, language | The translated texts by their key in the record, the translator version |
 | `call_records` | Domain, call identifier | Operation kind, input, output, time recorded |
 
-`build_tasks` is indexed on state, kind, and target (the evaluated Fact or the Generator of a run), for build task reads and for finding the `created` task a new trigger joins. `review_presentation_targets` finds
+`build_tasks` is indexed on state, kind, and target (the evaluated Fact, the Generator of a run, or the language of a translation), for build task reads and for finding the `created` task a new trigger joins. `review_presentation_targets` finds
 earlier presentations per Fact for the review list. `call_records` keeps the input itself and
 compares it directly to detect a reused identifier with different input.
 

@@ -81,8 +81,8 @@ consent. A confirmed Fact is adopted knowledge, not proven knowledge. See
 
 One catalog serves readers of several languages. A domain declares its languages; a business
 term's name is knowledge in each of them, while every other text is written in the domain's
-recording language, its primary language, which never changes. **[Planned]** Such text reaches
-readers of other languages as an unreviewed translation. See
+recording language, its primary language, which never changes. Such text reaches readers of other
+languages as an unreviewed translation, made only when one is asked for. See
 [`semantic-catalog/languages.md`](semantic-catalog/languages.md).
 
 ## Responsibilities and boundaries

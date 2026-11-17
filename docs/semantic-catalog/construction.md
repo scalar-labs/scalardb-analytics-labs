@@ -45,8 +45,8 @@ registering an observation records a new Input Observation.
 
 A **build task** tracks one Generator run, one impact judgement, one evaluation by the policy
 evaluation model (see [Choosing the confirmation path](#choosing-the-confirmation-path)), one
-re-evaluation after a user policy change, or **[Planned]** one translation (see
-[`languages.md`](languages.md#translations)), with its trigger, inputs, and result.
+re-evaluation after a user policy change, or one translation of requested records' text into one
+language (see [`languages.md`](languages.md#translations)), with its trigger, inputs, and result.
 
 | State | Meaning | Next |
 | --- | --- | --- |
@@ -56,13 +56,15 @@ re-evaluation after a user policy change, or **[Planned]** one translation (see
 | `failed` | Failed, with its reason | `created`, by resuming |
 
 A build task records its kind, its triggers (log records), the Fact an evaluation evaluates, the
-Generator a run runs, and the observation judged with the Facts selected for re-examination for an
+Generator a run runs, the language a translation translates into, and the observation judged with the Facts selected for re-examination for an
 impact judgement. The versions of the inputs a Generator read are recorded on the acceptances and
 retirement proposals it produced. Its result holds the commits it wrote, the
 model version of an evaluation, the policy version a re-evaluation ran under, the missing inputs
-when there was no candidate, and any duplicate-check matches with the original values.
+when there was no candidate, any duplicate-check matches with the original values, and the
+translator version and translated records of a translation. A translation's triggers are the log
+records whose text it translates.
 **[Planned]** Impact judgements are not implemented yet; Generator runs, evaluations by the policy
-evaluation model, and policy re-evaluations are. A Generator run records the Generator's version and
+evaluation model, policy re-evaluations, and translations are. A Generator run records the Generator's version and
 the inputs a target lacked in its result, and the run's commit, if it wrote one.
 
 No Generator suspends to wait. An answer or new input creates a new build task.
@@ -74,7 +76,8 @@ in progress, blocked, or awaiting judgement is derived: in progress means some t
 non-empty.
 
 When a new trigger arrives for work that already has a `created` task of the same kind, such as a
-Generator, the Fact an evaluation evaluates, or the domain's re-evaluation, the trigger is added to
+Generator, the Fact an evaluation evaluates, the domain's re-evaluation, or the language of a
+translation, the trigger is added to
 that task instead of creating another, so several reports of one change do not repeat a run. A task
 that has started running takes no more triggers, because the run has not read the new input.
 **[Planned]** Each new observation gets its own impact judgement. Every acceptance references the
@@ -397,6 +400,8 @@ No operation sets the selected Fact directly. Selection changes only as the rule
 | Set a user policy version | Policy version | None | A policy re-evaluation |
 | Re-evaluate the policy (inside a build task) | Evaluations, machine-judgement confirmations, cascades | None | Evaluations left undecided; Generators that read newly confirmed predicates |
 | Resume a build task | Nothing in the log | The task is not `failed` | None; the task reruns on the latest state |
+| Request translations | Nothing in the log | The language is not declared, or a record is unknown; a request in the recording language, or for records already translated or without translatable text, creates nothing | A translation into the language |
+| Translate (inside a build task) | Nothing in the log; translations outside it | None | None |
 
 **[Planned]** Whenever replacement, a conflict resolution, or a retirement changes the selected
 Fact, build tasks are created for the Generators of Facts that depended on the Fact no longer
@@ -408,7 +413,7 @@ Everything one operation writes, in the log and outside it, is written in one tr
 includes operations that write no commit, such as a derived-record-only observation, a review
 presentation, a build task finishing without candidates, and a resume. A stopped process therefore
 never leaves outside records disagreeing with commits.
-**[Planned]** Translations are kept outside the log too, because they change no Fact's state either.
+Translations are kept outside the log too, because they change no Fact's state either.
 
 ## Following input changes
 

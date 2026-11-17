@@ -16,6 +16,7 @@ import com.scalar.db.analytics.labs.semantic.model.Ref;
 import com.scalar.db.analytics.labs.semantic.model.Review;
 import com.scalar.db.analytics.labs.semantic.model.ReviewPresentation;
 import com.scalar.db.analytics.labs.semantic.model.SemanticCatalogException;
+import com.scalar.db.analytics.labs.semantic.model.Translation;
 import com.scalar.db.analytics.labs.semantic.model.Urns;
 import com.scalar.db.analytics.labs.semantic.model.UsageFeedback;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.AnswerType;
@@ -35,9 +36,12 @@ import com.scalar.db.analytics.labs.semantic.storage.JdbcStore;
 import com.scalar.db.analytics.labs.semantic.storage.StoreTransaction;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
@@ -261,7 +265,7 @@ public final class SemanticCatalogStore implements AutoCloseable {
       Projection projection,
       List<PositionedRecord> records,
       TransitionResolver.Outcome outcome,
-      java.util.Map<Integer, String> urns,
+      Map<Integer, String> urns,
       String triggerWithoutCommit) {
     var moved =
         new Transitions(
@@ -1020,6 +1024,70 @@ public final class SemanticCatalogStore implements AutoCloseable {
         transaction -> {
           languages(transaction, domain);
           return transaction.buildTasks(domain);
+        });
+  }
+
+  // Translations
+
+  /**
+   * Requests translations of some records' text into a declared language other than the recording
+   * language, outside the log (see {@code docs/semantic-catalog/languages.md}, "Translations"). A
+   * record is named by its URN: a Fact, a Fact Address, a Fact Revision, an Input Observation, or a
+   * log record. Records already translated into the language and records with no translatable text
+   * are left out; the others become triggers of the language's created translation task, which a
+   * build run translates. A request in the recording language requests nothing.
+   *
+   * @throws SemanticCatalogException when the domain or a record does not exist, or the domain does
+   *     not declare the language
+   */
+  public TranslationRequest requestTranslations(
+      String domain, String language, List<String> records) {
+    return store.write(
+        transaction ->
+            Translations.request(
+                transaction, domain, languages(transaction, domain), language, records));
+  }
+
+  /**
+   * The outcome of a translation request.
+   *
+   * @param task the translation task the request created or joined; absent when nothing was left to
+   *     translate
+   * @param pending the log records the task is to translate, by the URN each was requested by
+   */
+  public record TranslationRequest(OptionalLong task, Map<String, String> pending) {
+    public TranslationRequest {
+      pending = Collections.unmodifiableMap(new LinkedHashMap<>(pending));
+    }
+  }
+
+  /**
+   * The translations into a declared language of some records' text that exist, by the URN each
+   * record was named by, named as for {@link #requestTranslations}. Reading never translates.
+   *
+   * @throws SemanticCatalogException when the domain or a record does not exist, or the domain does
+   *     not declare the language
+   */
+  public Map<String, Translation> translations(
+      String domain, String language, List<String> records) {
+    return store.read(
+        transaction -> {
+          Translations.requireDeclared(languages(transaction, domain), language);
+          var projection = new Projection(domain, transaction.projectionSource(domain));
+          var byRecord = new LinkedHashMap<String, String>();
+          for (var urn : records) {
+            byRecord.put(urn, Translations.logRecordOf(transaction, domain, projection, urn));
+          }
+          var found = transaction.translations(domain, language, byRecord.values());
+          var result = new LinkedHashMap<String, Translation>();
+          byRecord.forEach(
+              (urn, logRecord) -> {
+                var translation = found.get(logRecord);
+                if (translation != null) {
+                  result.put(urn, translation);
+                }
+              });
+          return result;
         });
   }
 
