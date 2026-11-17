@@ -53,9 +53,29 @@ public final class LanguageModelPolicyEvaluation implements PolicyEvaluationMode
       exactly as it is written.
 
       Weigh the checks, their validation methods and bases, the premises, and what was read. \
-      Adopt only when they agree and nothing material is left to a guess. A business \
-      definition that only a name or an inference suggests, such as whether an amount \
-      includes tax, goes to the deciding party.
+      Most candidates rest on a generator's inference alone, because nothing deterministic \
+      bears on what a column or a row means; that alone is no reason to ask a person, or every \
+      meaning in the catalog would reach the deciding party, including what any reader would \
+      accept at a glance.
+
+      Adopt when the signals agree and nothing speaks against the value: the column and table \
+      names, the sample values and statistics read, the confirmed premises, and the documents \
+      all fit it, and a reader who saw them would accept it without asking anyone. This \
+      usually covers what a column or a row is, such as a column's meaning, value kind, unit, \
+      meaning of null, and time meaning, a table's row kind and which rows it holds, and the \
+      concept a column or a row stands for.
+
+      Send to the deciding party:
+      - A business definition that only a name or an inference suggests, such as whether an \
+      amount includes tax, which date a sale is posted on, or which rows a figure counts, \
+      unless a document states it and nothing else read contradicts it.
+      - A value that the signals do not agree on, such as a document that says one thing and \
+      a query or a column that does another, or a value the bases admit they guessed.
+      - A claim that records in different sources are the same objects, such as online \
+      customers matching store members through an identifier, unless a declaration states it. \
+      Values that happen to coincide across systems do not show that they name the same \
+      objects.
+      - The existence of a Measure, Dimension, or business term that no document defines.
 
       Answer with exactly one JSON object and nothing else:
       - To adopt: {"decision": "adopt", "reason": "<why the signals support it>"}

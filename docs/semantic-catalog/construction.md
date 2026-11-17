@@ -234,7 +234,12 @@ records why the judgement is fuzzy and why a separate model makes it.
 
 So under `auto`, a Field meaning on which the column name, sample values, and a registered glossary
 agree can be adopted without a person, while a business definition that only a name suggests, such
-as whether a sales amount includes tax, reaches the deciding party. Under `full-auto`, a confirmed
+as whether a sales amount includes tax, reaches the deciding party. A candidate resting on inference
+alone is not sent to the deciding party for that reason: what a column or a row is, such as its
+meaning, value kind, unit, row kind, or the concept it stands for, is adopted when the signals read
+agree and none speaks against it. Values the signals disagree on, a claim that records in different
+sources are the same objects without a declaration, and a Measure, Dimension, or business term no
+document defines also reach the deciding party. Under `full-auto`, a confirmed
 candidate made from the selected Fact replaces it, and one made without it becomes a conflict for a
 person to resolve.
 
