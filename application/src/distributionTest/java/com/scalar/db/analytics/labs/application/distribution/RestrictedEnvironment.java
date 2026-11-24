@@ -447,7 +447,8 @@ sealed interface RestrictedEnvironment extends AutoCloseable {
       var sourceServers = pending(sources);
       storeServer.container().withNetwork(network).withNetworkAliases(STORE_ALIAS).start();
       sourceServers.forEach(
-          (name, server) -> server.container().withNetwork(network).withNetworkAliases(name));
+          (name, server) ->
+              server.container().withNetwork(network).withNetworkAliases(sourceAlias(name)));
       sourceServers.values().forEach(server -> server.container().start());
       var runtime =
           new GenericContainer<>(RUNTIME_IMAGE)
@@ -464,7 +465,14 @@ sealed interface RestrictedEnvironment extends AutoCloseable {
           (DatabaseServer.PostgreSql)
               storeServer.reachedAt(STORE_ALIAS, storeServer.internalPort()),
           mapServers(
-              sourceServers, (name, server) -> server.reachedAt(name, server.internalPort())));
+              sourceServers,
+              (name, server) -> server.reachedAt(sourceAlias(name), server.internalPort())));
+    }
+
+    // A server's host name differs from its source name, so a check that output never contains
+    // the host is not defeated by output that names the source.
+    private static String sourceAlias(String name) {
+      return name + "-server";
     }
 
     @Override
