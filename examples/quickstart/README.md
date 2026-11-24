@@ -16,7 +16,7 @@ source grants the CLI a read-only account.
 
 - Java 25 or later, selected through `JAVA_HOME` or the `java` command on `PATH`
 - Docker with Docker Compose
-- What the repository build needs; see [Run a query](../../README.md#run-a-query)
+- What the repository build needs; see [Build prerequisites](../../DEVELOPMENT.md#build-prerequisites)
 
 Ports `15432`, `25432`, and `13306` must be free on `127.0.0.1`.
 
@@ -39,8 +39,10 @@ CLI=$(echo ../../application/build/install/scalardb-analytics-*/bin/scalardb-ana
 ```
 
 ```json
-{"schema":"scalardb-analytics/version","schemaVersion":"1","productVersion":"0.1.0-SNAPSHOT"}
+{"schema":"scalardb-analytics/version","schemaVersion":"1","productVersion":"2026.11.24+3.gabc1234"}
 ```
+
+The version comes from the nearest release tag; see [Versions](../../README.md#versions).
 
 To use the archive from `./gradlew distTar` instead, unpack it anywhere and set `CLI` to its
 `bin/scalardb-analytics`.

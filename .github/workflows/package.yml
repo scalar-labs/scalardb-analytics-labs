@@ -1,0 +1,131 @@
+name: Package
+
+# Builds the distribution archive of every platform, keeps it as a workflow
+# artifact, and publishes it as a GitHub Release when a `v<version>` tag is
+# pushed, with the version's section of CHANGELOG.md as its notes. The build
+# takes the product version from that tag.
+#
+# The build reads private inputs, so the repository must define these secrets:
+#   PRIVATE_REPOSITORY_TOKEN  reads the upstream/scalardb-analytics submodule
+#                             and the scalardb-analytics-connectors releases
+#   GPR_USERNAME, GPR_PASSWORD  read the ScalarDB SQL package registry
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  # The Testcontainers-based checks and distribution tests need Docker, which
+  # the Linux runners provide.
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux_amd64
+            runner: ubuntu-24.04
+          - platform: linux_arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # The product version comes from the nearest release tag.
+          fetch-depth: 0
+          submodules: true
+          token: ${{ secrets.PRIVATE_REPOSITORY_TOKEN }}
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+      - name: Check
+        env:
+          GITHUB_TOKEN: ${{ secrets.PRIVATE_REPOSITORY_TOKEN }}
+          GPR_USERNAME: ${{ secrets.GPR_USERNAME }}
+          GPR_PASSWORD: ${{ secrets.GPR_PASSWORD }}
+        run: ./gradlew check distSmokeTest queryAcceptanceTest
+      - name: Build archive
+        env:
+          GITHUB_TOKEN: ${{ secrets.PRIVATE_REPOSITORY_TOKEN }}
+          GPR_USERNAME: ${{ secrets.GPR_USERNAME }}
+          GPR_PASSWORD: ${{ secrets.GPR_PASSWORD }}
+        run: ./gradlew distTar
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: distribution-${{ matrix.platform }}
+          path: application/build/distributions/*-${{ matrix.platform }}.tar.gz
+          if-no-files-found: error
+
+  # macOS runners have no Docker, so this job builds the archive without
+  # running the Testcontainers-based checks and distribution tests.
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # The product version comes from the nearest release tag.
+          fetch-depth: 0
+          submodules: true
+          token: ${{ secrets.PRIVATE_REPOSITORY_TOKEN }}
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+      - name: Build archive
+        env:
+          GITHUB_TOKEN: ${{ secrets.PRIVATE_REPOSITORY_TOKEN }}
+          GPR_USERNAME: ${{ secrets.GPR_USERNAME }}
+          GPR_PASSWORD: ${{ secrets.GPR_PASSWORD }}
+        run: ./gradlew distTar
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: distribution-osx_arm64
+          path: application/build/distributions/*-osx_arm64.tar.gz
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, macos]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Take the release notes from the changelog
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          awk -v heading="## [$version]" '
+            index($0, "## [") == 1 { if (found) exit; found = index($0, heading) == 1; next }
+            index($0, "[") == 1 && found && /^\[[^]]+\]: / { next }
+            found { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
+            echo "CHANGELOG.md has no section for $version" >&2
+            exit 1
+          fi
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: distribution-*
+          path: dist
+          merge-multiple: true
+      - name: Check the archives carry the tag's version
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          for platform in osx_arm64 linux_amd64 linux_arm64; do
+            archive="dist/scalardb-analytics-$version-$platform.tar.gz"
+            if [ ! -f "$archive" ]; then
+              echo "missing $archive; built: $(ls dist)" >&2
+              exit 1
+            fi
+          done
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/*.tar.gz --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"

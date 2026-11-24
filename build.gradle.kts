@@ -13,7 +13,41 @@ plugins {
 }
 
 group = "com.scalar-labs"
-version = providers.fileContents(layout.projectDirectory.file("VERSION")).asText.get().trim()
+
+// The product version comes from the nearest release tag, `v<YYYY.M.D>`. A build of the tagged
+// commit has the tag's version. A later commit appends the commit count and abbreviated hash, and
+// `dirty` for uncommitted changes, as semver build metadata, so it never orders before the release
+// it follows. Without a release tag the version is 0.0.0, and outside a Git checkout it is
+// 0.0.0+unknown.
+fun productVersion(): String {
+    val describe = providers.exec {
+        commandLine(
+            // Without optional locks, checking for uncommitted changes never takes the index
+            // lock, so the build does not collide with a concurrent Git command.
+            "git", "--no-optional-locks", "-C", layout.projectDirectory.asFile.absolutePath,
+            "describe", "--tags", "--match", "v[0-9]*", "--dirty", "--always",
+        )
+        isIgnoreExitValue = true
+    }
+    if (describe.result.get().exitValue != 0) return "0.0.0+unknown"
+    val output = describe.standardOutput.asText.get().trim()
+    Regex("""v(\d+\.\d+\.\d+)(?:-(\d+)-g([0-9a-f]+))?(-dirty)?""").matchEntire(output)?.let { tag ->
+        val (release, count, hash, dirty) = tag.destructured
+        val metadata = listOfNotNull(
+            count.takeIf { it.isNotEmpty() },
+            hash.takeIf { it.isNotEmpty() }?.let { "g$it" },
+            dirty.takeIf { it.isNotEmpty() }?.let { "dirty" },
+        )
+        return if (metadata.isEmpty()) release else release + "+" + metadata.joinToString(".")
+    }
+    Regex("""([0-9a-f]+)(-dirty)?""").matchEntire(output)?.let { untagged ->
+        val (hash, dirty) = untagged.destructured
+        return "0.0.0+g$hash" + if (dirty.isNotEmpty()) ".dirty" else ""
+    }
+    throw GradleException("Cannot derive the product version from `git describe` output: $output")
+}
+
+version = productVersion()
 
 val checkJava = tasks.register("checkJava") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP

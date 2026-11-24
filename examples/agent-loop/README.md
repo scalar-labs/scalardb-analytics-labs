@@ -44,7 +44,7 @@ source grants the CLI a read-only account.
 
 - Java 25 or later, selected through `JAVA_HOME` or the `java` command on `PATH`
 - Docker with Docker Compose
-- What the repository build needs; see [Run a query](../../README.md#run-a-query)
+- What the repository build needs; see [Build prerequisites](../../DEVELOPMENT.md#build-prerequisites)
 - A signed-in [Claude Code](https://claude.com/claude-code) (`claude`) on `PATH`. The catalog uses
   it as its language model, and you run the agent in it. Check it with `claude -p "say ok"`.
 - `jq`, to edit the workspace configuration below
