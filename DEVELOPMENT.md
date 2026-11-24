@@ -118,11 +118,9 @@ versioned separately and pinned in [`gradle/libs.versions.toml`](gradle/libs.ver
 The [`Package`](.github/workflows/package.yml) workflow builds the distribution archive of every
 platform on pull requests and on `main`. The Linux jobs also run `check`, `distSmokeTest`, and
 `queryAcceptanceTest`; the macOS job only builds, because its runners have no Docker. The workflow
-needs these repository secrets:
-
-- `PRIVATE_REPOSITORY_TOKEN`: a token that can read the `upstream/scalardb-analytics` submodule and
-  the `scalar-labs/scalardb-analytics-connectors` releases
-- `GPR_USERNAME` and `GPR_PASSWORD`: credentials for the ScalarDB SQL package registry
+reads the `upstream/scalardb-analytics` submodule, the `scalar-labs/scalardb-analytics-connectors`
+releases, and the ScalarDB SQL package registry with the organization secret `CR_PAT`, which
+`scalar-labs/scalardb-analytics` uses for the same registry.
 
 ## Release
 
