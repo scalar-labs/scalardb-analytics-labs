@@ -10,6 +10,7 @@ import com.scalar.db.analytics.labs.semantic.model.LogPosition;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord.FactEvent;
 import com.scalar.db.analytics.labs.semantic.model.LogRecordJson;
+import com.scalar.db.analytics.labs.semantic.model.QueuedTranslation;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
 import com.scalar.db.analytics.labs.semantic.model.ReviewPresentation;
 import com.scalar.db.analytics.labs.semantic.model.Translation;
@@ -910,6 +911,63 @@ public final class StoreTransaction {
         .list()
         .forEach(translation -> translations.put(translation.logRecord(), translation));
     return translations;
+  }
+
+  /** Queues the text of some log records for translation into a language; a queued one is kept. */
+  public void enqueueTranslations(String domain, String language, Collection<String> logRecords) {
+    if (logRecords.isEmpty()) {
+      return;
+    }
+    jdbc.sql(
+            "INSERT INTO semantic_catalog.translation_queue (domain, log_record, language)"
+                + " SELECT :domain, r, :language FROM unnest(CAST(:records AS text[])) AS r"
+                + " ON CONFLICT DO NOTHING")
+        .param("domain", domain)
+        .param("language", language)
+        .param("records", array(logRecords))
+        .update();
+  }
+
+  /** Every queued translation of a domain, by language and then log record. */
+  public List<QueuedTranslation> queuedTranslations(String domain) {
+    return jdbc.sql(
+            "SELECT log_record, language, failure FROM semantic_catalog.translation_queue"
+                + " WHERE domain = ? ORDER BY language, log_record")
+        .params(domain)
+        .query(
+            (rs, row) ->
+                new QueuedTranslation(
+                    rs.getString("log_record"), rs.getString("language"), rs.getString("failure")))
+        .list();
+  }
+
+  /**
+   * Removes a queued translation, once made or no longer to be made.
+   *
+   * @return whether it was queued
+   */
+  public boolean dequeueTranslation(String domain, String logRecord, String language) {
+    return jdbc.sql(
+                "DELETE FROM semantic_catalog.translation_queue"
+                    + " WHERE domain = ? AND log_record = ? AND language = ?")
+            .params(domain, logRecord, language)
+            .update()
+        > 0;
+  }
+
+  /**
+   * Records why the last attempt at a queued translation failed; the translation stays queued.
+   *
+   * @return whether it was queued
+   */
+  public boolean failQueuedTranslation(
+      String domain, String logRecord, String language, String reason) {
+    return jdbc.sql(
+                "UPDATE semantic_catalog.translation_queue SET failure = ?"
+                    + " WHERE domain = ? AND log_record = ? AND language = ?")
+            .params(reason, domain, logRecord, language)
+            .update()
+        > 0;
   }
 
   // Reads for review

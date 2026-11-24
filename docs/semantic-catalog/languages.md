@@ -162,19 +162,27 @@ record's text is what it holds in the recording language: a Fact's value when it
 is a description, a Fact Address's applicability scope description and free-description predicate
 definition, an evaluation's reason and review material, an answer's or a conflict resolution's
 wording, a user policy version's reason, and usage feedback's content and context summary. Records
-already translated into the language, and records without such text, are left out. The others become
-triggers of the language's `created` translation build task, created when there is none (see
-[`construction.md`](construction.md#build-tasks)), so several requests are translated in one run.
-A request in the recording language asks for nothing, because its text is the original.
+already translated into the language, and records without such text, are left out. The text of
+each of the others is queued for translation into the language, once however often it is
+requested. A request in the recording language asks for nothing, because its text is the original.
 
-A build run translates each triggering record's text from the recording language into the task's
-language, one model call per record, through the same language-model adapter as Generators (see
+The translation queue is not a build task, and translations do not run in a build run. A
+translation changes no Fact's state and writes nothing to the log, while a build task can take
+minutes, such as a Generator run, so a reader waiting for a translation would otherwise wait behind
+construction work it has nothing to do with. A **translation run** translates the queue under the
+domain's own translator lock, independent of the builder semaphore (see
+[`storage.md`](storage.md#writes-and-reads)), so it runs while a build run does. It translates each
+queued text from the recording language into the queued language, one model call per text, through
+the same language-model adapter as Generators (see
 [`generators.md`](generators.md#reaching-a-language-model)). It keeps the result outside the log,
 keyed by the log record that holds the text and the language, with the version of the translator
-that made it: the model and the instructions. A log record never changes, so neither does its
-translation. A record translated in the meantime is not translated again, and nothing is translated
-into a language the domain no longer declares. A failed translation task, such as one whose model
-left a text out, is resumed like any other.
+that made it: the model and the instructions, and removes the text from the queue. A log record
+never changes, so neither does its translation. A record translated in the meantime is not
+translated again, and nothing is translated into a language the domain no longer declares. A
+translation that fails, because the model is unavailable or its answer leaves a text out, stays
+queued with its reason, and the next run tries it again; a stopped run leaves its unfinished texts
+queued. A run returns once it has tried each queued text, including texts queued while it runs, and
+reports what it translated and what failed.
 
 A translation changes no Fact's state. It is never evaluated or reviewed, and never a dependency or
 an input read of a candidate: Generators and the policy evaluation model read originals. Business
@@ -186,9 +194,10 @@ granularity, refer to a level by its name. A Fact Revision names the text of the
 produced it, such as an evaluation's reason or an answer's wording; a Fact's value is asked for by
 the Fact.
 
-Translating in a build task rather than on read keeps reads free of model calls. A
+Translating in a translation run rather than on read keeps reads free of model calls. A
 read therefore returns only translations that exist and reports the rest as pending (see
-[Reading in a language](#reading-in-a-language)).
+[Reading in a language](#reading-in-a-language)); a caller that needs them runs the translations
+and reads again.
 
 A mistranslation cannot be caught by review. Every translation a read returns is
 therefore marked as one, and the original is always returned with it.
@@ -200,7 +209,7 @@ text a read returns comes as its original, in the recording language. Without a 
 the primary one, that is all it returns. When the language read in is another, the read returns
 its result unchanged and, beside it, each text with its translation or a mark that the translation
 is pending, named by the URN the result names its record by. It then requests the translations
-that are missing, so a later read returns them once a build run has made them. Keeping
+that are missing, so a later read returns them once a translation run has made them. Keeping
 translations beside the result rather than inside it leaves the result exactly what a read in the
 recording language returns, so nothing that composes a query or a Generator's input can take a
 translation for an original.
@@ -216,13 +225,17 @@ An agent working with a person, in review or in answering a question, knows the 
 reads from the conversation, or from a request in whatever words. When that language is declared
 and is not the domain's primary language, it passes it on every read whose text it shows the person;
 otherwise, and on reads it only reasons on, it names none and reads originals. No preferred
-language is kept for a principal, because the agent decides the language. It shows the Semantic Catalog's translations and never translates knowledge
-itself, so a reader can always tell a translation from the wording that was judged. Its own
+language is kept for a principal, because the agent decides the language. It shows each original with the Semantic Catalog's translation beside it and
+never translates knowledge itself, so a reader can always tell a translation from the wording that was judged. Its own
 explanations it writes in the reader's language. What the person writes for the Semantic Catalog to
 record, such as a correction's wording or usage feedback, it translates into the recording language
-before submitting it. When a text's translation is still pending, it tells the person the
-translation is not available yet and reads again after the translation task has run, showing the
-original only when the person asks for it.
+before submitting it. It never shows the person that a translation is pending: a person who
+reads another language sees only an AI session, which must read as a normal conversation in their
+language. Before showing a text whose translation is pending, it runs the translations, which the
+read already queued and which do not wait for build tasks, and reads again, so even the first
+answer shows the translation beside the original. Only when a translation cannot be made, such as
+when the model is unavailable, does it show the original with a short note that the translation
+could not be obtained.
 
 A Query Agent composes SQL from original text and requests translations only for text it shows the
 user, such as a definition it cites, so an unreviewed translation never shapes a query. How the

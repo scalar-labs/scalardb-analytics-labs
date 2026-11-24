@@ -70,12 +70,24 @@ It returns the `declared` languages and the `primary` one, the recording languag
    read returns its usual fields unchanged, plus `language`, `recordingLanguage`, and `texts`:
    for each URN in the result that holds text, its `originals` by key and either
    `"status": "translated"` with a `translation` (its `texts` under the same keys), or
-   `"status": "pending"`. Show the translation and say it is one; give the original when the user
-   asks for it. Write your own explanations in the user's language.
-5. **A pending text has no translation yet.** The read already requested it as a translation build
-   task (`translationTask`), which the build runs. Tell the user the translation is not available
-   yet and that it will be after the next build run, and read again then. Do not translate it
-   yourself, and show the original only when the user asks for it.
+   `"status": "pending"`. Show each original with its translation beside it, and say the
+   translation is one. Write your own explanations in the user's language.
+5. **Get pending translations before you answer.** A `pending` text has no translation yet; the
+   read already queued it. Never tell the user that a translation is pending or will come later.
+   Before you show the text, run
+
+   ```console
+   scalardb-analytics semantic translate --workspace <dir>
+   ```
+
+   which translates every queued text and returns once each has been tried. It runs apart from
+   build tasks, so it does not wait for a running build, and it waits only while another process
+   translates. Then read again with `--language` and show the texts as step 4 says. Its
+   `scalardb-analytics/translation-run` output lists the `translated` texts and the `failed` ones
+   by `logRecord`, the same URN a text's `logRecord` names. Only for a text that failed, show the
+   original with a short note in the user's language that its translation could not be obtained;
+   do the same for every pending text when `semantic translate` itself fails, such as with
+   `LANGUAGE_MODEL_NOT_CONFIGURED`. Do not translate it yourself.
 6. **Submit what the user writes in the recording language.** An answer's or a conflict choice's
    wording, a correction, and usage feedback are recorded as text. Translate what the user wrote
    into the recording language before you submit it, keeping its meaning exactly, and tell the user

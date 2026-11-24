@@ -88,9 +88,6 @@ final class ReadCommands {
                 output.put("language", translations.language());
                 output.put("recordingLanguage", translations.recordingLanguage());
                 output.put("texts", texts(translations.texts()));
-                translations
-                    .translationTask()
-                    .ifPresent(task -> output.put("translationTask", task));
               });
       return output;
     }

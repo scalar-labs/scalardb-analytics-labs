@@ -49,8 +49,8 @@ transaction read from the store, never state cached in the process, so a retry c
 assumptions.
 
 Operations that write no commit detect collisions on the rows they write. These are a
-derived-record-only observation, a review presentation, a resume, a translation request, and a
-build task finishing without candidates or with translations. Build task and review presentation numbers are also one past the last number in the
+derived-record-only observation, a review presentation, a resume, a translation request, a
+translation made or failed, and a build task finishing without candidates. Build task and review presentation numbers are also one past the last number in the
 snapshot and are unique by primary key. State changes and added triggers on a build task update the
 same `build_tasks` row, so overlapping ones also collide and retry. Registering table metadata,
 whether it records an observation or only a derived record, updates the latest received version on
@@ -68,6 +68,14 @@ it is refused at once, while answers, reads, and other writes proceed. A lock fi
 only processes on one host, while the store may be reached from several; a runner row with a lease
 outlives a stopped process until the lease expires; and a row lock needs a transaction open for the
 whole run, which holds back vacuum in watching mode.
+
+A process running a domain's translations takes the domain's **translator lock**, a second
+session-level advisory lock held the same way, so translations run while a build run holds the
+builder semaphore. Its key is another integer the `domains` row issues; both keys come from one
+sequence, so no lock shares a key with another. A second process waits for the lock rather than
+being refused, because a caller runs translations to show their result and the first process is
+translating the same queue. Nothing needs resetting when a process stops: an unfinished translation
+is still queued.
 
 Running a build task never holds a transaction while a model or a construction query runs:
 
@@ -147,7 +155,7 @@ The log:
 
 | Table | Primary key | Holds |
 | --- | --- | --- |
-| `domains` | Domain | Creation time, recording language, builder semaphore key |
+| `domains` | Domain | Creation time, recording language, builder semaphore key, translator lock key |
 | `commits` | Domain, commit number | Time, kind of operation, author (the person or agent behind the call) |
 | `log_records` | Domain, commit number, order | Record kind, target Fact, target Input Resource, target Fact Address of a conflict resolution, content |
 
@@ -199,9 +207,10 @@ Records kept outside the log:
 | `derived_records` | Domain, Physical Catalog table identifier, table metadata version | Table metadata, completeness, read time, retrieval information, content digest, digest of the source metadata schema |
 | `source_metadata_schemas` | Domain, schema digest | Connector name, the JSON Schema |
 | `translations` | Domain, log record, language | The translated texts by their key in the record, the translator version |
+| `translation_queue` | Domain, log record, language | The reason the last attempt failed, if one did |
 | `call_records` | Domain, call identifier | Operation kind, input, output, time recorded |
 
-`build_tasks` is indexed on state, kind, and target (the evaluated Fact, the Generator of a run, or the language of a translation), for build task reads and for finding the `created` task a new trigger joins. `review_presentation_targets` finds
+`build_tasks` is indexed on state, kind, and target (the evaluated Fact or the Generator of a run), for build task reads and for finding the `created` task a new trigger joins. `review_presentation_targets` finds
 earlier presentations per Fact for the review list. `call_records` keeps the input itself and
 compares it directly to detect a reused identifier with different input.
 

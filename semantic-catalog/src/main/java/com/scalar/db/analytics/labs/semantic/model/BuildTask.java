@@ -33,8 +33,7 @@ public record BuildTask(long number, Work work, List<String> triggers, Status st
   public enum Kind {
     POLICY_EVALUATION("policy-evaluation"),
     POLICY_RE_EVALUATION("policy-re-evaluation"),
-    GENERATOR_RUN("generator-run"),
-    TRANSLATION("translation");
+    GENERATOR_RUN("generator-run");
 
     private final String value;
 
@@ -62,8 +61,7 @@ public record BuildTask(long number, Work work, List<String> triggers, Status st
   @JsonSubTypes({
     @JsonSubTypes.Type(value = Work.PolicyEvaluation.class, name = "policy-evaluation"),
     @JsonSubTypes.Type(value = Work.PolicyReEvaluation.class, name = "policy-re-evaluation"),
-    @JsonSubTypes.Type(value = Work.GeneratorRun.class, name = "generator-run"),
-    @JsonSubTypes.Type(value = Work.Translation.class, name = "translation")
+    @JsonSubTypes.Type(value = Work.GeneratorRun.class, name = "generator-run")
   })
   public sealed interface Work {
     Kind kind();
@@ -116,26 +114,6 @@ public record BuildTask(long number, Work work, List<String> triggers, Status st
       @Override
       public String target() {
         return generator;
-      }
-    }
-
-    /**
-     * A translation of the text of the log records its triggers name into one declared language
-     * other than the recording language, requested by a reader of that language (see {@code
-     * docs/semantic-catalog/languages.md}, "Translations"). A created translation into the same
-     * language takes every new request, so one run translates them together.
-     *
-     * @param language the language translated into
-     */
-    record Translation(String language) implements Work {
-      @Override
-      public Kind kind() {
-        return Kind.TRANSLATION;
-      }
-
-      @Override
-      public String target() {
-        return language;
       }
     }
   }
@@ -211,8 +189,7 @@ public record BuildTask(long number, Work work, List<String> triggers, Status st
     @JsonSubTypes.Type(value = Result.NoLongerAwaiting.class, name = "no-longer-awaiting"),
     @JsonSubTypes.Type(value = Result.Superseded.class, name = "superseded"),
     @JsonSubTypes.Type(value = Result.ReEvaluated.class, name = "re-evaluated"),
-    @JsonSubTypes.Type(value = Result.Generated.class, name = "generated"),
-    @JsonSubTypes.Type(value = Result.Translated.class, name = "translated")
+    @JsonSubTypes.Type(value = Result.Generated.class, name = "generated")
   })
   public sealed interface Result {
     /**
@@ -275,19 +252,6 @@ public record BuildTask(long number, Work work, List<String> triggers, Status st
         implements Result {
       public Generated {
         missingInputs = List.copyOf(missingInputs);
-      }
-    }
-
-    /**
-     * The text of the triggering log records was translated and kept outside the log.
-     *
-     * @param translator the version of the translator that made the translations
-     * @param translated the log records translated, each once; a record already translated into the
-     *     language by the time the task ran is not translated again
-     */
-    record Translated(JsonNode translator, List<String> translated) implements Result {
-      public Translated {
-        translated = List.copyOf(translated);
       }
     }
   }

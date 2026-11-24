@@ -6,11 +6,13 @@ package com.scalar.db.analytics.labs.semantic;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.scalar.db.analytics.labs.semantic.llm.LanguageModel;
 import com.scalar.db.analytics.labs.semantic.model.BuildTask;
 import com.scalar.db.analytics.labs.semantic.model.Document;
 import com.scalar.db.analytics.labs.semantic.model.Languages;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
 import com.scalar.db.analytics.labs.semantic.model.LogRecordJson;
+import com.scalar.db.analytics.labs.semantic.model.QueuedTranslation;
 import com.scalar.db.analytics.labs.semantic.model.RecordingLanguageChangedException;
 import com.scalar.db.analytics.labs.semantic.model.Ref;
 import com.scalar.db.analytics.labs.semantic.model.Review;
@@ -1046,8 +1048,8 @@ public final class SemanticCatalogStore implements AutoCloseable {
    * language, outside the log (see {@code docs/semantic-catalog/languages.md}, "Translations"). A
    * record is named by its URN: a Fact, a Fact Address, a Fact Revision, an Input Observation, or a
    * log record. Records already translated into the language and records with no translatable text
-   * are left out; the others become triggers of the language's created translation task, which a
-   * build run translates. A request in the recording language requests nothing.
+   * are left out; the text of the others is queued, once however often it is requested, for {@link
+   * #runTranslations} to translate. A request in the recording language requests nothing.
    *
    * @throws SemanticCatalogException when the domain or a record does not exist, or the domain does
    *     not declare the language
@@ -1063,11 +1065,10 @@ public final class SemanticCatalogStore implements AutoCloseable {
   /**
    * The outcome of a translation request.
    *
-   * @param task the translation task the request created or joined; absent when nothing was left to
-   *     translate
-   * @param pending the log records the task is to translate, by the URN each was requested by
+   * @param pending the log records whose text is queued for translation, by the URN each was
+   *     requested by; empty when nothing was left to translate
    */
-  public record TranslationRequest(OptionalLong task, Map<String, String> pending) {
+  public record TranslationRequest(Map<String, String> pending) {
     public TranslationRequest {
       pending = Collections.unmodifiableMap(new LinkedHashMap<>(pending));
     }
@@ -1100,6 +1101,30 @@ public final class SemanticCatalogStore implements AutoCloseable {
                 }
               });
           return result;
+        });
+  }
+
+  /**
+   * Translates a domain's translation queue (see {@code docs/semantic-catalog/public-api.md},
+   * "Running translations"). It takes the domain's translator lock, waiting while another process
+   * holds it, and is independent of the builder semaphore and of build tasks. It tries each queued
+   * translation once, including those queued while it runs, one model call each, keeps each one
+   * made outside the log and removes it from the queue, and leaves a failed one queued with its
+   * reason. Queued translations with nothing left to translate are removed.
+   *
+   * @throws SemanticCatalogException when the domain does not exist or the store fails
+   */
+  public TranslationRun runTranslations(String domain, LanguageModel model) {
+    var declared = store.read(transaction -> languages(transaction, domain));
+    return new TranslationRunner(store, domain, declared, model).run();
+  }
+
+  /** A domain's queued translations, by language and then log record. */
+  public List<QueuedTranslation> translationQueue(String domain) {
+    return store.read(
+        transaction -> {
+          languages(transaction, domain);
+          return transaction.queuedTranslations(domain);
         });
   }
 
@@ -1151,9 +1176,9 @@ public final class SemanticCatalogStore implements AutoCloseable {
    * Reads the Catalog Snapshot of a domain at a point in a language (see {@code
    * docs/semantic-catalog/languages.md}, "Reading in a language"). The reader's result keeps its
    * original text. When the language is not the recording language, each text the result returns
-   * comes beside it with its translation or a pending mark, and the pending texts are then
-   * requested, which adds triggers to the language's translation task outside the log and calls no
-   * model. In the recording language this is the same as {@link #read(String, Point, Function)}.
+   * comes beside it with its translation or a pending mark, and the pending texts are then queued
+   * for translation outside the log, which calls no model. In the recording language this is the
+   * same as {@link #read(String, Point, Function)}.
    *
    * @throws SemanticCatalogException when the domain does not exist, does not declare the language,
    *     or the point names a commit not written yet
@@ -1170,20 +1195,17 @@ public final class SemanticCatalogStore implements AutoCloseable {
                   language.equals(languages.primary())
                       ? Map.<String, LanguageRead.Text>of()
                       : Translations.texts(transaction, domain, language, ReadTexts.of(result));
-              return new LanguageRead<>(
-                  result, languages.primary(), language, texts, OptionalLong.empty());
+              return new LanguageRead<>(result, languages.primary(), language, texts);
             });
     var pending =
         read.texts().entrySet().stream()
             .filter(entry -> entry.getValue() instanceof LanguageRead.Text.Pending)
             .map(Map.Entry::getKey)
             .toList();
-    if (pending.isEmpty()) {
-      return read;
+    if (!pending.isEmpty()) {
+      requestTranslations(domain, language, pending);
     }
-    var requested = requestTranslations(domain, language, pending);
-    return new LanguageRead<>(
-        read.result(), read.recordingLanguage(), language, read.texts(), requested.task());
+    return read;
   }
 
   private static <T> T readAt(

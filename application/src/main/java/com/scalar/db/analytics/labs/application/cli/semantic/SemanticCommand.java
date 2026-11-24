@@ -53,6 +53,7 @@ public final class SemanticCommand implements Runnable {
     command.addSubcommand("build", build);
     command.addSubcommand("tasks", new OperationCommands.TasksCommand(environment));
     command.addSubcommand("resume", new OperationCommands.ResumeCommand(environment));
+    command.addSubcommand("translate", new OperationCommands.TranslateCommand(environment));
     command.addSubcommand("read", new ReadCommands.ReadCommand(environment));
     command.addSubcommand("elements", new ReadCommands.ElementsCommand(environment));
     command.addSubcommand(

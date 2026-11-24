@@ -595,7 +595,7 @@ and a Physical Catalog reference never moves; a renamed table likewise becomes a
 The policy evaluation model (see
 [`construction.md`](construction.md#choosing-the-confirmation-path)) calls a language model through
 an **adapter**, the only part of the Semantic Catalog that knows how a model is reached.
-The implemented meaning-inference Generators and translation build tasks (see
+The implemented meaning-inference Generators and translation runs (see
 [`languages.md`](languages.md#translations)) call it the same way. **[Planned]** So will the
 other meaning-inference Generators, impact judgement, and the duplicate check. A
 caller passes a prompt and receives the model's answer; it never depends on a particular provider,

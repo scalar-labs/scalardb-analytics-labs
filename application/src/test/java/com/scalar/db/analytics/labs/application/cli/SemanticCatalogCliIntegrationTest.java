@@ -440,7 +440,7 @@ class SemanticCatalogCliIntegrationTest {
     Files.writeString(path, OBJECT_MAPPER.writeValueAsString(configuration));
     var originals = single(semantic("review"));
 
-    // Before the translation task runs, the texts come pending and the read requests them.
+    // Before a translation run, the texts come pending and the read queues them.
     var pending = single(semantic("review", "--language", "ja"));
 
     assertThat(pending.get("groups")).isEqualTo(originals.get("groups"));
@@ -451,14 +451,30 @@ class SemanticCatalogCliIntegrationTest {
     assertThat(text.get("status").textValue()).isEqualTo("pending");
     assertThat(text.get("originals").get("reviewMaterial.question").textValue())
         .isEqualTo("Is each row of orders one order placed?");
-    assertThat(pending.get("translationTask").longValue()).isPositive();
+    assertThat(pending.has("translationTask")).isFalse();
 
-    // After a build run, the same read returns each original beside its translation.
+    // A build run does not translate; a translation run does, and the same read then returns each
+    // original beside its translation.
     assertSuccessful(semantic("build"));
+    assertThat(
+            single(semantic("review", "--language", "ja"))
+                .get("texts")
+                .get(evaluation)
+                .get("status")
+                .textValue())
+        .isEqualTo("pending");
+    var run = single(semantic("translate"));
+    assertThat(run.get("schema").textValue()).isEqualTo("scalardb-analytics/translation-run");
+    assertThat(run.get("failed")).isEmpty();
+    assertThat(run.get("translated"))
+        .anySatisfy(
+            each -> {
+              assertThat(each.get("logRecord").textValue()).isEqualTo(evaluation);
+              assertThat(each.get("language").textValue()).isEqualTo("ja");
+            });
     var translated = single(semantic("review", "--language", "ja"));
 
     assertThat(translated.get("groups")).isEqualTo(originals.get("groups"));
-    assertThat(translated.has("translationTask")).isFalse();
     var said = translated.get("texts").get(evaluation);
     assertThat(said.get("status").textValue()).isEqualTo("translated");
     assertThat(said.get("originals").get("reviewMaterial.question").textValue())
@@ -471,7 +487,6 @@ class SemanticCatalogCliIntegrationTest {
     var tasks = single(semantic("tasks")).get("tasks").size();
     var recording = single(semantic("review", "--language", "en"));
     assertThat(recording.get("texts")).isEmpty();
-    assertThat(recording.has("translationTask")).isFalse();
     assertThat(originals.has("texts")).isFalse();
     assertThat(single(semantic("tasks")).get("tasks")).hasSize(tasks);
 

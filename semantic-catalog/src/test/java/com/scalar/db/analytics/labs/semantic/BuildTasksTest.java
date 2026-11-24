@@ -393,6 +393,51 @@ class BuildTasksTest extends StoreScenarioTest {
   }
 
   @Test
+  void translationsRunWhileABuildRunHoldsTheSemaphoreAndOtherTasksWait() throws Exception {
+    var s = scenario();
+    var c = s.begin();
+    var field = c.field(c.dataset("shop.public.items"), "shop.public.items.name");
+    var candidate = c.candidate(c.address(field, Vocabulary.MEANING), "商品の名前");
+    var meaning = s.write(c).urn(candidate);
+    var running = inferredRowKind(s, "shop.public.orders");
+    var waiting = inferredRowKind(s, "shop.public.customers");
+    var entered = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var blocking =
+        new StandIn(
+            subject -> {
+              entered.countDown();
+              try {
+                release.await(30, TimeUnit.SECONDS);
+              } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+              }
+              return new Decision.Adopt("agreed");
+            });
+    var build = CompletableFuture.supplyAsync(() -> drain(s, blocking));
+    assertThat(entered.await(30, TimeUnit.SECONDS)).isTrue();
+
+    // One evaluation task runs and holds the semaphore, the other waits as created; a translation
+    // run neither waits for them nor runs them.
+    store.requestTranslations(s.domain, "en", List.of(meaning));
+    var translated =
+        store.runTranslations(s.domain, new ScriptedModel().translating(TranslationTest.PREFIXING));
+    assertThat(translated.translated()).hasSize(1);
+    assertThat(store.translations(s.domain, "en", List.of(meaning))).containsOnlyKeys(meaning);
+    assertThat(store.translationQueue(s.domain)).isEmpty();
+    assertThat(
+            evaluations(store.buildTasks(s.domain)).stream()
+                .map(task -> task.status().state())
+                .toList())
+        .containsExactlyInAnyOrder(BuildTask.State.RUNNING, BuildTask.State.CREATED);
+
+    release.countDown();
+    build.get(30, TimeUnit.SECONDS);
+    assertThat(s.state(running.rowKind())).contains(FactState.CONFIRMED);
+    assertThat(s.state(waiting.rowKind())).contains(FactState.CONFIRMED);
+  }
+
+  @Test
   void aRunStartsByReturningAbandonedTasksToCreated() throws Exception {
     var s = scenario();
     var inferred = inferredRowKind(s, "shop.public.orders");

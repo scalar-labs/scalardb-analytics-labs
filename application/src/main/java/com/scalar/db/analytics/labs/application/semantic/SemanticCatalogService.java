@@ -15,6 +15,8 @@ import com.scalar.db.analytics.labs.semantic.FeedbackRegistration;
 import com.scalar.db.analytics.labs.semantic.LanguageRead;
 import com.scalar.db.analytics.labs.semantic.Point;
 import com.scalar.db.analytics.labs.semantic.SemanticCatalogStore;
+import com.scalar.db.analytics.labs.semantic.TranslationRun;
+import com.scalar.db.analytics.labs.semantic.llm.LanguageModel;
 import com.scalar.db.analytics.labs.semantic.model.BuildTask;
 import com.scalar.db.analytics.labs.semantic.model.Hierarchy;
 import com.scalar.db.analytics.labs.semantic.model.Knowledge;
@@ -35,7 +37,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.OptionalLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -95,14 +96,9 @@ public final class SemanticCatalogService {
    * @param recordingLanguage the language every original is written in
    * @param texts for each URN in the result that names a record with text, its originals with the
    *     translation or a pending mark; empty when the language read in is the recording language
-   * @param translationTask the translation task the read requested the pending texts in; absent
-   *     when it requested nothing
    */
   public record Translations(
-      String language,
-      String recordingLanguage,
-      Map<String, LanguageRead.Text> texts,
-      OptionalLong translationTask) {}
+      String language, String recordingLanguage, Map<String, LanguageRead.Text> texts) {}
 
   /** The point a caller names: a Catalog Snapshot URN of this domain, or the latest commit. */
   public Point point(@Nullable String catalogSnapshot) {
@@ -312,6 +308,27 @@ public final class SemanticCatalogService {
     return store(store -> store.resumeBuildTask(domain(), task));
   }
 
+  /**
+   * Translates the domain's translation queue with the language model the workspace configuration
+   * names (see {@code docs/semantic-catalog/languages.md}, "Translations"), waiting while another
+   * process translates it. It runs apart from build tasks, so a running build does not delay it.
+   *
+   * @throws ApplicationFailure when the workspace configuration names no language model
+   */
+  public TranslationRun translate() {
+    var settings =
+        workspace
+            .languageModelSettings()
+            .orElseThrow(
+                () ->
+                    new ApplicationFailure(
+                        "LANGUAGE_MODEL_NOT_CONFIGURED",
+                        "Translations need a language model; set semanticCatalog.languageModel in"
+                            + " the workspace configuration."));
+    var model = LanguageModel.open(settings);
+    return store(store -> store.runTranslations(domain(), model));
+  }
+
   /** Checks a user policy version the calling principal proposes, at the latest point. */
   public Review.PolicyCheck checkPolicy(Preset preset, boolean countsDeclaredUnenforced) {
     var proposed = new LogRecord.PolicyVersion(preset, countsDeclaredUnenforced, principal, "");
@@ -364,9 +381,7 @@ public final class SemanticCatalogService {
     return new Read<>(
         Objects.requireNonNull(catalogSnapshot.get()),
         read.result(),
-        Optional.of(
-            new Translations(
-                read.language(), read.recordingLanguage(), read.texts(), read.translationTask())));
+        Optional.of(new Translations(read.language(), read.recordingLanguage(), read.texts())));
   }
 
   /** Rejects a language the workspace configuration does not declare for the domain. */

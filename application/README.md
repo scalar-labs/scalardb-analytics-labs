@@ -60,7 +60,7 @@ scalardb-analytics workspace init \
 | --- | --- | --- |
 | `sampleSize` | `100000` | The most rows construction-run SQL reads of a sampled table, at most `10000000` |
 | `constructionQueryTimeLimitSeconds` | `60` | How long one construction-run query may take, at most `86400` |
-| `languageModel` | none | The language model the build tasks call; `semantic build` needs it |
+| `languageModel` | none | The language model the build tasks and translations call; `semantic build` and `semantic translate` need it |
 | `modelInput` | see below | Which data reads reach the language model |
 | `languages` | `["en"]` | The languages the domain's readers use, such as `["ja", "en"]`, `["zh-Hant"]`, or `["pt-BR", "en"]`; a business term has one name per language. Each is a BCP 47 language tag in its canonical form, so `EN` or `zh-hant` is rejected; the accepted forms are in [`../docs/semantic-catalog/languages.md`](../docs/semantic-catalog/languages.md#declared-languages) |
 | `primaryLanguage` | the first of `languages` | The primary one of `languages`, and the language the domain records every description in. It cannot change once the domain exists; an operation on a domain created with another primary language fails with `RECORDING_LANGUAGE_CHANGED` |
@@ -170,9 +170,8 @@ for a reader of that language (see
 Their fields stay the same, with original text only, and the output adds `language`,
 `recordingLanguage`, and `texts`: for each URN in the result whose record holds text, its
 `originals` by key with either `"status": "translated"` and the `translation`, or
-`"status": "pending"`. A read that found pending texts requested them and adds the
-`translationTask` that will translate them on the next `semantic build`. In the recording language
-`texts` is empty. With `--term`, `elements` takes `--language TAG` to match only that language's
+`"status": "pending"`. A read that found pending texts queues them, and `semantic translate`
+translates them. In the recording language `texts` is empty. With `--term`, `elements` takes `--language TAG` to match only that language's
 names. A language the domain does not declare is `INVALID_REQUEST`.
 
 | Command | Schema | Does |
@@ -188,6 +187,7 @@ names. A language the domain does not declare is `INVALID_REQUEST`.
 | `semantic feedback --content TEXT --context TEXT [--purpose P] [--related-fact URN...]` | `usage-feedback` | Registers usage feedback, such as missing knowledge met while composing a query |
 | `semantic tasks [--task N] [--state S]` | `build-tasks` | Lists build tasks with their state, triggers, and results |
 | `semantic resume N` | `build-task` | Returns a failed build task to `created` |
+| `semantic translate` | `translation-run` | Translates the queued texts with the workspace's language model, apart from build tasks, and lists the `translated` and `failed` ones by `logRecord` and `language`; a failed one stays queued for the next run. It waits while another process translates |
 | `semantic policy check PRESET` / `policy set PRESET --reason TEXT` | `policy-check` / `policy-version` | Checks or sets the user policy version (`full-auto`, `auto`, or `manual`, with `--count-declared-unenforced`) |
 | `semantic languages` | `semantic-languages` | Shows the domain's declared languages and its primary one |
 

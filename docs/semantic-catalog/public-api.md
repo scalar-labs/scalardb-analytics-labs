@@ -9,17 +9,18 @@ explained in [`construction.md`](construction.md#operations-that-add-records).
 
 ## What is exposed
 
-**[Planned]** Operations change the log, a build task, a review presentation record, or a
-translation. Reads change nothing in the log; a read in a declared language other than the primary
-one requests the translations it found missing, which adds triggers to a build task outside the
-log and calls no model.
+**[Planned]** Operations change the log, a build task, a review presentation record, a
+translation, or a queued translation. Reads change nothing in the log; a read in a declared language other than the primary
+one requests the translations it found missing, which queues them outside the log and calls no
+model.
 Every call targets one domain, named by an identifier the application supplies and the Semantic
 Catalog treats as opaque.
 
 **[Planned]** The application calls these operations: registering an observation, submitting answers, resolving a
 conflict, setting a user policy version, running build tasks, resuming a build task, registering
-a review presentation, and requesting translations. Recording a Generator's results, evaluation by the policy evaluation model,
-policy re-evaluation, and translating run only inside a build task and are not exposed. The Semantic Catalog owns
+a review presentation, requesting translations, and running translations. Recording a Generator's
+results, evaluation by the policy evaluation model, and policy re-evaluation run only inside a build
+task and are not exposed. The Semantic Catalog owns
 Generator output and the versions that produced it, and policy evaluation is its own judgement with
 nothing for the application to supply.
 
@@ -61,9 +62,8 @@ evaluations, answers, and feedback, comes as its original, in the domain's recor
 language, or the primary one, returns only that. When the language read in is another, the read
 returns, beside its unchanged result, the recording language and, for each URN in the result that
 names a record with text, that record's original texts with their translation, marked as a
-translation, or marked as pending when the translation task has not run yet. The read then
-requests the missing translations and returns the translation task it added them to (see
-[`languages.md`](languages.md#translations)). A Fact's value is named by the Fact, the text of the
+translation, or marked as pending when no translation run has made it yet. The read then
+requests the missing translations (see [`languages.md`](languages.md#translations)). A Fact's value is named by the Fact, the text of the
 Fact Event a Fact Revision rests on by the Fact Revision, a Fact Address's descriptions by the Fact
 Address, and an answer, an evaluation, or an observation by its own URN. A
 translation never replaces the original, so a caller can always show which wording was judged.
@@ -192,24 +192,33 @@ each task as it finishes, `succeeded` or `failed`, with its result, the missing 
 was no candidate, or the reason for failure. It returns when no `created` task remains or, if the
 caller asked to keep waiting, when the caller stops it. A Generator run, an evaluation by the policy
 evaluation model, or a re-evaluation records its result in one commit; a Generator run whose output
-is the same as what is recorded writes none; a translation writes no commit and keeps its
-translations outside the log. **[Planned]** An impact judgement creates
+is the same as what is recorded writes none. **[Planned]** An impact judgement creates
 build tasks for the Generators of the Facts it selects. Resuming a build task returns a `failed`
 task to `created`, to run on the latest state.
 
 ### Requesting translations
 
-**[Planned]** Requesting translations takes records, each named by the URN of a Fact, a Fact
+Requesting translations takes records, each named by the URN of a Fact, a Fact
 Address, a Fact Revision, an Input Observation, or a log record, and a declared language other than
 the recording language (see [`languages.md`](languages.md#translations)). It writes nothing to the
 log. Records already translated into the language and records without translatable text are left
-out; the others become triggers of the language's `created` translation task, which a build run
-translates. It returns that task and the records left to it. A request in the recording language
+out; the text of the others is queued for a translation run. It returns the records left to it,
+each with the log record that holds its text. A request in the recording language
 asks for nothing; a language the domain does not declare, or a record it does not hold, is invalid
 input. A Fact's URN names its value, and a Fact Revision's URN names the text of the Fact Event that
 produced it, such as an evaluation's reason and review material or an answer's wording, not the
 Fact's value. Retrieving translations takes the same records and language and returns the translations
 that exist, each with the version of the translator that made it; it never translates.
+
+### Running translations
+
+Running translations takes the domain's translator lock, waiting while another call holds it, and
+is independent of the builder semaphore and of build tasks, so it runs while a build run does (see
+[`languages.md`](languages.md#translations)). It tries each queued translation once, including those
+queued while it runs, and returns what it translated and what failed, each named by the log record
+that holds the text and the language, a failure with its reason. A translation it makes is kept
+outside the log and leaves the queue; a failed one stays queued with its reason for the next run.
+It writes nothing to the log.
 
 ### Registering a review presentation
 

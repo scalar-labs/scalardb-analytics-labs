@@ -182,9 +182,24 @@ public final class JdbcStore implements AutoCloseable {
    * @return the lock, or empty when another process holds it
    * @throws SemanticCatalogException when the domain does not exist or the store cannot be reached
    */
-  public Optional<BuilderLock> tryLockBuilder(String domain) {
+  public Optional<DomainLock> tryLockBuilder(String domain) {
+    return lock(domain, DomainLock.Kind.BUILDER, false);
+  }
+
+  /**
+   * Takes a domain's translator lock: a session-level advisory lock that says a process is
+   * translating the domain's translation queue, held like the builder semaphore and independent of
+   * it. When another process holds it, this waits until that process releases it.
+   *
+   * @throws SemanticCatalogException when the domain does not exist or the store cannot be reached
+   */
+  public DomainLock lockTranslator(String domain) {
+    return lock(domain, DomainLock.Kind.TRANSLATOR, true).orElseThrow();
+  }
+
+  private Optional<DomainLock> lock(String domain, DomainLock.Kind kind, boolean wait) {
     var key =
-        jdbc.sql("SELECT builder_lock FROM semantic_catalog.domains WHERE domain = ?")
+        jdbc.sql("SELECT " + kind.column + " FROM semantic_catalog.domains WHERE domain = ?")
             .param(domain)
             .query(Long.class)
             .optional()
@@ -197,37 +212,54 @@ public final class JdbcStore implements AutoCloseable {
     } catch (SQLException e) {
       throw new SemanticCatalogException("Cannot connect to the Semantic Catalog store", e);
     }
-    try (var statement = connection.prepareStatement("SELECT pg_try_advisory_lock(?)")) {
+    var sql = wait ? "SELECT true FROM pg_advisory_lock(?)" : "SELECT pg_try_advisory_lock(?)";
+    try (var statement = connection.prepareStatement(sql)) {
       statement.setLong(1, key);
       try (var rs = statement.executeQuery()) {
         rs.next();
         if (rs.getBoolean(1)) {
-          return Optional.of(new BuilderLock(connection, key));
+          return Optional.of(new DomainLock(connection, key, kind));
         }
       }
       connection.close();
       return Optional.empty();
     } catch (SQLException e) {
       closeQuietly(connection);
-      throw new SemanticCatalogException("Cannot take the builder semaphore of " + domain, e);
+      throw new SemanticCatalogException("Cannot take the " + kind.label + " of " + domain, e);
     }
   }
 
-  /** A held builder semaphore; closing it releases the semaphore and its connection. */
-  public final class BuilderLock implements AutoCloseable {
+  /** A held domain lock; closing it releases the lock and its connection. */
+  public static final class DomainLock implements AutoCloseable {
+    /** The locks a domain issues, with the column that holds each one's key. */
+    private enum Kind {
+      BUILDER("builder_lock", "builder semaphore"),
+      TRANSLATOR("translator_lock", "translator lock");
+
+      private final String column;
+      private final String label;
+
+      Kind(String column, String label) {
+        this.column = column;
+        this.label = label;
+      }
+    }
+
     private final Connection connection;
     private final long key;
+    private final Kind kind;
 
-    private BuilderLock(Connection connection, long key) {
+    private DomainLock(Connection connection, long key, Kind kind) {
       this.connection = connection;
       this.key = key;
+      this.kind = kind;
     }
 
     /**
-     * Confirms that the semaphore is still held. The server releases it if it ends the session, for
-     * example on a timeout or a restart, and another process may then run the domain's tasks.
+     * Confirms that the lock is still held. The server releases it if it ends the session, for
+     * example on a timeout or a restart, and another process may then take it.
      *
-     * @throws SemanticCatalogException when the semaphore is lost
+     * @throws SemanticCatalogException when the lock is lost
      */
     public void requireHeld() {
       try (var statement =
@@ -242,12 +274,12 @@ public final class JdbcStore implements AutoCloseable {
           }
         }
       } catch (SQLException e) {
-        throw new SemanticCatalogException("Lost the builder semaphore", e);
+        throw new SemanticCatalogException("Lost the " + kind.label, e);
       }
-      throw new SemanticCatalogException("Lost the builder semaphore");
+      throw new SemanticCatalogException("Lost the " + kind.label);
     }
 
-    /** Releases the semaphore by ending its connection. */
+    /** Releases the lock by ending its connection. */
     @Override
     public void close() {
       closeQuietly(connection);

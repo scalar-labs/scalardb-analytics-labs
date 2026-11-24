@@ -370,6 +370,23 @@ final class OperationCommands {
   }
 
   @Command(
+      name = "translate",
+      description =
+          "Translates the texts that reads in another language queued, apart from build tasks,"
+              + " and returns once each has been tried; waits while another process translates.")
+  static final class TranslateCommand extends SemanticCall {
+    TranslateCommand(Map<String, String> environment) {
+      super(environment);
+    }
+
+    @Override
+    Map<String, Object> call(SemanticCatalogService service) {
+      var run = service.translate();
+      return envelope("translation-run", "translated", run.translated(), "failed", run.failed());
+    }
+  }
+
+  @Command(
       name = "resume",
       description = "Returns a failed build task to created, so the next build runs it.")
   static final class ResumeCommand extends SemanticCall {

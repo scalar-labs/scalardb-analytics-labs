@@ -1,14 +1,20 @@
 -- The Semantic Catalog store. Every table has the domain as the first column of its primary key.
 
--- The domains of the Semantic Catalog. builder_lock is the key of the session-level advisory lock
--- that a process running the domain's build tasks holds, issued per domain so domains never share
--- one. recording_language is the language every description in the domain's log is written in,
--- the primary language declared when the domain was created; it never changes.
+-- The keys of the session-level advisory locks the domains issue, drawn from one sequence so no two
+-- locks share a key.
+CREATE SEQUENCE semantic_catalog.lock_keys;
+
+-- The domains of the Semantic Catalog. builder_lock is the key of the advisory lock that a process
+-- running the domain's build tasks holds, and translator_lock the key of the one a process
+-- translating the domain's translation queue holds; each is issued per domain so domains never
+-- share one. recording_language is the language every description in the domain's log is written
+-- in, the primary language declared when the domain was created; it never changes.
 CREATE TABLE semantic_catalog.domains (
     domain text PRIMARY KEY,
     created_at timestamptz NOT NULL,
     recording_language text NOT NULL,
-    builder_lock bigint GENERATED ALWAYS AS IDENTITY UNIQUE
+    builder_lock bigint NOT NULL DEFAULT nextval('semantic_catalog.lock_keys') UNIQUE,
+    translator_lock bigint NOT NULL DEFAULT nextval('semantic_catalog.lock_keys') UNIQUE
 );
 
 -- The log of each domain, and the records its creating log records materialize.
@@ -264,11 +270,11 @@ CREATE TABLE semantic_catalog.source_metadata_schemas (
 );
 
 -- Build tasks: one run of a Generator, an impact judgement, an evaluation by the policy evaluation
--- model, a policy re-evaluation, or a translation. Running one changes no Fact's state by itself, so
--- it is not in the log. task is a number increasing within the domain; kind and state are kept as
--- columns for build task reads; target is the Fact an evaluation task evaluates, the Generator a
--- run runs, or the language a translation translates into, to find the created task a new trigger
--- joins; content holds the work, the triggers, and the result or failure reason.
+-- model, or a policy re-evaluation. Running one changes no Fact's state by itself, so it is not in
+-- the log. task is a number increasing within the domain; kind and state are kept as columns for
+-- build task reads; target is the Fact an evaluation task evaluates or the Generator a run runs, to
+-- find the created task a new trigger joins; content holds the work, the triggers, and the result
+-- or failure reason.
 CREATE TABLE semantic_catalog.build_tasks (
     domain text NOT NULL REFERENCES semantic_catalog.domains (domain),
     task bigint NOT NULL,
@@ -282,7 +288,7 @@ CREATE TABLE semantic_catalog.build_tasks (
 CREATE INDEX build_tasks_state_kind ON semantic_catalog.build_tasks (domain, state, kind, target);
 
 -- Translations: the text of one log record said in one declared language other than the recording
--- language, made by a translation build task on request. A translation changes no Fact's state and
+-- language, made on request from the translation queue. A translation changes no Fact's state and
 -- is never an input of a candidate, so it is not in the log. log_record is the URN of the log
 -- record whose text it translates; content holds the translated texts by their key in the record
 -- and the version of the translator that made them. A log record never changes, so neither does its
@@ -292,5 +298,16 @@ CREATE TABLE semantic_catalog.translations (
     log_record text NOT NULL,
     language text NOT NULL,
     content jsonb NOT NULL,
+    PRIMARY KEY (domain, log_record, language)
+);
+
+-- The translation queue: the text of one log record requested in one declared language and not
+-- translated yet. A translation run translates each row and removes it; failure is the reason the
+-- last attempt failed, null while none has, and the row stays to be tried again.
+CREATE TABLE semantic_catalog.translation_queue (
+    domain text NOT NULL REFERENCES semantic_catalog.domains (domain),
+    log_record text NOT NULL,
+    language text NOT NULL,
+    failure text,
     PRIMARY KEY (domain, log_record, language)
 );

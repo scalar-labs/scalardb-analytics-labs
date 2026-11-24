@@ -4,7 +4,6 @@
  */
 package com.scalar.db.analytics.labs.semantic;
 
-import com.scalar.db.analytics.labs.semantic.model.BuildTask;
 import com.scalar.db.analytics.labs.semantic.model.Languages;
 import com.scalar.db.analytics.labs.semantic.model.LogPosition;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
@@ -20,10 +19,10 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalLong;
 
 /**
  * Requesting translations and finding the log records whose text they translate (see {@code
@@ -164,9 +163,9 @@ final class Translations {
 
   /**
    * Requests the translation of some records' text into a language. Records already translated into
-   * it, and records with no translatable text, are left out; the rest become triggers of the
-   * language's created translation task. Nothing is requested in the recording language, whose text
-   * is the original.
+   * it, and records with no translatable text, are left out; the text of the rest is queued for
+   * translation, once however often it is requested. Nothing is requested in the recording
+   * language, whose text is the original.
    *
    * @throws SemanticCatalogException when the language is not declared or a record is unknown
    */
@@ -178,7 +177,7 @@ final class Translations {
       List<String> records) {
     requireDeclared(languages, language);
     if (language.equals(languages.primary())) {
-      return new SemanticCatalogStore.TranslationRequest(OptionalLong.empty(), Map.of());
+      return new SemanticCatalogStore.TranslationRequest(Map.of());
     }
     var originals = originalsOf(transaction, domain, records);
     var translated =
@@ -187,27 +186,15 @@ final class Translations {
                 domain, language, originals.values().stream().map(Original::logRecord).toList())
             .keySet();
     var pending = new LinkedHashMap<String, String>();
-    var triggers = new ArrayList<String>();
     originals.forEach(
         (urn, original) -> {
           var logRecord = original.logRecord();
-          if (translated.contains(logRecord) || original.texts().isEmpty()) {
-            return;
-          }
-          pending.put(urn, logRecord);
-          if (!triggers.contains(logRecord)) {
-            triggers.add(logRecord);
+          if (!translated.contains(logRecord) && !original.texts().isEmpty()) {
+            pending.put(urn, logRecord);
           }
         });
-    if (triggers.isEmpty()) {
-      return new SemanticCatalogStore.TranslationRequest(OptionalLong.empty(), pending);
-    }
-    var work = new BuildTask.Work.Translation(language);
-    long task = -1;
-    for (var trigger : triggers) {
-      task = BuildTasks.trigger(transaction, domain, work, trigger);
-    }
-    return new SemanticCatalogStore.TranslationRequest(OptionalLong.of(task), pending);
+    transaction.enqueueTranslations(domain, language, new LinkedHashSet<>(pending.values()));
+    return new SemanticCatalogStore.TranslationRequest(pending);
   }
 
   /**

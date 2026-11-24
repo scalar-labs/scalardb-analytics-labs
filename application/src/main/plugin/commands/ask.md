@@ -15,5 +15,6 @@ with the Bash tool. Pass `--workspace <dir>` if this session settled one; otherw
 `SCALARDB_ANALYTICS_WORKSPACE`.
 
 Answer in the user's language, reading as the skill's "Reading in the user's language" says:
-compose the SQL from originals, and show the catalog's translations of the definitions you cite.
+compose the SQL from originals, and show each definition you cite with the catalog's translation
+beside the original.
 Cite as the skill says: the Catalog Snapshot and the Fact Revisions the SQL relies on.

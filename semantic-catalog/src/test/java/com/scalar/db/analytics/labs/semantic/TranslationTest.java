@@ -4,17 +4,19 @@
  */
 package com.scalar.db.analytics.labs.semantic;
 
+import static java.util.Objects.requireNonNull;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.scalar.db.analytics.labs.semantic.model.BuildTask;
+import com.scalar.db.analytics.labs.semantic.llm.LanguageModelException;
 import com.scalar.db.analytics.labs.semantic.model.ElementIdentity;
 import com.scalar.db.analytics.labs.semantic.model.Knowledge;
 import com.scalar.db.analytics.labs.semantic.model.KnowledgeRequest;
 import com.scalar.db.analytics.labs.semantic.model.LogPosition;
 import com.scalar.db.analytics.labs.semantic.model.LogRecord;
+import com.scalar.db.analytics.labs.semantic.model.QueuedTranslation;
 import com.scalar.db.analytics.labs.semantic.model.Review;
 import com.scalar.db.analytics.labs.semantic.model.SemanticCatalogException;
 import com.scalar.db.analytics.labs.semantic.model.Urns;
@@ -23,36 +25,21 @@ import com.scalar.db.analytics.labs.semantic.model.Vocabulary.AnswerType;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.ElementKind;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.PolicyResult;
 import com.scalar.db.analytics.labs.semantic.model.Vocabulary.Transition;
-import com.scalar.db.analytics.labs.semantic.policy.PolicyEvaluationModel;
 import java.util.List;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 
 /**
  * Translations made on request (see {@code docs/semantic-catalog/languages.md}, "Translations"): a
- * reader of a declared language other than the recording language asks for the text it shows, a
- * build run translates it outside the log, and recording text translates nothing. The test domains
- * record in Japanese and also declare English.
+ * reader of a declared language other than the recording language asks for the text it shows, which
+ * is queued, a translation run translates it outside the log apart from build tasks, and recording
+ * text translates nothing. The test domains record in Japanese and also declare English.
  */
 class TranslationTest extends StoreScenarioTest {
   private static final JsonNodeFactory JSON = JsonNodeFactory.instance;
 
-  /** These scenarios leave nothing to the policy evaluation model. */
-  private static final PolicyEvaluationModel NO_POLICY_MODEL =
-      new PolicyEvaluationModel() {
-        @Override
-        public JsonNode version() {
-          return JSON.objectNode();
-        }
-
-        @Override
-        public Decision evaluate(Subject subject) {
-          throw new AssertionError("A translation scenario asked the policy evaluation model");
-        }
-      };
-
   /** Translates each text into English by prefixing it, so a test can tell which text it says. */
-  private static final Function<JsonNode, String> PREFIXING =
+  static final Function<JsonNode, String> PREFIXING =
       input -> {
         var texts = JSON.objectNode();
         input
@@ -62,19 +49,12 @@ class TranslationTest extends StoreScenarioTest {
         return JSON.objectNode().set("texts", texts).toString();
       };
 
-  private static BuildRun.Summary run(Scenario s, ScriptedModel model) {
-    return store.runBuildTasks(
-        s.domain,
-        new BuildRun.Environment(
-            NO_POLICY_MODEL, BuildTasksTest.NO_CONSTRUCTION_SQL, model, ScriptedModel.NO_DATA),
-        BuildRun.drain(),
-        task -> {});
+  private static TranslationRun run(Scenario s, ScriptedModel model) {
+    return store.runTranslations(s.domain, model);
   }
 
-  private static List<BuildTask> translationTasks(Scenario s) {
-    return store.buildTasks(s.domain).stream()
-        .filter(task -> task.work() instanceof BuildTask.Work.Translation)
-        .toList();
+  private static List<QueuedTranslation> queue(Scenario s) {
+    return store.translationQueue(s.domain);
   }
 
   /** A Field's meaning, written as a candidate in the recording language; its Fact's URN. */
@@ -91,17 +71,28 @@ class TranslationTest extends StoreScenarioTest {
     var s = scenario();
     var fact = meaning(s, "ordered_at", "注文が確定した日時");
 
-    // Recording text in a domain that declares English creates no translation task.
-    assertThat(translationTasks(s)).isEmpty();
+    // Recording text in a domain that declares English queues nothing.
+    assertThat(queue(s)).isEmpty();
     var commits = s.lastCommit();
 
     var requested = store.requestTranslations(s.domain, "en", List.of(fact));
-    assertThat(requested.task()).isPresent();
     assertThat(requested.pending()).containsOnlyKeys(fact);
+    assertThat(queue(s))
+        .singleElement()
+        .satisfies(
+            queued -> {
+              assertThat(queued.logRecord()).isEqualTo(requested.pending().get(fact));
+              assertThat(queued.language()).isEqualTo("en");
+              assertThat(queued.failure()).isNull();
+            });
     assertThat(store.translations(s.domain, "en", List.of(fact))).isEmpty();
 
     var model = new ScriptedModel().translating(PREFIXING);
-    run(s, model);
+    var ran = run(s, model);
+    assertThat(ran.translated())
+        .containsExactly(
+            new TranslationRun.Translated(requireNonNull(requested.pending().get(fact)), "en"));
+    assertThat(ran.failed()).isEmpty();
 
     var translations = store.translations(s.domain, "en", List.of(fact));
     assertThat(translations).containsOnlyKeys(fact);
@@ -117,14 +108,15 @@ class TranslationTest extends StoreScenarioTest {
               assertThat(call.input().path("sourceLanguage").asText()).isEqualTo("ja");
               assertThat(call.input().path("targetLanguage").asText()).isEqualTo("en");
             });
-    var task = store.buildTask(s.domain, requested.task().getAsLong()).orElseThrow();
-    assertThat(task.status()).isInstanceOf(BuildTask.Status.Succeeded.class);
 
-    // Translating wrote nothing to the log, and a translated record is not requested again.
+    // Translating wrote nothing to the log and no build task, emptied the queue, and a translated
+    // record is not requested again.
     assertThat(s.lastCommit()).isEqualTo(commits);
+    assertThat(store.buildTasks(s.domain)).isEmpty();
+    assertThat(queue(s)).isEmpty();
     var again = store.requestTranslations(s.domain, "en", List.of(fact));
-    assertThat(again.task()).isEmpty();
     assertThat(again.pending()).isEmpty();
+    assertThat(queue(s)).isEmpty();
   }
 
   /** A Field whose meaning is confirmed; the Field's URN and the meaning Fact's URN. */
@@ -155,8 +147,8 @@ class TranslationTest extends StoreScenarioTest {
     var meaning = confirmedMeaning(s, "注文が確定した日時");
     var commits = s.lastCommit();
 
-    // Before the translation task runs, the original comes with a pending mark, and the read
-    // requests the translation.
+    // Before a translation run, the original comes with a pending mark, and the read queues the
+    // translation.
     var before = meaningIn(s, "en", meaning.field());
     assertThat(before.recordingLanguage()).isEqualTo("ja");
     assertThat(before.language()).isEqualTo("en");
@@ -182,13 +174,10 @@ class TranslationTest extends StoreScenarioTest {
             pending ->
                 assertThat(pending.originals())
                     .containsExactly(java.util.Map.entry("value", "注文が確定した日時")));
-    assertThat(before.translationTask()).isPresent();
-    assertThat(translationTasks(s))
-        .singleElement()
-        .satisfies(task -> assertThat(task.triggers()).hasSize(1));
+    assertThat(queue(s)).singleElement();
 
-    // After a build run, the same read returns the original beside its translation and requests
-    // nothing; neither reading nor translating wrote to the log.
+    // After a translation run, the same read returns the original beside its translation and
+    // requests nothing; neither reading nor translating wrote to the log.
     run(s, new ScriptedModel().translating(PREFIXING));
     var after = meaningIn(s, "en", meaning.field());
     assertThat(after.texts())
@@ -203,7 +192,7 @@ class TranslationTest extends StoreScenarioTest {
               assertThat(translated.translation().texts())
                   .containsExactly(java.util.Map.entry("value", "EN 注文が確定した日時"));
             });
-    assertThat(after.translationTask()).isEmpty();
+    assertThat(queue(s)).isEmpty();
     assertThat(s.lastCommit()).isEqualTo(commits);
   }
 
@@ -214,14 +203,13 @@ class TranslationTest extends StoreScenarioTest {
 
     var inJapanese = meaningIn(s, "ja", meaning.field());
     assertThat(inJapanese.texts()).isEmpty();
-    assertThat(inJapanese.translationTask()).isEmpty();
     assertThat(inJapanese.result()).singleElement();
-    assertThat(translationTasks(s)).isEmpty();
+    assertThat(queue(s)).isEmpty();
 
     assertThatThrownBy(() -> meaningIn(s, "fr", meaning.field()))
         .isInstanceOf(SemanticCatalogException.class)
         .hasMessageContaining("does not declare the language fr");
-    assertThat(translationTasks(s)).isEmpty();
+    assertThat(queue(s)).isEmpty();
     assertThat(store.languages(s.domain).declared()).containsExactly("ja", "en");
     assertThat(store.languages(s.domain).primary()).isEqualTo("ja");
   }
@@ -269,7 +257,7 @@ class TranslationTest extends StoreScenarioTest {
         .isInstanceOfSatisfying(
             LanguageRead.Text.Pending.class,
             pending -> assertThat(pending.originals()).containsEntry("reason", "test"));
-    assertThat(review.translationTask()).isPresent();
+    assertThat(queue(s)).extracting(QueuedTranslation::logRecord).contains(evaluationRecord);
   }
 
   @Test
@@ -295,22 +283,18 @@ class TranslationTest extends StoreScenarioTest {
                     List.of(KnowledgeRequest.of(written.urn(term), Vocabulary.WRITTEN_FORM))));
     assertThat(read.result().getFirst().addresses()).isNotEmpty();
     assertThat(read.texts()).isEmpty();
-    assertThat(read.translationTask()).isEmpty();
-    assertThat(translationTasks(s)).isEmpty();
+    assertThat(queue(s)).isEmpty();
   }
 
   @Test
-  void requestsIntoOneLanguageJoinItsCreatedTask() {
+  void aTextRequestedAgainIsQueuedOnce() {
     var s = scenario();
     var first = meaning(s, "ordered_at", "注文が確定した日時");
     var second = meaning(s, "shipped_at", "出荷した日時");
 
-    var one = store.requestTranslations(s.domain, "en", List.of(first));
-    var other = store.requestTranslations(s.domain, "en", List.of(second, first));
-    assertThat(other.task()).isEqualTo(one.task());
-    assertThat(translationTasks(s))
-        .singleElement()
-        .satisfies(task -> assertThat(task.triggers()).hasSize(2));
+    store.requestTranslations(s.domain, "en", List.of(first));
+    store.requestTranslations(s.domain, "en", List.of(second, first));
+    assertThat(queue(s)).hasSize(2);
 
     var model = new ScriptedModel().translating(PREFIXING);
     run(s, model);
@@ -335,12 +319,11 @@ class TranslationTest extends StoreScenarioTest {
     var requested =
         store.requestTranslations(
             s.domain, "en", List.of(written.urn(name), written.urn(existence)));
-    assertThat(requested.task()).isEmpty();
     assertThat(requested.pending()).isEmpty();
 
     // The recording language's text is the original.
-    assertThat(store.requestTranslations(s.domain, "ja", List.of(fact)).task()).isEmpty();
-    assertThat(translationTasks(s)).isEmpty();
+    assertThat(store.requestTranslations(s.domain, "ja", List.of(fact)).pending()).isEmpty();
+    assertThat(queue(s)).isEmpty();
 
     assertThatThrownBy(() -> store.requestTranslations(s.domain, "fr", List.of(fact)))
         .isInstanceOf(SemanticCatalogException.class)
@@ -363,33 +346,48 @@ class TranslationTest extends StoreScenarioTest {
   }
 
   @Test
-  void aFailedTranslationKeepsTheOthersAndIsResumedForTheRest() {
+  void aFailedTranslationStaysQueuedWithItsReasonAndIsTriedAgainByTheNextRun() {
     var s = scenario();
     var ordered = meaning(s, "ordered_at", "注文が確定した日時");
     var shipped = meaning(s, "shipped_at", "出荷した日時");
-    var task =
-        store.requestTranslations(s.domain, "en", List.of(ordered, shipped)).task().getAsLong();
+    var shippedRecord =
+        store.requestTranslations(s.domain, "en", List.of(ordered, shipped)).pending().get(shipped);
 
-    // An answer that leaves a text out fails the task; the other record's translation is kept.
-    run(
-        s,
-        new ScriptedModel()
-            .translating(
-                input ->
-                    input.path("texts").path("value").asText().contains("出荷")
-                        ? "{\"texts\": {}}"
-                        : PREFIXING.apply(input)));
-    assertThat(store.buildTask(s.domain, task).orElseThrow().status())
-        .isInstanceOfSatisfying(
-            BuildTask.Status.Failed.class,
-            failed -> assertThat(failed.reason()).contains("leaves out value"));
+    // An answer that leaves a text out fails that translation; the other one is kept.
+    var failing =
+        run(
+            s,
+            new ScriptedModel()
+                .translating(
+                    input ->
+                        input.path("texts").path("value").asText().contains("出荷")
+                            ? "{\"texts\": {}}"
+                            : PREFIXING.apply(input)));
+    assertThat(failing.translated()).hasSize(1);
+    assertThat(failing.failed())
+        .singleElement()
+        .satisfies(
+            failed -> {
+              assertThat(failed.logRecord()).isEqualTo(shippedRecord);
+              assertThat(failed.reason()).contains("leaves out value");
+            });
     assertThat(store.translations(s.domain, "en", List.of(ordered, shipped)))
         .containsOnlyKeys(ordered);
+    assertThat(queue(s))
+        .singleElement()
+        .satisfies(
+            queued -> {
+              assertThat(queued.logRecord()).isEqualTo(shippedRecord);
+              assertThat(queued.failure()).contains("leaves out value");
+            });
 
-    // Resuming translates only the record still missing a translation.
-    store.resumeBuildTask(s.domain, task);
+    // The next run translates only the record still queued.
     var model = new ScriptedModel().translating(PREFIXING);
-    run(s, model);
+    var next = run(s, model);
+    assertThat(next.translated())
+        .containsExactly(new TranslationRun.Translated(requireNonNull(shippedRecord), "en"));
+    assertThat(next.failed()).isEmpty();
+    assertThat(queue(s)).isEmpty();
     assertThat(store.translations(s.domain, "en", List.of(ordered, shipped)))
         .containsOnlyKeys(ordered, shipped);
     assertThat(model.calls)
@@ -397,5 +395,28 @@ class TranslationTest extends StoreScenarioTest {
         .singleElement()
         .satisfies(
             call -> assertThat(call.input().path("texts").path("value").asText()).contains("出荷"));
+  }
+
+  @Test
+  void anUnavailableModelFailsEveryQueuedTranslationOnceAndLeavesThemQueued() {
+    var s = scenario();
+    var fact = meaning(s, "ordered_at", "注文が確定した日時");
+    store.requestTranslations(s.domain, "en", List.of(fact));
+
+    var ran =
+        run(
+            s,
+            new ScriptedModel()
+                .translating(
+                    input -> {
+                      throw new LanguageModelException("The model is unavailable");
+                    }));
+    assertThat(ran.translated()).isEmpty();
+    assertThat(ran.failed())
+        .singleElement()
+        .satisfies(failed -> assertThat(failed.reason()).contains("unavailable"));
+    assertThat(queue(s))
+        .singleElement()
+        .satisfies(queued -> assertThat(queued.failure()).contains("unavailable"));
   }
 }
