@@ -110,8 +110,24 @@ if [ "$(uname -s)" = "Darwin" ]; then
     "${OBJECT_FILES[@]}" "$STATIC_DIRECTORY/libduckdb_static.a" \
     -o "$EXTENSION_FILE"
 else
-  clang++ -shared -Wl,--gc-sections \
-    "${OBJECT_FILES[@]}" "$STATIC_DIRECTORY/libduckdb_static.a" -ldl -pthread \
+  # Exporting only the extension's own symbols keeps the statically linked DuckDB private, as on
+  # macOS, so it cannot interpose on the host's DuckDB. Unlike the macOS linker, which drops
+  # unreachable functions one by one, section garbage collection cannot drop unreachable DuckDB
+  # code that shares a section with reachable code, and that code references the built-in
+  # extension loader and the libraries the core links. The linker therefore takes every archive of
+  # the release's static libraries as one group, and any symbol still unresolved fails the link
+  # instead of the LOAD.
+  VERSION_SCRIPT="$OUTPUT_DIRECTORY/exports.map"
+  {
+    printf '{\n  global:\n'
+    for symbol in "${EXPORTED_SYMBOLS[@]}"; do
+      printf '    %s;\n' "$symbol"
+    done
+    printf '  local: *;\n};\n'
+  } > "$VERSION_SCRIPT"
+  clang++ -shared -Wl,--gc-sections -Wl,--version-script="$VERSION_SCRIPT" -Wl,--no-undefined \
+    "${OBJECT_FILES[@]}" \
+    -Wl,--start-group "$STATIC_DIRECTORY"/*.a -Wl,--end-group -ldl -pthread \
     -o "$EXTENSION_FILE"
 fi
 
