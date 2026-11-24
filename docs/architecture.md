@@ -63,7 +63,7 @@ using party may access it.
 | Semantic Catalog | **[Planned]** Semantic state, evidence, decisions, and construction of query-facing catalog context; see [`semantic-catalog.md`](semantic-catalog.md) |
 | Physical Catalog | Data-source registration, the physical schemas and Analytics types used for planning and execution, and name resolution, through the embedded upstream catalog; see [`physical-catalog.md`](physical-catalog.md) |
 | Query Engine | Embedded DuckDB lifecycle, product extensions, SQL execution, and Arrow result streaming; see [`query-engine.md`](query-engine.md) |
-| Connectors | Metadata retrieval, type mapping, and data read for one source kind, produced by the separate connector repository and carried as its distribution by the `connector` module; see [`../connector/README.md`](../connector/README.md) |
+| Connectors | Metadata retrieval, type mapping, and data read for one source kind, produced by the separate connector repository and downloaded as its released distribution by the `connector` module; see [`../connector/README.md`](../connector/README.md) |
 
 The application is the composition root, not the owner of component domain logic. Dependencies point
 from application use cases toward component APIs. JDBC, native-library, DuckDB extension, and
@@ -205,7 +205,7 @@ do not rebuild unrelated native parts.
 | --- | --- | --- |
 | `application` | Java, Gradle | CLI, Agent Skill, composition, distribution, and product release |
 | `physical-catalog` | Java, Gradle, with the upstream build included | Submodule updates and the product boundary around the catalog |
-| `connector` | Java, Gradle, carrying the connectors distribution | Connectors distribution updates, the Java binding of its library |
+| `connector` | Java, Gradle, consuming the released connectors distribution | Connectors distribution updates, the Java binding of its library |
 | `semantic-catalog` | **[Planned]** Java, Gradle | Domain model, construction, and model-assisted processes |
 | `query-engine` and `duckdb` | Java and a C++ DuckDB extension | DuckDB version, extensions, and engine integration |
 

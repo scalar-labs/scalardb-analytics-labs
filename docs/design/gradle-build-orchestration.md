@@ -21,8 +21,7 @@ testable while still making their declared artifacts inputs to the product build
 - Java modules are Gradle subprojects.
 - Native modules retain their own build configuration and expose explicit build outputs to Gradle.
 - Connector sources remain in their owning repository; this build consumes the connectors'
-  distribution, carried unpacked in the repository until the connectors publish releases, and
-  builds no Rust.
+  distribution, downloaded from the connectors' GitHub release, and builds no Rust.
 - The application owns final distribution assembly without absorbing component implementation
   logic.
 - Root lifecycle tasks cover every build unit connected to the repository build.

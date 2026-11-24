@@ -1,6 +1,0 @@
-manifest_version = 1
-name = "ADBC PostgreSQL Driver"
-version = "1.13.0"
-
-[Driver]
-shared = "libadbc_driver_postgresql.so"

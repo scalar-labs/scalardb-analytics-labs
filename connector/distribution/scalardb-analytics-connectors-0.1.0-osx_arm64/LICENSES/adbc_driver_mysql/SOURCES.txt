@@ -1,4 +1,0 @@
-The source code of these components of ADBC Driver Foundry Driver for MySQL 0.8.0,
-whose licenses require it to be available, is at:
-
-- go-sql-driver/mysql 1.10.1 (MPL-2.0): https://github.com/go-sql-driver/mysql/tree/v1.10.1

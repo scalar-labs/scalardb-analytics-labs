@@ -15,9 +15,11 @@ embedded Physical Catalog and packaging the connectors also needs:
 - the upstream catalog source, the `upstream/scalardb-analytics` submodule. Gradle checks it out at
   its recorded commit when it is missing or behind, which needs network access. A submodule with
   uncommitted changes at another commit fails the build instead of being overwritten.
-- the scalardb-analytics-connectors distribution for the build host, which
-  [`connector/distribution/`](connector/distribution) carries for `osx_arm64` only; see
-  [`connector/README.md`](connector/README.md).
+- a GitHub token that can read the private `scalar-labs/scalardb-analytics-connectors` repository,
+  as the `githubToken` Gradle property, the `GITHUB_TOKEN` or `GH_TOKEN` environment variable, or a
+  `gh` CLI login. Gradle downloads the connectors distribution for the build host from that
+  repository's GitHub release, or uses a locally built package that the `connectorsArchive` Gradle
+  property names; see [`connector/README.md`](connector/README.md).
 - credentials for the private ScalarDB SQL package registry, as the `gprUsername` and
   `gprPassword` Gradle properties or the `GPR_USERNAME` and `GPR_PASSWORD` environment variables
 

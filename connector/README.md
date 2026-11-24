@@ -1,17 +1,35 @@
 # Connector module
 
-This module carries the scalardb-analytics-connectors distribution and is the Java binding of its
+This module packages the scalardb-analytics-connectors distribution and is the Java binding of its
 connector API library. The distribution, one per platform, holds the connector API library with
 the Connectors built into it, the connectors' DuckDB extension, the ADBC drivers those Connectors
 load, the library's C header, and the license texts of everything in it.
 
-## The carried distribution
+## The released distribution
 
-Until the connectors repository publishes releases, the distribution it builds is carried unpacked
-in [`distribution/`](distribution), as
-`scalardb-analytics-connectors-<version>-<platform>/`, for the version in
-`gradle/libs.versions.toml` (`scalardb-analytics-connectors`). Only `osx_arm64` is carried. To
-update it, replace the directory with the newly built package unpacked.
+The build downloads `scalardb-analytics-connectors-<version>-<platform>.tgz` for the build host
+(`osx_arm64`, `linux_amd64`, or `linux_arm64`) from the GitHub release `v<version>` of
+`scalar-labs/scalardb-analytics-connectors`, for the version in `gradle/libs.versions.toml`
+(`scalardb-analytics-connectors`), and unpacks it under `build/connectors/`. The archive is not
+committed to this repository. The build fails when the archive's SHA-256 digest differs from the
+one recorded for its platform in [`build.gradle.kts`](build.gradle.kts); to update the
+distribution, change the version and those digests together.
+
+The connectors repository is private, so the download needs a GitHub token that can read it: the
+`githubToken` Gradle property, the `GITHUB_TOKEN` or `GH_TOKEN` environment variable, or, when none
+is set, the token of a `gh` CLI login. The archive is downloaded once and reused until the version
+or digest changes.
+
+To build against a package that has no release, such as one built from the connectors repository's
+`main` with its `packaging/package.sh`, point the `connectorsArchive` Gradle property at the tgz.
+A relative path is resolved against the repository root. The build then neither downloads nor
+needs a token, and uses the package as given, without a digest check. The package's top-level
+directory may carry any version, so a build of an unreleased version works without changing
+`gradle/libs.versions.toml`:
+
+```console
+./gradlew build -PconnectorsArchive=../scalardb-analytics-connectors/target/dist/scalardb-analytics-connectors-0.1.0-osx_arm64.tgz
+```
 
 The jar carries the distribution's `lib/`, `duckdb/`, and `adbc-drivers/` under
 `native/connectors/` with their layout intact, and its license texts under
