@@ -129,3 +129,5 @@ releases, and the ScalarDB SQL package registry with the organization secret `CR
 2. Push the tag `v<version>` on that commit. The workflow builds the archives with the tag's
    version, checks that the changelog has the version's section, and creates the GitHub Release
    with the three archives and that section as its notes.
+3. Roll over the `Next release` milestone to the tag, as described in
+   [Issue workflow](docs/issue-workflow.md#at-each-release).
