@@ -19,6 +19,8 @@ links to the architectural units needed for deeper understanding.
   to the canonical architectural explanation.
 - The issue tracker owns proposals, implementation gaps, migration work, and delivery status.
 - Source code and generated reference documentation own low-level APIs and exhaustive details.
+- [`issue-workflow.md`](issue-workflow.md) is not an architectural unit. It describes how this
+  repository uses Issues, labels, milestones, and the changelog.
 
 ## Placement rules
 
